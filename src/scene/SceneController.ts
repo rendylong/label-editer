@@ -174,6 +174,13 @@ export function labelTextureSizeMatches(
 /** CanvasTexture 对齐 glTF 的纹理坐标方向，保证实时预览和导出文件一致。 */
 export function configureLabelCanvasTexture(texture: THREE.Texture, color: boolean): void {
   texture.flipY = false
+  // The canvas edge is deliberately transparent so UVs outside a label area disappear.
+  // Mipmaps mix that edge with opaque paper and create dark bands on sibling overlays.
+  texture.generateMipmaps = false
+  texture.minFilter = THREE.LinearFilter
+  texture.magFilter = THREE.LinearFilter
+  texture.wrapS = THREE.ClampToEdgeWrapping
+  texture.wrapT = THREE.ClampToEdgeWrapping
   if (color) texture.colorSpace = THREE.SRGBColorSpace
   texture.needsUpdate = true
 }
@@ -423,6 +430,39 @@ export class SceneController {
     this.needsRender = true
   }
 
+  /** Render a deterministic PNG without depending on toolbar or DOM selectors. */
+  async capturePng(width: number, height: number): Promise<Blob> {
+    if (this.disposed || this.failed) throw new Error('3D preview is not ready')
+    const targetWidth = Math.max(1, Math.min(4096, Math.round(width)))
+    const targetHeight = Math.max(1, Math.min(4096, Math.round(height)))
+    const previousSize = this.renderer.getSize(new THREE.Vector2())
+    const previousPixelRatio = this.renderer.getPixelRatio()
+    const previousAspect = this.camera.aspect
+    try {
+      this.renderer.setPixelRatio(1)
+      this.renderer.setSize(targetWidth, targetHeight, false)
+      this.composer.setSize(targetWidth, targetHeight)
+      this.outline.setSize(targetWidth, targetHeight)
+      this.camera.aspect = targetWidth / targetHeight
+      this.camera.updateProjectionMatrix()
+      this.composer.render()
+      return await new Promise<Blob>((resolve, reject) => {
+        this.renderer.domElement.toBlob((blob) => {
+          if (blob) resolve(blob)
+          else reject(new Error('3D preview PNG encoding failed'))
+        }, 'image/png')
+      })
+    } finally {
+      this.renderer.setPixelRatio(previousPixelRatio)
+      this.renderer.setSize(previousSize.x, previousSize.y, false)
+      this.composer.setSize(previousSize.x, previousSize.y)
+      this.outline.setSize(previousSize.x, previousSize.y)
+      this.camera.aspect = previousAspect
+      this.camera.updateProjectionMatrix()
+      this.requestRender()
+    }
+  }
+
   private resize(): void {
     if (this.failed) return
     const w = this.container.clientWidth || 1
@@ -483,19 +523,26 @@ export class SceneController {
   }
 
   /** 用重映射几何创建/更新独立贴标层（uvRemap 输出为唯一数据源）。 */
-  applyLabelGeometry(remap: RemapOutput, nodeName: string, mode: 'overlay' | 'replace' = 'replace', meshIndex?: number): void {
+  applyLabelGeometry(
+    remap: RemapOutput,
+    nodeName: string,
+    mode: 'overlay' | 'replace' = 'replace',
+    meshIndex?: number,
+    areaId = nodeName,
+  ): void {
     if (this.failed) return
     if (!this.model) return
-    const existingSource = this.labelSources.get(nodeName)
+    const existingSource = this.labelSources.get(areaId)
     const source = existingSource?.mesh
       ?? (meshIndex === undefined ? undefined : this.modelMeshesByIndex.get(meshIndex))
       ?? (this.model.getObjectByName(nodeName) as THREE.Mesh | null)
     if (!source || !source.isMesh) return
     const visibleWithoutLabel = existingSource?.visibleWithoutLabel ?? source.visible
-    let overlay = this.labelMeshes.get(nodeName)
+    let overlay = this.labelMeshes.get(areaId)
     if (!overlay) {
       overlay = createLabelOverlayMesh(source, remap, mode)
-      this.labelMeshes.set(nodeName, overlay)
+      overlay.name = `__label_overlay__${nodeName}__${areaId}`
+      this.labelMeshes.set(areaId, overlay)
     } else {
       const next = new THREE.BufferGeometry()
       const positions = mode === 'overlay' ? offsetOverlayPositions(remap.positions, remap.normals) : remap.positions
@@ -508,34 +555,37 @@ export class SceneController {
     }
     // A replace overlay starts transparent. Keep the original surface visible until the
     // first real bake arrives, otherwise re-importing an already-labelled GLB looks blank.
-    source.visible = mode === 'replace' && this.labelTextures.has(nodeName) ? false : visibleWithoutLabel
-    this.labelSources.set(nodeName, { mesh: source, mode, visibleWithoutLabel })
+    source.visible = mode === 'replace' && this.labelTextures.has(areaId) ? false : visibleWithoutLabel
+    this.labelSources.set(areaId, { mesh: source, mode, visibleWithoutLabel })
     // 补应用缓存的烘焙
-    const pending = this.pendingBakes.get(nodeName)
+    const pending = this.pendingBakes.get(areaId)
     if (pending) {
-      this.applyLabelBake(nodeName, pending)
-      this.pendingBakes.delete(nodeName)
+      this.applyLabelBake(areaId, pending)
+      this.pendingBakes.delete(areaId)
     }
     this.requestRender()
   }
 
   /** Remove one area's runtime overlay without disturbing any remaining area. */
-  removeLabelArea(nodeName: string): void {
+  removeLabelArea(areaId: string): void {
     if (this.failed) return
-    const overlay = this.labelMeshes.get(nodeName)
+    const overlay = this.labelMeshes.get(areaId)
     if (overlay) {
       overlay.parent?.remove(overlay)
       disposeObjectTree(overlay)
-      this.labelMeshes.delete(nodeName)
+      this.labelMeshes.delete(areaId)
     }
-    this.labelTextures.delete(nodeName)
-    this.pendingBakes.delete(nodeName)
-    const source = this.labelSources.get(nodeName)
+    this.labelTextures.delete(areaId)
+    this.pendingBakes.delete(areaId)
+    const source = this.labelSources.get(areaId)
     if (source) {
-      source.mesh.visible = source.visibleWithoutLabel
-      this.labelSources.delete(nodeName)
+      this.labelSources.delete(areaId)
+      const retainedReplacement = [...this.labelSources.entries()].some(([retainedId, retained]) => (
+        retained.mesh === source.mesh && retained.mode === 'replace' && this.labelTextures.has(retainedId)
+      ))
+      source.mesh.visible = retainedReplacement ? false : source.visibleWithoutLabel
     }
-    if (this.frontMarkerNode === nodeName) this.removeMarker()
+    if (this.frontMarkerNode === areaId) this.removeMarker()
     if (this.outline?.selectedObjects.includes(overlay as THREE.Object3D)) {
       this.outline.selectedObjects = this.outline.selectedObjects.filter((object) => object !== overlay)
     }
@@ -543,36 +593,36 @@ export class SceneController {
   }
 
   /** Reconcile store-owned areas with currently installed per-node overlays and pending bakes. */
-  reconcileLabelAreas(nodeNames: Iterable<string>): void {
+  reconcileLabelAreas(areaIds: Iterable<string>): void {
     if (this.failed) return
-    const retained = new Set(nodeNames)
+    const retained = new Set(areaIds)
     const installed = new Set([
       ...this.labelMeshes.keys(),
       ...this.labelSources.keys(),
       ...this.labelTextures.keys(),
       ...this.pendingBakes.keys(),
     ])
-    for (const nodeName of installed) {
-      if (!retained.has(nodeName)) this.removeLabelArea(nodeName)
+    for (const areaId of installed) {
+      if (!retained.has(areaId)) this.removeLabelArea(areaId)
     }
   }
 
   /** 热更新标签纹理（同一 texture 对象换源，避免程序重编译）。mesh 未就绪时缓存。 */
-  applyLabelBake(nodeName: string, bake: { color: HTMLCanvasElement; metalness: HTMLCanvasElement; roughness: HTMLCanvasElement; bump: HTMLCanvasElement } | null): void {
+  applyLabelBake(areaId: string, bake: { color: HTMLCanvasElement; metalness: HTMLCanvasElement; roughness: HTMLCanvasElement; bump: HTMLCanvasElement } | null): void {
     if (this.failed) return
-    const mesh = this.labelMeshes.get(nodeName)
+    const mesh = this.labelMeshes.get(areaId)
     if (!mesh) {
-      if (bake) this.pendingBakes.set(nodeName, bake)
+      if (bake) this.pendingBakes.set(areaId, bake)
       return
     }
     if (!bake) return
-    let texs = this.labelTextures.get(nodeName)
+    let texs = this.labelTextures.get(areaId)
     if (texs && !labelTextureSizeMatches(texs, bake)) {
       texs.color.dispose()
       texs.metal.dispose()
       texs.rough.dispose()
       texs.bump.dispose()
-      this.labelTextures.delete(nodeName)
+      this.labelTextures.delete(areaId)
       texs = undefined
     }
     if (!texs) {
@@ -585,13 +635,13 @@ export class SceneController {
       configureLabelCanvasTexture(rough, false)
       configureLabelCanvasTexture(bump, false)
       texs = { color, metal, rough, bump, width: bake.color.width, height: bake.color.height }
-      this.labelTextures.set(nodeName, texs)
+      this.labelTextures.set(areaId, texs)
       const mat = mesh.material as THREE.MeshStandardMaterial
       // 贴标区域闭合带：完整接管颜色/PBR/微表面，并强制不透明避免透过。
       configureLabelMaterial(mat, { color, metal, rough, bump })
       mat.opacity = 1
     }
-    const source = this.labelSources.get(nodeName)
+    const source = this.labelSources.get(areaId)
     if (source?.mode === 'replace') source.mesh.visible = false
     texs.color.image = bake.color
     texs.color.needsUpdate = true
@@ -612,10 +662,10 @@ export class SceneController {
   }
 
   /** 正面标记（画布 u=0.5 对应的 3D 位置）。 */
-  setFrontMarker(nodeName: string, remap: RemapParams, remapOutput: RemapOutput): void {
+  setFrontMarker(areaId: string, remap: RemapParams, remapOutput: RemapOutput): void {
     if (this.failed) return
-    const mesh = this.labelMeshes.get(nodeName)
-    if (this.frontMarker && this.frontMarkerNode !== nodeName) this.removeMarker()
+    const mesh = this.labelMeshes.get(areaId)
+    if (this.frontMarker && this.frontMarkerNode !== areaId) this.removeMarker()
     if (!mesh) return
     const { u0, u1 } = basisForAxis(remap.axis)
     const ang = remapOutput.frontAngle
@@ -631,7 +681,7 @@ export class SceneController {
     cone.name = '__front_marker'
     this.scene.add(cone)
     this.frontMarker = cone
-    this.frontMarkerNode = nodeName
+    this.frontMarkerNode = areaId
     this.requestRender()
   }
 
@@ -642,11 +692,11 @@ export class SceneController {
   }
 
   /** 高亮激活区域所在网格。 */
-  setActiveAreaHighlight(nodeName: string | null): void {
+  setActiveAreaHighlight(areaId: string | null): void {
     if (this.failed) return
     const targets: THREE.Object3D[] = []
-    if (nodeName) {
-      const mesh = this.labelMeshes.get(nodeName)
+    if (areaId) {
+      const mesh = this.labelMeshes.get(areaId)
       if (mesh) targets.push(mesh)
     }
     this.setOutlineTargets(targets)
@@ -788,10 +838,13 @@ export class SceneController {
     this.model.traverse((o) => {
       o.visible = !names.has(o.name)
     })
-    for (const [nodeName, source] of this.labelSources) {
+    for (const [areaId, source] of this.labelSources) {
       source.visibleWithoutLabel = !names.has(source.mesh.name)
-      source.mesh.visible = source.mode === 'replace' && this.labelTextures.has(nodeName) ? false : source.visibleWithoutLabel
-      const overlay = this.labelMeshes.get(nodeName)
+      const hiddenByReplacement = [...this.labelSources.entries()].some(([candidateId, candidate]) => (
+        candidate.mesh === source.mesh && candidate.mode === 'replace' && this.labelTextures.has(candidateId)
+      ))
+      source.mesh.visible = hiddenByReplacement ? false : source.visibleWithoutLabel
+      const overlay = this.labelMeshes.get(areaId)
       if (overlay) overlay.visible = source.visibleWithoutLabel
     }
     this.requestRender()

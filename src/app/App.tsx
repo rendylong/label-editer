@@ -14,6 +14,8 @@ import { installShortcuts } from './actions'
 import { AreaSetupView } from './AreaSetupView'
 import { fitCanvasDisplayWidth } from './canvasLayout'
 import './styles.css'
+import { bootstrapAgentBridgeFromPage } from '../agent/bridge'
+import { createBrowserAgentBridge } from '../agent/browserBridgeRuntime'
 
 export function EditorWorkspace({ editorViewMode }: { editorViewMode: EditorViewMode }): React.JSX.Element {
   return (
@@ -57,6 +59,20 @@ export function App(): React.JSX.Element {
   const view = useUiStore((s) => s.view)
 
   useEffect(() => installShortcuts(), [])
+  useEffect(() => {
+    let dispose = (): void => undefined
+    let cancelled = false
+    void bootstrapAgentBridgeFromPage({
+      createBridge: (bootstrap) => createBrowserAgentBridge(bootstrap),
+    }).then((nextDispose) => {
+      if (cancelled) nextDispose()
+      else dispose = nextDispose
+    })
+    return () => {
+      cancelled = true
+      dispose()
+    }
+  }, [])
 
   return (
     <div className="app">

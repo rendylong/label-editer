@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { validateLabelSpec } from '../src/agent/labelSpecSchema'
+import { applyStructuredLabelSpec } from '../src/app/labelSpec'
+import type { LabelAreaConfig } from '../src/label/types'
+
+const baseArea: LabelAreaConfig = {
+  id: 'base', name: 'Base', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay',
+  remap: { mode: 'cylindrical', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0, planarBox: { min: [-1, -1, -1], max: [1, 1, 1] } },
+  range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+  canvas: { width: 1000, height: 500, aspect: 2 }, layers: [], globalCraft: { craft: [] },
+  fonts: [], referenceVisible: false, undoStack: [], redoStack: [],
+}
 
 describe('Label Spec v2', () => {
   it('accepts deterministic front and back areas', () => {
@@ -65,5 +75,19 @@ describe('Label Spec v2', () => {
     expect(result.warnings.some((warning) => warning.includes('surfaceMode'))).toBe(true)
     expect(result.warnings.some((warning) => warning.includes('range'))).toBe(true)
     expect(result.warnings.some((warning) => warning.includes('print'))).toBe(true)
+  })
+
+  it('maps a v2 image asset to an editable image layer', () => {
+    const result = applyStructuredLabelSpec(baseArea, {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{ id: 'logo', type: 'image', asset: 'logo', x: 0.5, y: 0.5, width: 0.4, height: 0.2 }],
+      }],
+    })
+    expect(result.areas[0].layers[0]).toMatchObject({
+      id: 'logo', kind: 'image', src: 'logo', width: 400, height: 100,
+    })
   })
 })

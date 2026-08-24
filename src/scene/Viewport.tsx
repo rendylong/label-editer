@@ -7,6 +7,7 @@ import { SceneController } from './SceneController'
 import { useModelStore, useLabelStore, useUiStore } from '../state/stores'
 import { findPart } from '../glb/analyze'
 import type { PartNode } from '../label/types'
+import { registerAgentPreviewCapture } from '../agent/previewCapture'
 
 /** modelStore 保存部件树 id；three 场景显隐以节点 name 定位，必须先做映射。 */
 export function resolveHiddenNodeNames(parts: PartNode[], hiddenIds: Set<string>): Set<string> {
@@ -53,7 +54,9 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
       },
     })
     ctrlRef.current = ctrl
+    const unregisterPreview = registerAgentPreviewCapture(({ width, height }) => ctrl.capturePng(width, height))
     return () => {
+      unregisterPreview()
       ctrl.dispose()
       ctrlRef.current = null
     }
@@ -69,18 +72,18 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
     void ctrl.loadModel(glbBytes).then((installed) => {
       if (!installed || ctrlRef.current !== ctrl) return
       const ls = useLabelStore.getState()
-      ctrl.reconcileLabelAreas(ls.areas.map((area) => area.nodeName))
+      ctrl.reconcileLabelAreas(ls.areas.map((area) => area.id))
       for (const area of ls.areas) {
         if (area.id === ls.activeAreaId && ls.remapOutput) {
-          ctrl.applyLabelGeometry(ls.remapOutput, area.nodeName, area.surfaceMode ?? 'replace', area.meshIndex)
-          if (showFrontMarker) ctrl.setFrontMarker(area.nodeName, area.remap, ls.remapOutput)
+          ctrl.applyLabelGeometry(ls.remapOutput, area.nodeName, area.surfaceMode ?? 'replace', area.meshIndex, area.id)
+          if (showFrontMarker) ctrl.setFrontMarker(area.id, area.remap, ls.remapOutput)
           else ctrl.hideFrontMarker()
         }
         const bake = ls.bakeMap[area.id]
-        if (bake) ctrl.applyLabelBake(area.nodeName, bake)
+        if (bake) ctrl.applyLabelBake(area.id, bake)
       }
       ctrl.setChannelView(useUiStore.getState().channelView)
-      ctrl.setActiveAreaHighlight(ls.activeArea?.nodeName ?? null)
+      ctrl.setActiveAreaHighlight(ls.activeArea?.id ?? null)
     })
   }, [glbBytes, modelName])
 
@@ -99,11 +102,11 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
     const ctrl = ctrlRef.current
     if (!ctrl) return
     if (activeArea && remapOutput) {
-      ctrl.applyLabelGeometry(remapOutput, activeArea.nodeName, activeArea.surfaceMode ?? 'replace', activeArea.meshIndex)
-      if (showFrontMarker) ctrl.setFrontMarker(activeArea.nodeName, activeArea.remap, remapOutput)
+      ctrl.applyLabelGeometry(remapOutput, activeArea.nodeName, activeArea.surfaceMode ?? 'replace', activeArea.meshIndex, activeArea.id)
+      if (showFrontMarker) ctrl.setFrontMarker(activeArea.id, activeArea.remap, remapOutput)
       else ctrl.hideFrontMarker()
     }
-    ctrl.setActiveAreaHighlight(activeArea?.nodeName ?? null)
+    ctrl.setActiveAreaHighlight(activeArea?.id ?? null)
     ctrl.requestRender()
   }, [activeArea?.id, activeArea?.nodeName, remapOutput, areas.length, showFrontMarker])
 
@@ -111,11 +114,11 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
   useEffect(() => {
     const ctrl = ctrlRef.current
     if (!ctrl) return
-    ctrl.reconcileLabelAreas(areas.map((area) => area.nodeName))
+    ctrl.reconcileLabelAreas(areas.map((area) => area.id))
     for (const area of areas) {
       const bake = bakeMap[area.id]
       if (bake) {
-        ctrl.applyLabelBake(area.nodeName, { color: bake.color, metalness: bake.metalness, roughness: bake.roughness, bump: bake.bump })
+        ctrl.applyLabelBake(area.id, { color: bake.color, metalness: bake.metalness, roughness: bake.roughness, bump: bake.bump })
       }
     }
     ctrl.setChannelView(useUiStore.getState().channelView)
@@ -126,7 +129,7 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
     const ctrl = ctrlRef.current
     if (!ctrl) return
     if (!selectedPartId) {
-      ctrl.setActiveAreaHighlight(useLabelStore.getState().activeArea?.nodeName ?? null)
+      ctrl.setActiveAreaHighlight(useLabelStore.getState().activeArea?.id ?? null)
       return
     }
     const node = findPart(parts, selectedPartId)
@@ -134,7 +137,8 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
     // 若选中部件是某区域的网格，保持区域高亮；否则高亮选中部件
     const isAreaMesh = useLabelStore.getState().areas.some((a) => a.nodeName === node.name)
     if (isAreaMesh) {
-      ctrl.setActiveAreaHighlight(node.name)
+      const state = useLabelStore.getState()
+      ctrl.setActiveAreaHighlight(state.activeArea?.nodeName === node.name ? state.activeArea.id : state.areas.find((area) => area.nodeName === node.name)?.id ?? null)
     } else {
       if (node.meshIndex !== undefined) ctrl.setSelectedMesh(node.meshIndex)
     }

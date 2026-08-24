@@ -64,6 +64,19 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
       cornerRadius: Math.max(0, finite(input.cornerRadius, 0)),
     }
   }
+  if (input.type === 'image') {
+    const width = Math.max(4, ratio(input.width, 0.25) * area.canvas.width)
+    const height = Math.max(4, ratio(input.height, 0.25) * area.canvas.height)
+    return {
+      ...common,
+      kind: 'image',
+      src: typeof input.asset === 'string' ? input.asset : '',
+      naturalWidth: width,
+      naturalHeight: height,
+      width,
+      height,
+    }
+  }
   const language = typeof input.language === 'string' ? input.language : undefined
   const rtl = input.writingDirection === 'rtl' || language?.toLowerCase().startsWith('ar')
   return {

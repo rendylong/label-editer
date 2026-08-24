@@ -140,7 +140,7 @@ export interface ExportManifest {
   warnings: string[]
 }
 
-export type BridgeResult<T = undefined> = AgentEnvelope<T>
+export type BridgeResult<T = void> = AgentEnvelope<T>
 
 export interface LabelEditorAgentBridgeV1 {
   reset(): Promise<BridgeResult>
