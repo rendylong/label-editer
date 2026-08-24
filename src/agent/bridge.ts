@@ -3,6 +3,7 @@ import {
   agentSuccess,
   type AgentErrorCode,
   type AppliedDesign,
+  type ApplyProjectRequest,
   type ApplySpecRequest,
   type ArtifactDescriptor,
   type DesignValidationReport,
@@ -58,6 +59,7 @@ export interface AgentBridgeHandlers {
   reset: () => Promise<void>
   loadModel: (input: ModelLoadRequest) => Promise<ModelInspection>
   applySpec: (input: ApplySpecRequest) => Promise<AppliedDesign>
+  applyProject: (input: ApplyProjectRequest) => Promise<AppliedDesign>
   getProject: () => Promise<SerializedProject>
   validateDesign: () => Promise<DesignValidationReport>
   waitForReady: (input?: ReadinessRequest) => Promise<ReadinessReport>
@@ -97,6 +99,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     reset: overrides.reset ?? (() => Promise.resolve(missingHandler('reset'))),
     loadModel: overrides.loadModel ?? (() => Promise.resolve(missingHandler('loadModel'))),
     applySpec: overrides.applySpec ?? (() => Promise.resolve(missingHandler('applySpec'))),
+    applyProject: overrides.applyProject ?? (() => Promise.resolve(missingHandler('applyProject'))),
     getProject: overrides.getProject ?? (() => Promise.resolve(missingHandler('getProject'))),
     validateDesign: overrides.validateDesign ?? (() => Promise.resolve(missingHandler('validateDesign'))),
     waitForReady: overrides.waitForReady ?? (() => Promise.resolve(missingHandler('waitForReady'))),
@@ -107,6 +110,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     reset: () => invoke('reset', handlers.reset),
     loadModel: (input) => invoke('load_model', () => handlers.loadModel(input)),
     applySpec: (input) => invoke('apply_label_spec', () => handlers.applySpec(input)),
+    applyProject: (input) => invoke('apply_label_project', () => handlers.applyProject(input)),
     getProject: () => invoke('get_project', handlers.getProject),
     validateDesign: () => invoke('validate_design', handlers.validateDesign),
     waitForReady: (input) => invoke('wait_for_ready', () => handlers.waitForReady(input)),

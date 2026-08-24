@@ -143,7 +143,7 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
         'content-type': MIME[path.extname(fallback)] ?? 'application/octet-stream',
         'content-length': info.size,
         'cache-control': 'no-store',
-        'content-security-policy': "default-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' blob: data:; font-src 'self' data:",
+        'content-security-policy': "default-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:",
         'x-content-type-options': 'nosniff',
       })
       if (request.method === 'HEAD') response.end()

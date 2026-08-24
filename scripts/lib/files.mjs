@@ -101,3 +101,35 @@ export async function publishAtomically(outputDir, artifacts, { force = false, s
     throw error
   }
 }
+
+export async function publishFileAtomically(outputPath, bytes, { force = false, sessionId = randomBytes(8).toString('hex') } = {}) {
+  const parent = path.dirname(outputPath)
+  const base = path.basename(outputPath)
+  const temporary = path.join(parent, `.${base}.${sessionId}.tmp`)
+  const backup = path.join(parent, `.${base}.${sessionId}.backup`)
+  let movedExisting = false
+  await rm(temporary, { force: true })
+  try {
+    await writeExclusive(temporary, bytes)
+    const exists = await stat(outputPath).then(() => true, () => false)
+    if (exists && !force) {
+      const error = new Error(`Output already exists: ${outputPath}`)
+      error.code = 'OUTPUT_CONFLICT'
+      throw error
+    }
+    if (exists) {
+      await rm(backup, { force: true })
+      await rename(outputPath, backup)
+      movedExisting = true
+    }
+    await rename(temporary, outputPath)
+    if (movedExisting) await rm(backup, { force: true })
+  } catch (error) {
+    await rm(temporary, { force: true })
+    if (movedExisting) {
+      const outputExists = await stat(outputPath).then(() => true, () => false)
+      if (!outputExists) await rename(backup, outputPath)
+    }
+    throw error
+  }
+}

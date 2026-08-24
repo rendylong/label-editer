@@ -49,6 +49,17 @@ describe('browser Agent Bridge guard', () => {
     })
   })
 
+  it('exposes project import as a guarded bridge operation', async () => {
+    const bridge = createAgentBridge({
+      applyProject: async ({ project }) => ({ areaIds: ['front'], project: project as Record<string, unknown>, warnings: [] }),
+    })
+    await expect(bridge.applyProject({ project: { version: 3 } })).resolves.toMatchObject({
+      ok: true,
+      operation: 'apply_label_project',
+      data: { areaIds: ['front'], project: { version: 3 } },
+    })
+  })
+
   it('trusts the token returned by the same-origin bootstrap response', async () => {
     const bridge = createAgentBridge({ reset: async () => undefined })
     const dispose = await bootstrapAgentBridgeFromPage({

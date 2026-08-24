@@ -1,5 +1,6 @@
-import Ajv2020, { type ErrorObject } from 'ajv/dist/2020'
+import type { ErrorObject, ValidateFunction } from 'ajv'
 import labelSpecV2Schema from './label-spec-v2.schema.json'
+import validateV2 from './generated/labelSpecV2Validator'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -42,8 +43,7 @@ export type LabelSpecValidationResult =
   | { ok: true; spec: LabelSpecV2; issues: []; warnings: string[] }
   | { ok: false; issues: LabelSpecIssue[]; warnings: string[] }
 
-const ajv = new Ajv2020({ allErrors: true, strict: true })
-const validateV2 = ajv.compile<LabelSpecV2>(labelSpecV2Schema)
+const validateLabelSpecV2 = validateV2 as ValidateFunction<LabelSpecV2>
 
 function isRecord(value: unknown): value is UnknownRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -157,10 +157,10 @@ export function migrateLabelSpecV1(raw: unknown): { spec: LabelSpecV2; warnings:
 export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
   const version = isRecord(raw) ? raw.version : undefined
   const migrated = version === 1 ? migrateLabelSpecV1(raw) : { spec: raw, warnings: [] }
-  if (!validateV2(migrated.spec)) {
+  if (!validateLabelSpecV2(migrated.spec)) {
     return {
       ok: false,
-      issues: (validateV2.errors ?? []).map((error) => ({
+      issues: (validateLabelSpecV2.errors ?? []).map((error) => ({
         path: errorPath(error),
         message: error.message ?? 'invalid value',
         keyword: error.keyword,

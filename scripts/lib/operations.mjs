@@ -1,8 +1,9 @@
 import Ajv2020 from 'ajv/dist/2020.js'
-import { readFile } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
+import { readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { failure, success } from './envelope.mjs'
-import { resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
+import { resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
 
 const schemaPath = path.resolve(import.meta.dirname, '../../src/agent/label-spec-v2.schema.json')
 
@@ -41,6 +42,24 @@ async function validateSpecValue(value) {
   const validate = new Ajv2020({ allErrors: true, strict: true }).compile(schema)
   const valid = validate(value)
   return { valid, issues: valid ? [] : schemaIssues(validate), warnings: [] }
+}
+
+function isLabelProjectValue(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.areas)) return false
+  if (value.version === 3 || typeof value.modelFileName === 'string') return true
+  return value.areas.some((area) => area && typeof area === 'object' && Array.isArray(area.layers)
+    && area.layers.some((layer) => layer && typeof layer === 'object' && typeof layer.kind === 'string'))
+}
+
+async function assertOutputAvailable(runtime, outputPath, force) {
+  const resolved = await resolveAllowedOutputPath(runtime.allowedRoots, outputPath)
+  if (force) return resolved
+  if (await stat(resolved).then(() => true, () => false)) {
+    const error = new Error(`Output already exists: ${resolved}`)
+    error.code = 'OUTPUT_CONFLICT'
+    throw error
+  }
+  return resolved
 }
 
 function unwrapBridge(envelope) {
@@ -163,19 +182,27 @@ export function createOperations(runtime, { progress = () => undefined } = {}) {
       try {
         progress('Validating Label Spec')
         const input = await readJsonInput(runtime, { inline: spec, inputPath: specPath })
-        const validation = await validateSpecValue(input.value)
+        const isProject = isLabelProjectValue(input.value)
+        const validation = isProject
+          ? { valid: true, issues: [], warnings: [] }
+          : await validateSpecValue(input.value)
         if (!validation.valid) {
-          const error = new Error('Label Spec schema validation failed')
-          error.code = 'INVALID_LABEL_SPEC'
-          error.details = { issues: validation.issues }
-          throw error
+          const validationError = new Error('Label Spec schema validation failed')
+          validationError.code = 'INVALID_LABEL_SPEC'
+          validationError.details = { issues: validation.issues }
+          throw validationError
         }
+        await assertOutputAvailable(runtime, outputDir, force)
         session = await runtime.createSession({ glbPath })
         progress('Loading model in browser renderer')
         const inspection = await loadSessionModel(runtime, session)
-        const assetUrls = await addSpecAssets(runtime, session, input.value, input.baseDir)
         progress('Applying label design')
-        const applied = unwrapBridge(await runtime.callBridge(session, 'applySpec', { spec: input.value, assetUrls }))
+        const applied = isProject
+          ? unwrapBridge(await runtime.callBridge(session, 'applyProject', { project: input.value }))
+          : unwrapBridge(await runtime.callBridge(session, 'applySpec', {
+              spec: input.value,
+              assetUrls: await addSpecAssets(runtime, session, input.value, input.baseDir),
+            }))
         unwrapBridge(await runtime.callBridge(session, 'waitForReady', { timeoutMs: 60_000 }))
         progress('Rendering preview and export channels')
         const exported = unwrapBridge(await runtime.callBridge(session, 'exportArtifacts', {}))
@@ -224,12 +251,26 @@ export function createOperations(runtime, { progress = () => undefined } = {}) {
     },
 
     async preview({ inputPath, glbPath, outputPath, view = '3d' }) {
-      const result = await this.apply({ specPath: inputPath, glbPath, outputDir: path.dirname(outputPath), force: false })
-      if (!result.ok) return result
-      return success('render_label_preview', {
-        preview: result.data.artifacts.find((artifact) => artifact.id === 'preview-3d'),
-        view,
-      }, { sessionId: result.sessionId, warnings: result.warnings })
+      const staging = path.join(
+        path.dirname(outputPath),
+        `.${sanitizeArtifactName(path.basename(outputPath))}.${randomBytes(8).toString('hex')}.artifacts`,
+      )
+      try {
+        await assertOutputAvailable(runtime, outputPath, false)
+        const result = await this.apply({ specPath: inputPath, glbPath, outputDir: staging, force: false })
+        if (!result.ok) return result
+        const artifact = runtime.getArtifacts(result.sessionId).find((candidate) => candidate.id === 'preview-3d')
+        if (!artifact) throw new Error('Rendered preview artifact is missing')
+        const published = await runtime.publishArtifactFile(result.sessionId, outputPath, artifact, false)
+        return success('render_label_preview', {
+          preview: { ...publicArtifact(artifact, published), path: published },
+          view,
+        }, { sessionId: result.sessionId, warnings: result.warnings })
+      } catch (error) {
+        return failure('render_label_preview', error)
+      } finally {
+        await rm(staging, { recursive: true, force: true })
+      }
     },
 
     async export({ projectPath, glbPath, outputDir, force = false }) {
@@ -242,8 +283,19 @@ export function createOperations(runtime, { progress = () => undefined } = {}) {
         const input = await readJsonInput(runtime, { inputPath })
         session = await runtime.createSession({ glbPath })
         await loadSessionModel(runtime, session)
-        const assetUrls = await addSpecAssets(runtime, session, input.value, input.baseDir)
-        unwrapBridge(await runtime.callBridge(session, 'applySpec', { spec: input.value, assetUrls }))
+        if (isLabelProjectValue(input.value)) {
+          unwrapBridge(await runtime.callBridge(session, 'applyProject', { project: input.value }))
+        } else {
+          const validation = await validateSpecValue(input.value)
+          if (!validation.valid) {
+            const validationError = new Error('Label Spec schema validation failed')
+            validationError.code = 'INVALID_LABEL_SPEC'
+            validationError.details = { issues: validation.issues }
+            throw validationError
+          }
+          const assetUrls = await addSpecAssets(runtime, session, input.value, input.baseDir)
+          unwrapBridge(await runtime.callBridge(session, 'applySpec', { spec: input.value, assetUrls }))
+        }
         const url = await runtime.openEditor(session)
         return success('open_label_editor', { url, keepAlive: true }, { sessionId: session.id })
       } catch (error) {

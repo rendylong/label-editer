@@ -85,6 +85,10 @@ export interface ApplySpecRequest {
   assetUrls?: Record<string, string>
 }
 
+export interface ApplyProjectRequest {
+  project: unknown
+}
+
 export interface AppliedDesign {
   areaIds: string[]
   project: SerializedProject
@@ -146,6 +150,7 @@ export interface LabelEditorAgentBridgeV1 {
   reset(): Promise<BridgeResult>
   loadModel(input: ModelLoadRequest): Promise<BridgeResult<ModelInspection>>
   applySpec(input: ApplySpecRequest): Promise<BridgeResult<AppliedDesign>>
+  applyProject(input: ApplyProjectRequest): Promise<BridgeResult<AppliedDesign>>
   getProject(): Promise<BridgeResult<SerializedProject>>
   validateDesign(): Promise<BridgeResult<DesignValidationReport>>
   waitForReady(input?: ReadinessRequest): Promise<BridgeResult<ReadinessReport>>

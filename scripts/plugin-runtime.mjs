@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { createBrowserSessionManager } from './lib/browser-session.mjs'
 import { normalizeGlb } from './lib/codec.mjs'
-import { publishAtomically, resolveAllowedOutputPath, resolveAllowedPath } from './lib/files.mjs'
+import { publishAtomically, publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath } from './lib/files.mjs'
 import { createSessionServer } from './lib/session-server.mjs'
 
 export async function createPluginRuntime(options = {}) {
@@ -68,6 +68,12 @@ export async function createPluginRuntime(options = {}) {
       getSession(sessionId)
       const output = await resolveAllowedOutputPath(allowedRoots, outputDir)
       await publishAtomically(output, artifacts, { force, sessionId })
+      return output
+    },
+    async publishArtifactFile(sessionId, outputPath, artifact, force = false) {
+      getSession(sessionId)
+      const output = await resolveAllowedOutputPath(allowedRoots, outputPath)
+      await publishFileAtomically(output, artifact.bytes, { force, sessionId })
       return output
     },
     async disposeSession(sessionId) {

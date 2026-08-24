@@ -1,6 +1,6 @@
 import { applyStructuredLabelSpec } from '../app/labelSpec'
 import { computeLabelSetup, loadModelFromBytes } from '../app/modelLoader'
-import { serializeLabelProject } from '../app/projectSchema'
+import { parseLabelProject, serializeLabelProject } from '../app/projectSchema'
 import { restoreImportedAreaRuntime } from '../app/projectImportRuntime'
 import { extractMeshAccessors, isMeshWorldMirrored, meshLocalFrontDirection, readGlb } from '../glb/analyze'
 import { makeDefaultRemap } from '../glb/uvRemap'
@@ -196,6 +196,33 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         areaIds: areas.map((area) => area.id),
         project: serializeLabelProject(useModelStore.getState().modelName, useLabelStore.getState().areas) as unknown as Record<string, unknown>,
         warnings: validation.warnings,
+      }
+    },
+    applyProject: async (input) => {
+      const project = parseLabelProject(input.project)
+      const model = useModelStore.getState()
+      if (!model.glbBytes) throw new Error('No model is loaded')
+      if (project.modelFileName && model.modelName && project.modelFileName !== model.modelName) {
+        const error = new Error(`Project targets ${project.modelFileName}, but the loaded model is ${model.modelName}`) as Error & { code: string }
+        error.code = 'INVALID_LABEL_SPEC'
+        throw error
+      }
+      normalizedSpec = undefined
+      const areas: LabelAreaConfig[] = project.areas.map((area) => ({
+        ...area,
+        undoStack: [],
+        redoStack: [],
+      }))
+      await applyPreparedAreaTransaction({ glbBytes: model.glbBytes, areas })
+      const ui = useUiStore.getState()
+      ui.setView('editor')
+      ui.setWorkspaceTab('labels')
+      ui.setMode('design')
+      ui.setEditorViewMode('split')
+      return {
+        areaIds: areas.map((area) => area.id),
+        project: serializeLabelProject(model.modelName, useLabelStore.getState().areas) as unknown as Record<string, unknown>,
+        warnings: [],
       }
     },
     getProject: async () => serializeLabelProject(

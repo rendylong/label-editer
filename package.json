@@ -3,14 +3,20 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Standalone web app: design labels on beauty-product bottle GLB models (part list, WYSIWYG label canvas, craft effects, real-time 3D preview, GLB/PNG export)",
+  "description": "Codex and MCP plugin for inspecting, designing, previewing, and exporting cosmetic labels on GLB packaging",
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "label-cli": "./scripts/label-cli.mjs"
   },
   "scripts": {
     "dev": "vite",
+    "generate:label-validator": "node scripts/generate-label-validator.mjs",
+    "prebuild": "pnpm generate:label-validator",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "pretest": "pnpm generate:label-validator",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:plugin-e2e": "vitest run tests/pluginE2E.test.ts --testTimeout=120000",

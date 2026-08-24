@@ -1,11 +1,11 @@
-import { mkdtemp, mkdir, realpath, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error Node plugin runtime is intentionally authored as directly executable ESM.
-import { resolveAllowedPath, sanitizeArtifactName } from '../scripts/lib/files.mjs'
+import { publishFileAtomically, resolveAllowedPath, sanitizeArtifactName } from '../scripts/lib/files.mjs'
 // @ts-expect-error Node plugin runtime is intentionally authored as directly executable ESM.
-import { inspectCodec } from '../scripts/lib/codec.mjs'
+import { inspectCodec, normalizeGlb } from '../scripts/lib/codec.mjs'
 // @ts-expect-error Node plugin runtime is intentionally authored as directly executable ESM.
 import { createSessionServer } from '../scripts/lib/session-server.mjs'
 
@@ -38,6 +38,14 @@ describe('plugin runtime security', () => {
     expect(sanitizeArtifactName('背标 / PBR.png')).toBe('背标-PBR.png')
   })
 
+  it('publishes a single artifact without overwriting by default', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'glb-label-file-'))
+    const output = path.join(root, 'preview.png')
+    await publishFileAtomically(output, new Uint8Array([1, 2, 3]), { sessionId: 'first' })
+    await expect(publishFileAtomically(output, new Uint8Array([4]), { sessionId: 'second' })).rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
+    expect(await readFile(output)).toEqual(Buffer.from([1, 2, 3]))
+  })
+
   it('returns explicit blockers for unsupported GLB extensions', () => {
     expect(inspectCodec(glbWithExtensions(['EXT_meshopt_compression']))).toMatchObject({
       blocker: { code: 'UNSUPPORTED_CODEC', extension: 'EXT_meshopt_compression' },
@@ -52,6 +60,40 @@ describe('plugin runtime security', () => {
     expect(inspectCodec(glbWithExtensions(['KHR_draco_mesh_compression']))).toMatchObject({
       sourceCompressed: true, needsNormalization: true, blocker: undefined,
     })
+  })
+
+  it('normalizes a real Draco-compressed GLB before browser rendering', async () => {
+    const [{ Document, NodeIO }, { KHRDracoMeshCompression }, { draco }, draco3d] = await Promise.all([
+      import('@gltf-transform/core'),
+      import('@gltf-transform/extensions'),
+      import('@gltf-transform/functions'),
+      // @ts-expect-error draco3dgltf does not publish TypeScript declarations.
+      import('draco3dgltf'),
+    ])
+    const document = new Document()
+    const buffer = document.createBuffer()
+    const positions = document.createAccessor('positions')
+      .setType('VEC3')
+      .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]))
+      .setBuffer(buffer)
+    const indices = document.createAccessor('indices')
+      .setType('SCALAR')
+      .setArray(new Uint16Array([0, 1, 2]))
+      .setBuffer(buffer)
+    const primitive = document.createPrimitive().setAttribute('POSITION', positions).setIndices(indices)
+    const mesh = document.createMesh('triangle').addPrimitive(primitive)
+    document.createScene('scene').addChild(document.createNode('triangle').setMesh(mesh))
+    await document.transform(draco())
+    const io = new NodeIO().registerExtensions([KHRDracoMeshCompression]).registerDependencies({
+      'draco3d.encoder': await draco3d.createEncoderModule(),
+      'draco3d.decoder': await draco3d.createDecoderModule(),
+    })
+    const compressed = await io.writeBinary(document)
+    expect(inspectCodec(compressed)).toMatchObject({ sourceCompressed: true, needsNormalization: true })
+
+    const normalized = await normalizeGlb(compressed)
+    expect(normalized.codec).toMatchObject({ sourceCompressed: true, normalized: true, outputCompressed: false })
+    expect(inspectCodec(normalized.bytes)).toMatchObject({ sourceCompressed: false, needsNormalization: false })
   })
 
   it('protects bootstrap and artifact routes with the session token', async () => {
@@ -75,6 +117,12 @@ describe('plugin runtime security', () => {
       expect(server.getArtifacts(session.id)).toMatchObject([{
         id: 'preview', fileName: 'preview.png', mimeType: 'image/png', byteLength: 3,
       }])
+
+      const editor = await fetch(`${server.origin}/editor/`)
+      const csp = editor.headers.get('content-security-policy') ?? ''
+      expect(csp).toContain("script-src 'self'")
+      expect(csp).not.toContain('unsafe-eval')
+      expect(csp).toContain("connect-src 'self' blob:")
     } finally {
       await server.close()
     }
