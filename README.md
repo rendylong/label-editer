@@ -1,78 +1,166 @@
-# glb-label-editor
+# GLB Label Editor Codex Plugin
 
-独立 Web 版 GLB 贴标编辑器 —— 为美妆瓶身设计标签（文字 / 图片 / 工艺），实时 3D 预览，导出重打包 GLB。
+面向美妆包装 GLB 的 Agent 贴标插件。Codex 或其他 MCP Agent 可以检查模型、选择稳定贴标目标、应用正标/背标/环绕标设计、渲染工艺预览，并原子导出可编辑项目、PBR 通道与已贴标 GLB。需要人工调整时，可打开带会话令牌的本地可视化编辑器继续操作。
 
-纯前端应用（Vite + React 19 + three.js + Konva + @gltf-transform），无后端、无账号，静态部署即可用。**不是 DSH 插件，不依赖 better-sidebar。**
+插件由三层共用同一套运行时：Codex Skill 负责工作流决策，MCP 提供六个粗粒度工具，`label-cli` 提供可脚本化的 JSON 接口。Agent 不需要依赖 DOM 选择器操作前端。
 
-## 功能
-
-- **部件列表**：GLB 场景树（节点 / 材质 / 三角形数），点击高亮，可显隐，自动识别贴标部件（名字含 label/贴标/标签，或含纹理的独立网格）。
-- **多个贴标区域**：可在部件列表创建任意数量的贴标区域，每个区域独立设计画布、图层、工艺与撤销栈；左侧「贴标区域」分组列出全部区域，可点击切换、删除。
-- **贴标区域可视化设置流程**：工具栏「＋ 贴标区域」进入独立页面——① 选择目标表面 → ② 在遵循 3D UV 逻辑的 **2D 展开图**上拖拽矩形框选贴标区域 → ③ 创建或更新。展开图明确标注模型正面、背部接缝、顶部与底部；选区始终限制在有效表面范围内。已有区域会载入真实范围继续编辑，不会丢弃确认结果。
-- **贴标区域大小可调**：编辑器属性面板显示区域摘要，并统一从「在 2D 展开图中编辑」进入可视化调整；环绕宽度、环绕起点、高度比例与垂直位置均由同一 UV 坐标转换约束，画布规格实时按几何推导。
-- **标签设计（WYSIWYG）**：2D 画布即"瓶子上的标签"——
-  - 文本图层：内容 / 字体（系统 + 上传 ttf/otf/woff2）/ 字号 / 字重 / 字距 / 行距 / 对齐 / 颜色 / 斜体 / 旋转 / 透明度 / **文字朝向**（横向=沿瓶身环绕、纵向=沿瓶高，属性面板可见当前朝向并切换）；
-  - 图片图层：上传 PNG/JPG/WebP，拖拽 / 缩放 / 旋转；
-  - **工艺**（每图层可叠加、也可全局）：烫金（金/银/玫瑰金/香槟金/镭射）、击凸、压凹、磨砂、UV 亮油、描边；
-  - 画布内直接拖拽 / 旋转 / 缩放（Konva Transformer）、增量撤销/重做（Ctrl+Z / Ctrl+Shift+Z / Delete / Ctrl+D）、快捷键缩放；
-  - 参考层（原标签纹理）显隐对比、接缝线、正面标记。
-- **实时 3D 预览**：所有贴标区域的修改防抖烘焙（≤50ms）→ 纹理热更新（换源不重编译）→ 下一帧生效；**PBR 通道**（Metalness/Roughness/Bump）由工艺自动生成并应用于材质；顶栏可切换 Color / Metalness / Roughness / Bump 通道视图。
-- **导出**：
-  - 标签纹理 PNG（激活区域，尺寸 = 画布规格，由几何推导，2048 宽）；
-  - **重打包 GLB**：Web Worker 中 @gltf-transform 重打包**所有贴标区域**（替换 baseColorTexture + metallicRoughness + normal、覆盖 UV、保留透明背景并使用 BLEND、按区域范围设置采样），**交叉自检**（独立实现 three GLTFLoader 重解析 + UV 采样比对 + 输入未修改校验），任一项失败则报错并保留原文件；
-  - 项目 `.lbl`（JSON：设计数据 + 重映射参数）导入/导出，防止刷新丢失。
-
-## 核心技术：圆柱投影 UV 重映射
-
-真实模型的贴标网格 UV 常常是损坏/退化的（如示例 `面霜瓶.glb` 的 label_0：78% 顶点采样同一纹理点），无法直接编辑。本工具：
-
-1. 对标签网格拟合圆柱（PCA 主轴候选 + 圆柱度质量择优）；
-2. **圆柱投影重映射**：`u = (-atan2/2π + 0.5)·wrap + offset`、`v = 高度归一化`；U 正方向与模型正面的自然阅读方向一致，画布宽高比 = `2πr·wrap : 高`（几何推导，非固定方形）；
-3. **接缝顶点拆分**：跨缝三角形按"相对首顶点展开 ±1"复制顶点，配合 REPEAT 采样实现无缝环绕（实测可见带 138 条跨缝边全部消除）；
-4. 底部退化扇区（r < 0.2·r̄）三角形整体塌缩到单一 u 列（不可见区域，避免整幅拉伸）；
-5. 正面原点 = 画布 u=0.5（`θ_front = π/2 - 2π·offset`），画布与 3D 标记对齐。
-
-uvRemap 是**唯一数据源**：预览（three `geometry.setAttribute`）与导出（gltf-transform accessor 覆盖）都从同一组序列化参数派生，杜绝双源漂移。全部数学为纯函数，黄金用例见 `tests/uvRemap.test.ts`（真实模型数据）。
-
-## 使用
+## 准备运行环境
 
 ```bash
 pnpm install
-pnpm dev        # 开发（http://localhost:5178）
-pnpm test       # Vitest 单测（含真实 GLB 黄金用例与区域坐标回归）
-pnpm build      # 产物在 dist/
-pnpm preview    # 本地预览（http://localhost:4178）
+pnpm exec playwright install chromium
+pnpm build
 ```
 
-打开页面 → `加载示例`（内置面霜瓶.glb）→ 自动选中 label_0 → 添加文字/图片、调属性、加工艺 → 右侧 3D 实时预览 → `导出 GLB` / `导出纹理 PNG`。
+要求 Node.js 22+、pnpm 和可运行 Chromium/WebGL 的本机环境。插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)，MCP 配置位于 [`.mcp.json`](.mcp.json)，Agent 工作流位于 [`skills/cosmetic-label-editor/SKILL.md`](skills/cosmetic-label-editor/SKILL.md)。
 
-也可以 `打开 GLB` 导入任意 `.glb`（v1 仅支持 .glb；`.gltf` 外部资源未支持）。
+安装到 Codex 时，将本目录作为 `glb-label-editor` 插件源加入个人或团队 marketplace，再执行：
 
-## 部署
-
-`dist/` 是纯静态产物，可放任意静态托管（GitHub Pages / Vercel / Nginx…）。
-
-> ⚠️ **必须通过 http(s) 访问**（DRACO 解码 worker 在 `file://` 下不可用；3D 预览需要 WebGL）。DRACO 解码器已本地化到 `public/draco/`，离线可用。
-
-## 已知限制（v1）
-
-- **Draco 压缩模型的标签导出**不可用（npm 版 draco3d 依赖 node:fs，浏览器不可行——M1 spike 结论）：预览可正常显示（three 本地 decoder），导出会提示"仅导出 PNG"兜底。
-- 工艺效果为**视觉模拟**（烫金/击凸等绘制进纹理与 PBR 通道）；生产印刷需专色/出血转换（规划中）。
-- 模板库、异形曲面展平、.gltf 外部资源见 TODOS。
-- 环境贴图 / 动画 / Meshopt / KTX2 未接入。
-
-## 目录
-
-```
-src/
-  glb/          analyze.ts（部件树/accessor 提取）、uvRemap.ts（重映射纯函数）、
-                rebuild.ts + rebuild.worker.ts（重打包 + 交叉自检）、textures.ts（PNG/打包/法线）
-  scene/        SceneController.ts（three 场景、高亮、纹理热更新、通道视图）、Viewport.tsx
-  label/        LabelCanvas.tsx（Konva 画布 + 烘焙）、craft.ts（工艺绘制 + mask）、fonts.ts、types.ts
-  state/        stores.ts（modelStore / labelStore（mutation 网关 + 增量撤销）/ uiStore）
-  ui/           Toolbar.tsx、Panels.tsx（部件树/图层/属性/工艺）
-  app/          App.tsx、modelLoader.ts、actions.ts（导出/.lbl/快捷键）、styles.css
-tests/          uvRemap 黄金用例、GLB 往返、导出管线往返
+```bash
+codex plugin marketplace add /path/to/your/marketplace
+codex plugin add glb-label-editor@<marketplace-name>
 ```
 
-设计与评审记录：见 `/Users/apple/dsh/PLAN.md`（autoplan 三阶段评审 + 决策审计）。
+本地开发时也可以只注册 MCP：
+
+```bash
+codex mcp add glb-label-editor -- node /absolute/path/to/glb-label-editor/scripts/mcp-server.mjs
+```
+
+安装或更新插件后，请新建 Codex 会话，使 Skill 和 MCP 工具重新加载。
+
+## Agent 工具
+
+| MCP 工具 | 用途 | 是否写文件 |
+| --- | --- | --- |
+| `inspect_model` | 检查 GLB、列出稳定 mesh selector、候选贴标面、尺寸与 codec 状态 | 否 |
+| `validate_label_spec` | 校验 Label Spec、资源、目标与设计/印刷问题 | 否 |
+| `apply_label_spec` | 一次完成应用、烘焙、预览、GLB 交叉校验和完整产物发布 | 是 |
+| `render_label_preview` | 从 Label Spec 或 `.lbl` 项目生成预览 PNG | 是 |
+| `export_label_assets` | 从已保存 `.lbl` 项目再次导出完整交付物 | 是 |
+| `open_label_editor` | 返回同一会话的本机令牌化 URL，供人工审阅和接管 | 否 |
+
+推荐 Agent 顺序是 `inspect_model` → `validate_label_spec` → `apply_label_spec`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open_label_editor` 只用于人机接力，不是自动化所必需的步骤。
+
+## CLI
+
+所有命令都返回统一 Agent envelope。使用 `--json` 时，stdout 只写一条 JSON；进度与诊断写 stderr。
+
+```bash
+# 获取完整 Label Spec v2 JSON Schema
+node scripts/label-cli.mjs schema --json
+
+# 检查模型和候选贴标区域
+node scripts/label-cli.mjs inspect model.glb --json
+
+# 仅校验规格；增加 --glb 可同时验证模型目标
+node scripts/label-cli.mjs validate spec.json --glb model.glb --json
+
+# 应用设计并发布完整目录
+node scripts/label-cli.mjs apply spec.json \
+  --glb model.glb --output result --json
+
+# 已明确允许覆盖时使用 --force；--open 同时返回人工审阅 URL
+node scripts/label-cli.mjs apply spec.json \
+  --glb model.glb --output result --force --open --json
+
+# 输出单个预览文件
+node scripts/label-cli.mjs preview spec.json \
+  --glb model.glb --output preview.png --view 3d --json
+
+# 从可编辑项目再次导出
+node scripts/label-cli.mjs export result/project.lbl.json \
+  --glb model.glb --output exported --json
+
+# 保持本地会话运行，直到 Ctrl+C
+node scripts/label-cli.mjs open spec.json --glb model.glb
+```
+
+退出码：`0` 成功；`2` 参数错误；`3` 路径越界；`4` Label Spec/项目无效；`5` 目标缺失或有歧义；`6` 浏览器不可用；`7` GLB 重建失败；`8` codec 不支持；`9` 输出冲突；`1` 其他内部错误。
+
+## Label Spec v2
+
+Schema 的唯一来源是 [`src/agent/label-spec-v2.schema.json`](src/agent/label-spec-v2.schema.json)，也可以通过 `label-cli schema` 获取。真实正/背标示例见 [`tests/fixtures/specs/perfume-front-back-v2.json`](tests/fixtures/specs/perfume-front-back-v2.json)。
+
+核心结构：
+
+```json
+{
+  "version": 2,
+  "assets": {
+    "logo": { "path": "./logo.png", "mimeType": "image/png" }
+  },
+  "areas": [
+    {
+      "id": "front",
+      "name": "正标",
+      "target": { "stableSelector": "mesh:0/node:2" },
+      "surfaceMode": "overlay",
+      "side": "front",
+      "range": { "uStart": 0.35, "uWidth": 0.3, "vStart": 0.2, "vHeight": 0.6 },
+      "layers": []
+    }
+  ]
+}
+```
+
+- `overlay` 用于瓶身直印、透明贴花和本体表面；`replace` 只用于模型中独立存在的标签 mesh。
+- 支持正标、背标、侧标、圆柱环绕标、平面瓶身、管体、罐盖和颈封区域。
+- 文本支持可调整文本框、自动换行、多行、RTL、语言标签、字体、字重、字距、行距、对齐、横/竖排。
+- 图层支持文字、图片、基础/装饰形状、拖动排序、锁定、显隐和删除。
+- 工艺支持烫金、击凸、压凹、磨砂、UV 亮油和描边，并生成 Color、Metalness、Roughness、Bump 通道。
+- `print` 可记录毫米尺寸、出血、圆角、最小字高、刀模类型和专色版；问题会进入验证结果与印刷清单。
+
+## 输出目录
+
+一次成功的 `apply` 或 `export` 会在目标目录不存在时整体发布；中途失败不会留下半成品。默认不覆盖已有目录。
+
+```text
+result/
+├── labeled.glb
+├── project.lbl.json
+├── label-spec.normalized.json      # 从 Label Spec 应用时生成
+├── print-manifest.json
+├── preview-3d.png
+├── manifest.json                   # SHA-256、尺寸、验证与 GLB 交叉检查
+└── areas/
+    ├── front/
+    │   ├── color.png
+    │   ├── metalness.png
+    │   ├── roughness.png
+    │   └── bump.png
+    └── back/
+        └── ...
+```
+
+`labeled.glb` 内嵌完整 `.lbl` 项目元数据；导出的 GLB 会由 three.js 独立重解析并比对目标 mesh 与完整 UV，输入文件本身不会被修改。
+
+## 安全边界
+
+- 默认只允许读取/写入当前工作目录；调用方可显式增加 workspace roots。
+- 远程图片和字体 URL 默认禁用；资源必须是允许根目录内的本地文件。
+- 浏览器仅绑定随机端口的 `127.0.0.1`，每个会话使用随机 32 字节令牌；模型、bootstrap 和产物路由都校验令牌。
+- 页面 CSP 禁止 `unsafe-eval`，只允许本源脚本；仅对运行时自有的内存 GLB 开放 `blob:` 连接。
+- 目录和单文件产物都采用同目录临时文件/目录后 rename 的原子发布方式；除非明确使用 `force`，不会覆盖已有结果。
+- 返回的人工接管 URL 是短期本地能力凭证，不应发送给不受信任的第三方。
+
+## Codec 与交付边界
+
+- 标准 GLB 可直接处理；Draco GLB 会在 Node 运行时先解压标准化，输出当前不保留 Draco 压缩。
+- `EXT_meshopt_compression` 和 `KHR_texture_basisu` 当前返回明确的 `UNSUPPORTED_CODEC`，不会静默生成不完整结果。
+- 工艺是屏幕/PBR 预览和分色数据，不等于供应商实物可行性。颜色、套准、附着力、触感和刀模需要打样确认。
+- 当前不会生成印厂可直接制版的 PDF/AI 刀模，也不替代法规、条码或宣称审核。
+
+## 前端开发与验证
+
+插件保留完整独立编辑器，便于开发和人工设计：
+
+```bash
+pnpm dev
+pnpm test
+pnpm build
+GLB_LABEL_E2E_MODEL=/absolute/path/to/model.glb pnpm test:plugin-e2e
+pnpm plugin:verify
+```
+
+Web 前端使用 React 19、three.js、Konva 和 `@gltf-transform`。Agent 浏览器运行时加载同一份 `dist/`，因此前端与插件不会维护两套贴标逻辑。
