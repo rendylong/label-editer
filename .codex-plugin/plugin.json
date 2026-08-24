@@ -1,0 +1,22 @@
+{
+  "name": "glb-label-editor",
+  "version": "0.2.0",
+  "description": "Agent-driven GLB cosmetic label design, preview, print validation, and export",
+  "author": { "name": "Realibox" },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "GLB Label Editor",
+    "shortDescription": "Design and export cosmetic labels on GLB packaging",
+    "longDescription": "Inspect packaging GLBs, apply structured front, back, and wrap label designs, preview craft effects, validate print data, and export PNG/PBR assets plus labeled GLB files.",
+    "developerName": "Realibox",
+    "category": "Design",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Inspect this GLB and recommend label surfaces.",
+      "Apply this label spec and export a labeled GLB.",
+      "Open the label editor so I can review the result."
+    ],
+    "brandColor": "#356AE6"
+  }
+}

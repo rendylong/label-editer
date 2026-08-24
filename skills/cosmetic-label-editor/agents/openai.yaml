@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cosmetic Label Editor"
+  short_description: "Design and export labels on cosmetic GLB packaging"
+  default_prompt: "Inspect this cosmetic packaging GLB, apply a structured label design, and export a verified labeled GLB."
