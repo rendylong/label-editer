@@ -3,16 +3,15 @@
  */
 
 import { useModelStore, useLabelStore, useUiStore, flashToast } from '../state/stores'
-import { exportGlb, downloadBytes } from '../glb/rebuild'
-import { canvasToPngBytes, packMetalRough, bumpToNormal } from '../glb/textures'
+import { downloadBytes } from '../glb/rebuild'
 import { restoreImportedAreaRuntime } from './projectImportRuntime'
-import { parseLabelProject, serializeLabelProject } from './projectSchema'
+import { parseLabelProject } from './projectSchema'
 import { nudgeLayers } from '../label/selection'
 import { deriveDesignFontRequests, waitForDesignFonts } from '../label/fontRuntime'
 import { designFontReadinessKey } from '../label/exportReadiness'
 import { applyStructuredLabelSpec, targetAreaIdsForSpecReplacement } from './labelSpec'
-import { buildPrintManifest } from '../label/printReadiness'
 import { applyPreparedAreaTransaction } from '../agent/transactionalApply'
+import { createChannelArtifact, createGlbArtifact, createPrintArtifact, createProjectArtifact } from '../agent/artifactExport'
 import type { LabelAreaConfig, LabelLayer } from '../label/types'
 import type { BakeResult } from '../state/stores'
 
@@ -200,9 +199,9 @@ export async function exportPng(): Promise<void> {
   try {
     const { snapshot, bake } = await prepareActiveExportSnapshot()
     const channel: ExportPngChannel = useUiStore.getState().channelView ?? 'color'
-    const bytes = await canvasToPngBytes(selectBakeChannel(bake, channel))
+    const artifact = await createChannelArtifact(snapshot.area, bake, channel)
     assertExportAreaOwnership([snapshot], snapshot.owner.id)
-    downloadBytes(bytes, `label-${channel}-${bake.spec.width}x${bake.spec.height}.png`, 'image/png')
+    downloadBytes(artifact.bytes, `label-${channel}-${bake.spec.width}x${bake.spec.height}.png`, artifact.mimeType)
     flashToast(`已导出 ${channel} 通道 ${bake.spec.width}×${bake.spec.height}px`, 'success')
   } catch (err) {
     flashToast(err instanceof Error ? err.message : '导出失败', 'error')
@@ -237,43 +236,24 @@ export async function exportGlbFile(): Promise<void> {
     assertExportAreaOwnership(snapshots, activeAreaId, true)
     assertModelOwnership(modelSnapshot)
     flashToast(`正在重打包 GLB（${ls.areas.length} 个贴标区域）…`, 'info')
-    const { prepareAllAreas } = await import('./areaExporter')
-    assertExportAreaOwnership(snapshots, activeAreaId, true)
-    assertModelOwnership(modelSnapshot)
-    const prepared = await prepareAllAreas(modelSnapshot.glbBytes, snapshots.map(({ area }) => area), bakeInputs)
-    assertExportAreaOwnership(snapshots, activeAreaId, true)
-    assertModelOwnership(modelSnapshot)
-    if (prepared.length === 0) {
-      flashToast('没有可导出的贴标区域（请先添加并设计）', 'error')
-      return
-    }
-    const result = await exportGlb({
-      glb: modelSnapshot.glbBytes,
-      areas: prepared,
-      editableProject: serializeLabelProject(modelSnapshot.modelName, snapshots.map(({ area }) => area)),
+    const result = await createGlbArtifact({
+      glbBytes: modelSnapshot.glbBytes,
+      modelName: modelSnapshot.modelName,
+      areas: snapshots.map(({ area }) => area),
+      bakeMap: bakeInputs,
+      beforeRebuild: () => {
+        assertExportAreaOwnership(snapshots, activeAreaId, true)
+        assertModelOwnership(modelSnapshot)
+      },
     })
     assertExportAreaOwnership(snapshots, activeAreaId, true)
     assertModelOwnership(modelSnapshot)
-    if (!result.ok || !result.glbBytes) {
-      flashToast(`导出失败：${result.error ?? '未知错误'}（可改用仅导出 PNG）`, 'error')
-      return
-    }
-    console.log('[export] crossCheck =', JSON.stringify(result.crossCheck), 'bytes =', result.glbBytes.length)
-    ;(window as unknown as { __lastExport?: unknown }).__lastExport = { bytes: result.glbBytes, crossCheck: result.crossCheck }
-    const checks = [
-      result.crossCheck?.error,
-      result.crossCheck?.loaded === false ? '交叉解析失败' : null,
-      result.crossCheck?.uvSampleOk === false ? 'UV 校验不一致' : null,
-    ].filter(Boolean)
-    if (checks.length > 0) {
-      flashToast(`导出自检未通过：${checks.join('；')}——已保留原文件`, 'error')
-      return
-    }
+    console.log('[export] crossCheck =', JSON.stringify(result.crossCheck), 'bytes =', result.artifact.bytes.length)
+    ;(window as unknown as { __lastExport?: unknown }).__lastExport = { bytes: result.artifact.bytes, crossCheck: result.crossCheck }
     assertExportAreaOwnership(snapshots, activeAreaId, true)
     assertModelOwnership(modelSnapshot)
-    const base = modelSnapshot.modelName.replace(/\.glb$/i, '') || 'model'
-    downloadBytes(result.glbBytes, `${base}-label-edited.glb`, 'model/gltf-binary')
-    flashToast(`已导出 GLB（${prepared.length} 个区域，自检通过）`, 'success')
+    downloadBytes(result.artifact.bytes, result.artifact.fileName, result.artifact.mimeType)
+    flashToast(`已导出 GLB（${result.preparedAreaCount} 个区域，自检通过）`, 'success')
   } catch (err) {
     flashToast(err instanceof Error ? err.message : '导出失败', 'error')
   }
@@ -287,9 +267,8 @@ export function exportProject(): void {
     flashToast('没有可导出的标签项目', 'error')
     return
   }
-  const project = serializeLabelProject(ms.modelName, ls.areas)
-  const bytes = new TextEncoder().encode(JSON.stringify(project, null, 2))
-  downloadBytes(bytes, `label-project-${Date.now()}.lbl.json`, 'application/json')
+  const artifact = createProjectArtifact(ms.modelName, ls.areas)
+  downloadBytes(artifact.bytes, `label-project-${Date.now()}.lbl.json`, artifact.mimeType)
   flashToast(`项目已导出（${ls.areas.length} 个贴标区域）`, 'success')
 }
 
@@ -297,9 +276,9 @@ export function exportPrintManifest(): void {
   const area = useLabelStore.getState().activeArea
   if (!area) { flashToast('尚无可导出的贴标区域', 'error'); return }
   try {
-    const manifest = buildPrintManifest(area)
-    const bytes = new TextEncoder().encode(JSON.stringify(manifest, null, 2))
-    downloadBytes(bytes, `${area.name.replace(/[^\p{L}\p{N}._-]+/gu, '-')}-print-manifest.json`, 'application/json')
+    const artifact = createPrintArtifact(area)
+    const manifest = JSON.parse(new TextDecoder().decode(artifact.bytes)) as { separations: string[]; issues: unknown[] }
+    downloadBytes(artifact.bytes, artifact.fileName, artifact.mimeType)
     flashToast(`已导出印刷清单（${manifest.separations.length} 个通道/专色版）`, manifest.issues.length ? 'info' : 'success')
   } catch (error) {
     flashToast(error instanceof Error ? error.message : '印刷清单导出失败', 'error')
