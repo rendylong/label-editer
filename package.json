@@ -22,6 +22,7 @@
     "@gltf-transform/functions": "^4.4.2",
     "@modelcontextprotocol/sdk": "1.30.0",
     "ajv": "8.20.0",
+    "draco3dgltf": "1.5.7",
     "konva": "^10.3.1",
     "playwright": "1.62.1",
     "react": "^19.2.0",

@@ -132,6 +132,7 @@ async function waitForBakes(timeoutMs = 30_000): Promise<void> {
 
 async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: BrowserArtifact): Promise<ArtifactDescriptor> {
   const url = new URL(`${bootstrap.artifactUploadBase.replace(/\/$/, '')}/${encodeURIComponent(artifact.id)}`, window.location.origin)
+  url.searchParams.set('token', bootstrap.token)
   const response = await fetch(url, {
     method: 'PUT',
     headers: {
