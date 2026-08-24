@@ -1,0 +1,87 @@
+{
+  "version": 2,
+  "exports": ["glb", "project", "normalized-spec", "print-manifest", "preview-3d", "color", "metalness", "roughness", "bump"],
+  "areas": [
+    {
+      "id": "front",
+      "name": "正标",
+      "target": { "nodeName": "Cube.001_Material.001_0" },
+      "surfaceMode": "overlay",
+      "side": "front",
+      "range": { "uStart": 0.35, "uWidth": 0.3, "vStart": 0.2, "vHeight": 0.6 },
+      "paper": { "enabled": false, "color": "#FFFFFF", "opacity": 0 },
+      "print": {
+        "widthMm": 42,
+        "heightMm": 60,
+        "bleedMm": 2,
+        "cornerRadiusMm": 2,
+        "minTextHeightMm": 1.2,
+        "dieCutShape": "rounded-rectangle",
+        "spotColors": ["FOIL_GOLD"]
+      },
+      "layers": [
+        {
+          "id": "brand",
+          "type": "text",
+          "text": "REALIBOX",
+          "fontFamily": "noto-sans-sc",
+          "fontSize": 72,
+          "fontWeight": 700,
+          "width": 0.72,
+          "color": "#1B1B1B",
+          "align": "center",
+          "x": 0.5,
+          "y": 0.42,
+          "craft": [{ "type": "foil", "params": { "foilColor": "gold", "foilSpotName": "FOIL_GOLD", "highlight": 0.7 } }]
+        },
+        {
+          "id": "rule",
+          "type": "shape",
+          "shape": "line",
+          "x": 0.5,
+          "y": 0.58,
+          "width": 0.45,
+          "height": 0.02,
+          "fill": "#000000",
+          "stroke": "#000000",
+          "strokeWidth": 3,
+          "cornerRadius": 0
+        }
+      ]
+    },
+    {
+      "id": "back",
+      "name": "背标",
+      "target": { "nodeName": "Cube.001_Material.001_0" },
+      "surfaceMode": "overlay",
+      "side": "back",
+      "range": { "uStart": 0.35, "uWidth": 0.3, "vStart": 0.2, "vHeight": 0.6 },
+      "paper": { "enabled": false, "color": "#FFFFFF", "opacity": 0 },
+      "print": {
+        "widthMm": 42,
+        "heightMm": 60,
+        "bleedMm": 2,
+        "cornerRadiusMm": 2,
+        "minTextHeightMm": 1.2,
+        "dieCutShape": "rounded-rectangle",
+        "spotColors": []
+      },
+      "layers": [
+        {
+          "id": "description",
+          "type": "text",
+          "text": "EAU DE PARFUM\n50 ml",
+          "fontFamily": "system-sans",
+          "fontSize": 42,
+          "fontWeight": 400,
+          "lineHeight": 1.25,
+          "width": 0.72,
+          "color": "#1B1B1B",
+          "align": "center",
+          "x": 0.5,
+          "y": 0.5
+        }
+      ]
+    }
+  ]
+}

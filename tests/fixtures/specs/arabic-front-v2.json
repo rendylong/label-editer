@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "exports": ["preview-3d", "color"],
+  "areas": [
+    {
+      "id": "arabic-front",
+      "name": "Arabic Front",
+      "target": { "meshIndex": 0 },
+      "surfaceMode": "overlay",
+      "side": "front",
+      "range": { "uStart": 0.3, "uWidth": 0.4, "vStart": 0.2, "vHeight": 0.6 },
+      "layers": [
+        {
+          "id": "arabic-brand",
+          "type": "text",
+          "text": "من قلب الصحراء",
+          "fontFamily": "noto-sans-arabic",
+          "fontSize": 72,
+          "fontWeight": 700,
+          "lineHeight": 1.2,
+          "width": 0.8,
+          "color": "#111111",
+          "align": "right",
+          "writingDirection": "rtl",
+          "language": "ar",
+          "x": 0.5,
+          "y": 0.5
+        }
+      ]
+    }
+  ]
+}
