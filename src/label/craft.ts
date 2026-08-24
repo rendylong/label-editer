@@ -1,0 +1,531 @@
+/**
+ * 工艺效果：烘焙/贴图绘制与 PBR mask 生成。
+ * mask 语义：metalness（白=金属）、roughness（黑=光滑）、bump（0.5=平面）。
+ */
+
+import type { CraftEffect, CraftType, ImageLayer, LabelLayer, ShapeLayer, TextLayer } from './types'
+import { FOIL_COLORS } from './types'
+import { normalizeShapeLayer, traceShape, type ShapeDrawingContext } from './shapeGeometry'
+
+export type CraftScope = 'layer' | 'global'
+export type MaskChannel = 'metalness' | 'roughness' | 'bump'
+export type MaskDrawMode = 'fill' | 'stroke'
+
+const LAYER_CRAFT_TYPES: CraftType[] = ['foil', 'emboss', 'deboss', 'matte', 'uv', 'stroke']
+const GLOBAL_CRAFT_TYPES: CraftType[] = ['matte', 'uv']
+
+/** 全局工艺只允许整面材质属性；字形工艺必须绑定具体图层。 */
+export function craftTypesForScope(scope: CraftScope): CraftType[] {
+  return scope === 'global' ? [...GLOBAL_CRAFT_TYPES] : [...LAYER_CRAFT_TYPES]
+}
+
+export function foilGradientStops(key: string): string[] {
+  return FOIL_COLORS[key]?.stops ?? FOIL_COLORS.gold.stops
+}
+
+export function foilKonvaGradient(craft: CraftEffect | undefined, width: number, height: number): {
+  start: { x: number; y: number }
+  end: { x: number; y: number }
+  colorStops: Array<number | string>
+} | null {
+  if (!craft || craft.type !== 'foil') return null
+  const angle = ((craft.params.gradientAngle ?? 60) * Math.PI) / 180
+  const span = Math.max(width, height, 1)
+  const dx = Math.cos(angle) * span * 0.5
+  const dy = Math.sin(angle) * span * 0.5
+  const colors = foilGradientStops(craft.params.foilColor ?? 'gold')
+  const pairs = colors.map((color, index) => ({ offset: index / Math.max(colors.length - 1, 1), color }))
+  const highlight = clamp01(craft.params.highlight ?? 0.4)
+  if (highlight > 0) pairs.push({ offset: 0.38, color: `rgba(255,255,255,${(0.15 + highlight * 0.55).toFixed(3)})` })
+  pairs.sort((a, b) => a.offset - b.offset)
+  const colorStops: Array<number | string> = []
+  pairs.forEach(({ offset, color }) => colorStops.push(offset, color))
+  return { start: { x: width / 2 - dx, y: height / 2 - dy }, end: { x: width / 2 + dx, y: height / 2 + dy }, colorStops }
+}
+
+export function foilFillProps(craft: CraftEffect | undefined, width: number, height: number): {
+  fillPriority: 'color' | 'linear-gradient'
+  fillLinearGradientStartPoint?: { x: number; y: number }
+  fillLinearGradientEndPoint?: { x: number; y: number }
+  fillLinearGradientColorStops: Array<number | string>
+} {
+  const gradient = foilKonvaGradient(craft, width, height)
+  return gradient
+    ? {
+        fillPriority: 'linear-gradient',
+        fillLinearGradientStartPoint: gradient.start,
+        fillLinearGradientEndPoint: gradient.end,
+        fillLinearGradientColorStops: gradient.colorStops,
+      }
+    : { fillPriority: 'color', fillLinearGradientColorStops: [] }
+}
+
+export function textLineAnchorX(align: TextLayer['align'], width: number): number {
+  return align === 'left' ? -width / 2 : align === 'right' ? width / 2 : 0
+}
+
+/** 矩形以图层中心为锚点，2D 预览、变换和导出共享同一盒模型。 */
+export function rectangleRenderProps(layer: Pick<ShapeLayer, 'width' | 'height' | 'fill' | 'stroke' | 'strokeWidth' | 'cornerRadius'>): {
+  x: number
+  y: number
+  width: number
+  height: number
+  fill: string
+  stroke: string
+  strokeWidth: number
+  cornerRadius: number
+} {
+  return {
+    x: -layer.width / 2,
+    y: -layer.height / 2,
+    width: layer.width,
+    height: layer.height,
+    fill: layer.fill,
+    stroke: layer.stroke,
+    strokeWidth: layer.strokeWidth,
+    cornerRadius: layer.cornerRadius,
+  }
+}
+
+const OPEN_SHAPE_KINDS = new Set<ShapeLayer['shape']>(['line', 'wave', 'bracket'])
+
+export function shapeUsesOpenStroke(layer: Pick<ShapeLayer, 'shape'>): boolean {
+  return OPEN_SHAPE_KINDS.has(layer.shape)
+}
+
+export interface GenericShapePaintProps {
+  fill: string
+  stroke: string
+  fillPriority: 'color' | 'linear-gradient'
+  fillLinearGradientStartPoint?: { x: number; y: number }
+  fillLinearGradientEndPoint?: { x: number; y: number }
+  fillLinearGradientColorStops: Array<number | string>
+  strokeLinearGradientStartPoint?: { x: number; y: number }
+  strokeLinearGradientEndPoint?: { x: number; y: number }
+  strokeLinearGradientColorStops?: Array<number | string>
+}
+
+/** Craft stroke is a presentation override shared by text, image and shape layers. */
+export function craftStrokePaint(layer: {
+  craft: CraftEffect[]
+  stroke?: string
+  strokeWidth?: number
+}): { stroke?: string; strokeWidth: number } {
+  const effect = layer.craft.find((candidate) => candidate.type === 'stroke')
+  return {
+    stroke: effect?.params.strokeColor ?? layer.stroke,
+    strokeWidth: effect?.params.strokeWidth ?? layer.strokeWidth ?? 0,
+  }
+}
+
+/**
+ * Map shared foil colors onto the centered coordinates traced by generic shapes.
+ * Open paths route foil to Konva's stroke gradient; closed paths route it to fill.
+ */
+export function genericShapePaintProps(layer: ShapeLayer, foil: CraftEffect | undefined): GenericShapePaintProps {
+  const normalized = normalizeShapeLayer(layer)
+  const base = {
+    fill: layer.fill,
+    stroke: layer.stroke,
+    fillPriority: 'color' as const,
+    fillLinearGradientColorStops: [],
+  }
+  const gradient = foilKonvaGradient(foil, normalized.width, normalized.height)
+  if (!gradient) return base
+
+  const start = {
+    x: gradient.start.x - normalized.width / 2,
+    y: gradient.start.y - normalized.height / 2,
+  }
+  const end = {
+    x: gradient.end.x - normalized.width / 2,
+    y: gradient.end.y - normalized.height / 2,
+  }
+  if (shapeUsesOpenStroke(normalized)) {
+    return {
+      ...base,
+      strokeLinearGradientStartPoint: start,
+      strokeLinearGradientEndPoint: end,
+      strokeLinearGradientColorStops: gradient.colorStops,
+    }
+  }
+  return {
+    ...base,
+    fillPriority: 'linear-gradient',
+    fillLinearGradientStartPoint: start,
+    fillLinearGradientEndPoint: end,
+    fillLinearGradientColorStops: gradient.colorStops,
+  }
+}
+
+/** Minimal Konva scene-context contract, kept generic so path behavior stays unit-testable. */
+export interface ShapePreviewContext<ShapeNode> extends ShapeDrawingContext {
+  beginPath(): void
+  fillStrokeShape(shape: ShapeNode): void
+  strokeShape(shape: ShapeNode): void
+}
+
+/** Replay the shared path for the visible preview without fill-closing open decorations. */
+export function drawShapePreview<ShapeNode>(context: ShapePreviewContext<ShapeNode>, layer: ShapeLayer, shape: ShapeNode): void {
+  context.beginPath()
+  traceShape(context, layer)
+  if (shapeUsesOpenStroke(layer)) context.strokeShape(shape)
+  else context.fillStrokeShape(shape)
+}
+
+/** Draw the shared path into a PBR craft mask at the layer transform. */
+export function drawShapeMask(
+  ctx: CanvasRenderingContext2D,
+  layer: ShapeLayer,
+  gray: number,
+  mode: MaskDrawMode,
+): void {
+  const normalized = normalizeShapeLayer(layer)
+  ctx.save()
+  ctx.translate(normalized.x, normalized.y)
+  ctx.rotate((normalized.rotation * Math.PI) / 180)
+  ctx.beginPath()
+  traceShape(ctx, normalized)
+  ctx.fillStyle = `rgb(${gray},${gray},${gray})`
+  ctx.strokeStyle = ctx.fillStyle
+  ctx.lineWidth = Math.max(1, normalized.strokeWidth)
+  ctx.setLineDash(normalized.geometry?.dash ?? [])
+  if (mode === 'stroke' || shapeUsesOpenStroke(normalized)) ctx.stroke()
+  else ctx.fill()
+  ctx.restore()
+}
+
+const CJK_CHARACTER = /[\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/u
+
+function splitLongToken(token: string, maximumWidth: number, measureLine: (line: string) => number): string[] {
+  const pieces: string[] = []
+  let current = ''
+  for (const character of Array.from(token)) {
+    const candidate = current + character
+    if (current && measureLine(candidate) > maximumWidth) {
+      pieces.push(current)
+      current = character
+    } else {
+      current = candidate
+    }
+  }
+  if (current || pieces.length === 0) pieces.push(current)
+  return pieces
+}
+
+function wrapTextParagraph(paragraph: string, maximumWidth: number, measureLine: (line: string) => number): string[] {
+  if (paragraph === '') return ['']
+  const tokens: string[] = []
+  let word = ''
+  const flushWord = (): void => {
+    if (!word) return
+    tokens.push(word)
+    word = ''
+  }
+  for (const character of Array.from(paragraph)) {
+    if (/\s/u.test(character) || CJK_CHARACTER.test(character)) {
+      flushWord()
+      tokens.push(character)
+    } else {
+      word += character
+    }
+  }
+  flushWord()
+
+  const lines: string[] = []
+  let current = ''
+  const pushCurrent = (): void => {
+    lines.push(current.trimEnd())
+    current = ''
+  }
+  for (const token of tokens) {
+    if (/^\s+$/u.test(token) && current === '') continue
+    const candidate = current + token
+    if (measureLine(candidate) <= maximumWidth) {
+      current = candidate
+      continue
+    }
+    if (current) pushCurrent()
+    if (/^\s+$/u.test(token)) continue
+    if (measureLine(token) <= maximumWidth) {
+      current = token
+      continue
+    }
+    const pieces = splitLongToken(token, maximumWidth, measureLine)
+    lines.push(...pieces.slice(0, -1))
+    current = pieces.at(-1) ?? ''
+  }
+  if (current || lines.length === 0) pushCurrent()
+  return lines
+}
+
+/** 2D 可见文字、烘焙颜色与 PBR 遮罩共用的确定性盒模型。 */
+export function measureTextLayerLayout(
+  layer: TextLayer,
+  measureLine: (line: string) => number,
+): { width: number; height: number; rotation: number; lines: string[] } {
+  const explicitWidth = typeof layer.width === 'number' && Number.isFinite(layer.width) && layer.width > 0
+    ? layer.width
+    : null
+  const lines = explicitWidth === null
+    ? layer.text.split('\n')
+    : layer.text.split('\n').flatMap((paragraph) => wrapTextParagraph(paragraph, explicitWidth, measureLine))
+  const width = explicitWidth ?? Math.max(1, ...lines.map((line) => measureLine(line)))
+  const height = Math.max(1, layer.fontSize * (layer.lineHeight || 1.2) * lines.length)
+  return {
+    width,
+    height,
+    rotation: layer.rotation + (layer.direction === 'vertical' ? 90 : 0),
+    lines,
+  }
+}
+
+export interface MaskContribution {
+  channel: MaskChannel
+  tone: number
+  mode: MaskDrawMode
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value))
+}
+
+/** 将用户参数转换为 PBR 通道强度，作为预览与导出的单一规则。 */
+export function layerMaskContributions(layer: LabelLayer): MaskContribution[] {
+  const out: MaskContribution[] = []
+  const foil = layer.craft.find((effect) => effect.type === 'foil')
+  if (foil) out.push({ channel: 'metalness', tone: 255, mode: 'fill' })
+  const uv = layer.craft.find((effect) => effect.type === 'uv')
+  const matte = layer.craft.find((effect) => effect.type === 'matte')
+  if (uv) out.push({ channel: 'roughness', tone: Math.round(8 + 96 * (1 - clamp01(uv.params.gloss ?? 0.5))), mode: 'fill' })
+  else if (foil) out.push({ channel: 'roughness', tone: 42, mode: 'fill' })
+  else if (matte) out.push({ channel: 'roughness', tone: Math.round(217 + 38 * clamp01(matte.params.intensity ?? 0.3)), mode: 'fill' })
+  const emboss = layer.craft.find((effect) => effect.type === 'emboss')
+  const deboss = layer.craft.find((effect) => effect.type === 'deboss')
+  if (emboss) out.push({ channel: 'bump', tone: Math.round(128 + 127 * clamp01((emboss.params.depth ?? 0.08) / 0.4)), mode: 'fill' })
+  else if (deboss) out.push({ channel: 'bump', tone: Math.round(128 - 127 * clamp01((deboss.params.depth ?? 0.08) / 0.4)), mode: 'fill' })
+  return out
+}
+
+/** Deterministic micro-surface tones used by matte masks; no frame-to-frame shimmer. */
+export function matteSurfaceTones(pixel: number, intensity: number, density: number): { roughness: number; bump: number } {
+  const strength = clamp01(intensity)
+  const gate = (((pixel * 1664525 + 1013904223) >>> 0) & 0xffff) / 0xffff
+  const roughBase = 217 + 38 * strength
+  if (gate > clamp01(density)) return { roughness: Math.round(roughBase), bump: 128 }
+  const roughSample = (((pixel * 1103515245 + 12345) >>> 0) & 0xffff) / 0xffff
+  const bumpSample = (((pixel * 214013 + 2531011) >>> 0) & 0xffff) / 0xffff
+  return {
+    roughness: Math.max(210, Math.min(255, Math.round(roughBase + (roughSample - 0.5) * 18 * strength))),
+    bump: Math.max(116, Math.min(140, Math.round(128 + (bumpSample - 0.5) * 24 * strength))),
+  }
+}
+
+function applyLayerMatteSurface(
+  width: number,
+  height: number,
+  drawLayer: (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode) => void,
+  layer: LabelLayer,
+  effect: CraftEffect,
+  roughness: CanvasRenderingContext2D,
+  bump: CanvasRenderingContext2D,
+): void {
+  const mask = document.createElement('canvas')
+  mask.width = width
+  mask.height = height
+  const maskContext = mask.getContext('2d')!
+  maskContext.clearRect(0, 0, width, height)
+  drawLayer(maskContext, layer, 255, 'fill')
+  const coverage = maskContext.getImageData(0, 0, width, height).data
+  const roughImage = roughness.getImageData(0, 0, width, height)
+  const bumpImage = bump.getImageData(0, 0, width, height)
+  const intensity = effect.params.intensity ?? 0.3
+  const density = effect.params.noise ?? 0.5
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const offset = pixel * 4
+    if (coverage[offset + 3] === 0 && coverage[offset] === 0) continue
+    const tones = matteSurfaceTones(pixel, intensity, density)
+    roughImage.data[offset] = tones.roughness
+    roughImage.data[offset + 1] = tones.roughness
+    roughImage.data[offset + 2] = tones.roughness
+    const heightTone = Math.max(0, Math.min(255, bumpImage.data[offset] + tones.bump - 128))
+    bumpImage.data[offset] = heightTone
+    bumpImage.data[offset + 1] = heightTone
+    bumpImage.data[offset + 2] = heightTone
+  }
+  roughness.putImageData(roughImage, 0, 0)
+  bump.putImageData(bumpImage, 0, 0)
+}
+
+/** 图层是否携带某工艺。 */
+export function hasCraft(layer: LabelLayer, type: CraftType): boolean {
+  return layer.craft.some((c) => c.type === type)
+}
+
+/** 磨砂噪点：在整幅画布上叠加细噪点。 */
+export function applyMatteNoise(ctx: CanvasRenderingContext2D, w: number, h: number, intensity: number, density = 0.5): void {
+  const img = ctx.getImageData(0, 0, w, h)
+  const d = img.data
+  const n = d.length
+  const amt = Math.round(intensity * 18)
+  for (let i = 0; i < n; i += 4) {
+    if (d[i + 3] === 0) continue
+    const pixel = i / 4
+    const gate = (((pixel * 1664525 + 1013904223) >>> 0) & 0xffff) / 0xffff
+    if (gate > clamp01(density)) continue
+    const sample = (((pixel * 1103515245 + 12345) >>> 0) & 0xffff) / 0xffff
+    const v = (sample - 0.5) * amt
+    d[i] += v
+    d[i + 1] += v
+    d[i + 2] += v
+  }
+  ctx.putImageData(img, 0, 0)
+}
+
+/** UV 亮油全局效果：轻微提亮 + 顶部柔和光泽。 */
+export function applyUvGloss(ctx: CanvasRenderingContext2D, w: number, h: number, gloss: number): void {
+  ctx.save()
+  ctx.globalCompositeOperation = 'source-atop'
+  const g = ctx.createLinearGradient(0, 0, w * 0.35, h)
+  g.addColorStop(0, `rgba(255,255,255,${0.05 * gloss})`)
+  g.addColorStop(0.45, 'rgba(255,255,255,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, w, h)
+  ctx.restore()
+}
+
+/**
+ * Physical surface crafts belong to roughness/metalness/height channels.
+ * Keeping this boundary explicit prevents fixed highlights or grain from staining brand colors.
+ */
+export function applyPhysicalColorSurface(
+  _ctx: CanvasRenderingContext2D,
+  _width: number,
+  _height: number,
+  _effects: CraftEffect[],
+): void {}
+
+/** 图片透明轮廓先在独立画布着色，再同步合成到目标 mask，避免污染目标底色。 */
+export function drawImageMaskShape(
+  ctx: CanvasRenderingContext2D,
+  layer: ImageLayer,
+  image: CanvasImageSource,
+  gray: number,
+): void {
+  const width = Math.max(1, Math.round(layer.width))
+  const height = Math.max(1, Math.round(layer.height))
+  const temp = document.createElement('canvas')
+  temp.width = width
+  temp.height = height
+  const tctx = temp.getContext('2d')!
+  tctx.clearRect(0, 0, width, height)
+  tctx.drawImage(image, 0, 0, width, height)
+  tctx.globalCompositeOperation = 'source-in'
+  tctx.fillStyle = `rgb(${gray},${gray},${gray})`
+  tctx.fillRect(0, 0, width, height)
+  ctx.save()
+  ctx.translate(layer.x, layer.y)
+  ctx.rotate((layer.rotation * Math.PI) / 180)
+  ctx.drawImage(temp, -layer.width / 2, -layer.height / 2, layer.width, layer.height)
+  ctx.restore()
+}
+
+/** 为图片预览生成烫金、描边、磨砂与 UV 的颜色结果；透明区域始终保持透明。 */
+export function renderCraftedImage(image: CanvasImageSource, layer: ImageLayer): HTMLCanvasElement {
+  const width = Math.max(1, Math.round(layer.width))
+  const height = Math.max(1, Math.round(layer.height))
+  const base = document.createElement('canvas')
+  base.width = width
+  base.height = height
+  const bctx = base.getContext('2d')!
+  bctx.drawImage(image, 0, 0, width, height)
+  const foil = layer.craft.find((effect) => effect.type === 'foil')
+  if (foil) {
+    const geometry = foilKonvaGradient(foil, width, height)!
+    const gradient = bctx.createLinearGradient(geometry.start.x, geometry.start.y, geometry.end.x, geometry.end.y)
+    for (let index = 0; index < geometry.colorStops.length; index += 2) {
+      gradient.addColorStop(geometry.colorStops[index] as number, geometry.colorStops[index + 1] as string)
+    }
+    bctx.globalCompositeOperation = 'source-in'
+    bctx.fillStyle = gradient
+    bctx.fillRect(0, 0, width, height)
+    bctx.globalCompositeOperation = 'source-over'
+  }
+  applyPhysicalColorSurface(bctx, width, height, layer.craft)
+
+  const output = document.createElement('canvas')
+  output.width = width
+  output.height = height
+  const octx = output.getContext('2d')!
+  const stroke = layer.craft.find((effect) => effect.type === 'stroke')
+  if (stroke && (stroke.params.strokeWidth ?? 0) > 0) {
+    const radius = Math.max(1, Math.round(stroke.params.strokeWidth ?? 1))
+    for (let angle = 0; angle < 360; angle += 30) {
+      const radians = (angle * Math.PI) / 180
+      octx.drawImage(base, Math.cos(radians) * radius, Math.sin(radians) * radius)
+    }
+    octx.globalCompositeOperation = 'source-in'
+    octx.fillStyle = stroke.params.strokeColor ?? '#000000'
+    octx.fillRect(0, 0, width, height)
+    octx.globalCompositeOperation = 'source-over'
+  }
+  octx.drawImage(base, 0, 0)
+  return output
+}
+
+/**
+ * 生成 PBR mask 画布。
+ * @param drawLayer 绘制某图层"灰度剪影"的回调（text 用 fillText、image 用 drawImage，样式已设置）
+ */
+export function renderMasks(
+  width: number,
+  height: number,
+  drawLayer: (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode) => void,
+  layers: LabelLayer[],
+  globalCraft: CraftEffect[],
+): { metalness: HTMLCanvasElement; roughness: HTMLCanvasElement; bump: HTMLCanvasElement } {
+  const mk = (fill: string): [HTMLCanvasElement, CanvasRenderingContext2D] => {
+    const c = document.createElement('canvas')
+    c.width = width
+    c.height = height
+    const ctx = c.getContext('2d')!
+    ctx.fillStyle = fill
+    ctx.fillRect(0, 0, width, height)
+    return [c, ctx]
+  }
+  // 标签底纸是电介质：默认金属度为黑；仅烫金区域写白。
+  const [metal, mctx] = mk('#000000')
+  const [rough, rctx] = mk('#ffffff')
+  const [bump, bctx] = mk('#ffffff')
+  // 底值：粗糙纸面
+  rctx.fillStyle = '#d9d9d9'
+  rctx.fillRect(0, 0, width, height)
+  // bump 底值 = 中灰（平面）
+  bctx.fillStyle = '#808080'
+  bctx.fillRect(0, 0, width, height)
+
+  for (const layer of layers) {
+    if (!layer.visible) continue
+    for (const contribution of layerMaskContributions(layer)) {
+      const ctx = contribution.channel === 'metalness' ? mctx : contribution.channel === 'roughness' ? rctx : bctx
+      drawLayer(ctx, layer, contribution.tone, contribution.mode)
+    }
+    const matte = layer.craft.find((effect) => effect.type === 'matte')
+    const uv = layer.craft.find((effect) => effect.type === 'uv')
+    if (matte && !uv) applyLayerMatteSurface(width, height, drawLayer, layer, matte, rctx, bctx)
+  }
+  // 全局工艺
+  for (const c of globalCraft) {
+    if (c.type === 'matte') {
+      const tone = Math.round(217 + 38 * clamp01(c.params.intensity ?? 0.3))
+      rctx.fillStyle = `rgb(${tone},${tone},${tone})`
+      rctx.fillRect(0, 0, width, height)
+    }
+    if (c.type === 'uv') {
+      const tone = Math.round(8 + 96 * (1 - clamp01(c.params.gloss ?? 0.5)))
+      rctx.fillStyle = `rgb(${tone},${tone},${tone})`
+      rctx.fillRect(0, 0, width, height)
+    }
+  }
+  return { metalness: metal, roughness: rough, bump }
+}

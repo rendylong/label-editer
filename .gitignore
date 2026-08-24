@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build and test output
+dist/
+output/
+coverage/
+*.tsbuildinfo
+
+# Local automation artifacts
+.gstack/
+.playwright-cli/
+.superpowers/
+
+# Environment and credentials
+.env
+.env.*
+!.env.example
+
+# Logs and editor metadata
+*.log
+.DS_Store
+.idea/
+.vscode/
