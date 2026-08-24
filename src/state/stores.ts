@@ -100,6 +100,12 @@ interface LabelState {
   /** 调整区域范围（尺寸/位置）。light=true 只更新 range（拖拽中，不重算几何/画布）；默认全量重算 remap 输出与画布 */
   updateAreaRange: (areaId: string, range: Partial<LabelAreaRange>, opts?: { light?: boolean }) => void
   renameArea: (id: string, name: string) => void
+  /** Replace the complete editable area set and active runtime in one Zustand commit. */
+  replaceAreasAtomically: (
+    areas: LabelAreaConfig[],
+    activeAreaId: string,
+    runtime: { remapOutput: RemapOutput; meshAccessors: MeshAccessors },
+  ) => void
   clearAll: () => void
 }
 
@@ -287,6 +293,24 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     set({ areas, activeArea: s.activeAreaId === id ? updated : s.activeArea })
   },
 
+  replaceAreasAtomically: (areas, activeAreaId, runtime) => {
+    const activeArea = areas.find((area) => area.id === activeAreaId)
+    if (!activeArea) throw new Error(`无法激活不存在的贴标区域：${activeAreaId}`)
+    set((state) => ({
+      areas,
+      activeAreaId,
+      activeArea,
+      meshIndex: activeArea.meshIndex,
+      nodeName: activeArea.nodeName,
+      remapOutput: runtime.remapOutput,
+      meshAccessors: runtime.meshAccessors,
+      selectedLayerIds: [],
+      bakeMap: {},
+      activations: state.activations + 1,
+    }))
+    useUiStore.getState().setWorkspaceTab('labels')
+  },
+
   clearAll: () =>
     set({ areas: [], activeAreaId: null, activeArea: null, meshIndex: null, nodeName: '', remapOutput: null, meshAccessors: null, selectedLayerIds: [], bakeMap: {} }),
 }))
@@ -335,6 +359,8 @@ interface UiState {
   canvasZoom: number
   showSeam: boolean
   channelView: 'color' | 'metalness' | 'roughness' | 'bump' | null
+  areaSetupEditAreaId: string | null
+  areaSetupSide: 'front' | 'back'
   toast: { msg: string; kind: 'info' | 'success' | 'error' } | null
   /** Inspector-only preferences. These never participate in label snapshots. */
   favoriteFontIds: string[]
@@ -347,6 +373,7 @@ interface UiState {
   setCanvasZoom: (z: number) => void
   toggleSeam: () => void
   setChannelView: (c: UiState['channelView']) => void
+  startAreaSetup: (editAreaId?: string | null, side?: 'front' | 'back') => void
   toastMsg: (msg: string, kind?: 'info' | 'success' | 'error') => void
   clearToast: () => void
   toggleFavoriteFont: (id: string) => void
@@ -362,6 +389,8 @@ export const useUiStore = create<UiState>((set) => ({
   canvasZoom: 1,
   showSeam: true,
   channelView: null,
+  areaSetupEditAreaId: null,
+  areaSetupSide: 'front',
   toast: null,
   favoriteFontIds: [],
   recentFontIds: [],
@@ -373,6 +402,9 @@ export const useUiStore = create<UiState>((set) => ({
   setCanvasZoom: (canvasZoom) => set({ canvasZoom }),
   toggleSeam: () => set((s) => ({ showSeam: !s.showSeam })),
   setChannelView: (channelView) => set({ channelView }),
+  startAreaSetup: (areaSetupEditAreaId = null, areaSetupSide = 'front') => set({
+    areaSetupEditAreaId, areaSetupSide, workspaceTab: 'model', view: 'areaSetup', mode: 'browse',
+  }),
   toastMsg: (msg, kind = 'info') => set({ toast: { msg, kind } }),
   clearToast: () => set({ toast: null }),
   toggleFavoriteFont: (id) => set((state) => ({

@@ -10,8 +10,24 @@ import { parseLabelProject, serializeLabelProject } from './projectSchema'
 import { nudgeLayers } from '../label/selection'
 import { deriveDesignFontRequests, waitForDesignFonts } from '../label/fontRuntime'
 import { designFontReadinessKey } from '../label/exportReadiness'
+import { applyStructuredLabelSpec, targetAreaIdsForSpecReplacement } from './labelSpec'
+import { buildPrintManifest } from '../label/printReadiness'
+import { applyPreparedAreaTransaction } from '../agent/transactionalApply'
 import type { LabelAreaConfig, LabelLayer } from '../label/types'
 import type { BakeResult } from '../state/stores'
+
+export type ExportPngChannel = 'color' | 'metalness' | 'roughness' | 'bump'
+
+/** Select the exact baked canvas represented by the active channel view. */
+export function selectBakeChannel(
+  bake: Pick<BakeResult, ExportPngChannel>,
+  channel: Exclude<ReturnType<typeof useUiStore.getState>['channelView'], undefined>,
+): HTMLCanvasElement {
+  return channel === 'metalness' ? bake.metalness
+    : channel === 'roughness' ? bake.roughness
+      : channel === 'bump' ? bake.bump
+        : bake.color
+}
 
 type ExportBakeRequest = () => boolean
 
@@ -183,10 +199,11 @@ async function prepareActiveExportSnapshot(): Promise<{ snapshot: ExportAreaSnap
 export async function exportPng(): Promise<void> {
   try {
     const { snapshot, bake } = await prepareActiveExportSnapshot()
-    const bytes = await canvasToPngBytes(bake.color)
+    const channel: ExportPngChannel = useUiStore.getState().channelView ?? 'color'
+    const bytes = await canvasToPngBytes(selectBakeChannel(bake, channel))
     assertExportAreaOwnership([snapshot], snapshot.owner.id)
-    downloadBytes(bytes, `label-${bake.spec.width}x${bake.spec.height}.png`, 'image/png')
-    flashToast(`已导出标签纹理 ${bake.spec.width}×${bake.spec.height}px`, 'success')
+    downloadBytes(bytes, `label-${channel}-${bake.spec.width}x${bake.spec.height}.png`, 'image/png')
+    flashToast(`已导出 ${channel} 通道 ${bake.spec.width}×${bake.spec.height}px`, 'success')
   } catch (err) {
     flashToast(err instanceof Error ? err.message : '导出失败', 'error')
   }
@@ -233,6 +250,7 @@ export async function exportGlbFile(): Promise<void> {
     const result = await exportGlb({
       glb: modelSnapshot.glbBytes,
       areas: prepared,
+      editableProject: serializeLabelProject(modelSnapshot.modelName, snapshots.map(({ area }) => area)),
     })
     assertExportAreaOwnership(snapshots, activeAreaId, true)
     assertModelOwnership(modelSnapshot)
@@ -273,6 +291,19 @@ export function exportProject(): void {
   const bytes = new TextEncoder().encode(JSON.stringify(project, null, 2))
   downloadBytes(bytes, `label-project-${Date.now()}.lbl.json`, 'application/json')
   flashToast(`项目已导出（${ls.areas.length} 个贴标区域）`, 'success')
+}
+
+export function exportPrintManifest(): void {
+  const area = useLabelStore.getState().activeArea
+  if (!area) { flashToast('尚无可导出的贴标区域', 'error'); return }
+  try {
+    const manifest = buildPrintManifest(area)
+    const bytes = new TextEncoder().encode(JSON.stringify(manifest, null, 2))
+    downloadBytes(bytes, `${area.name.replace(/[^\p{L}\p{N}._-]+/gu, '-')}-print-manifest.json`, 'application/json')
+    flashToast(`已导出印刷清单（${manifest.separations.length} 个通道/专色版）`, manifest.issues.length ? 'info' : 'success')
+  } catch (error) {
+    flashToast(error instanceof Error ? error.message : '印刷清单导出失败', 'error')
+  }
 }
 
 /** 导入项目 .lbl（JSON schema 校验，防 prototype pollution）。 */
@@ -323,6 +354,23 @@ export function importProject(file: File): Promise<void> {
     reader.onerror = () => rej(new Error('读取文件失败'))
     reader.readAsText(file)
   })
+}
+
+/** Import a structured JSON Label Spec onto the currently selected target mesh. */
+export async function importStructuredLabelSpec(file: File): Promise<void> {
+  const base = useLabelStore.getState().activeArea
+  const glbBytes = useModelStore.getState().glbBytes
+  if (!base || !glbBytes) throw new Error('请先创建或选择一个贴标区域，再导入 Label Spec')
+  const raw = JSON.parse(await file.text())
+  const result = applyStructuredLabelSpec(base, raw, String(Date.now()))
+  const store = useLabelStore.getState()
+  const replacementIds = new Set(targetAreaIdsForSpecReplacement(store.areas, base))
+  const areas = [...store.areas.filter((area) => !replacementIds.has(area.id)), ...result.areas]
+  await applyPreparedAreaTransaction({ glbBytes, areas })
+  useUiStore.getState().setView('editor')
+  useUiStore.getState().setWorkspaceTab('labels')
+  useUiStore.getState().setMode('design')
+  flashToast(`已导入 Label Spec（${result.areas.length} 个区域）${result.warnings.length ? `；${result.warnings.join('；')}` : ''}`, result.warnings.length ? 'info' : 'success')
 }
 
 /** 全局快捷键。 */
