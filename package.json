@@ -4,18 +4,26 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Standalone web app: design labels on beauty-product bottle GLB models (part list, WYSIWYG label canvas, craft effects, real-time 3D preview, GLB/PNG export)",
+  "bin": {
+    "label-cli": "./scripts/label-cli.mjs"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:plugin-e2e": "vitest run tests/pluginE2E.test.ts --testTimeout=120000",
+    "plugin:verify": "pnpm test && pnpm build && pnpm test:plugin-e2e"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.4.2",
     "@gltf-transform/extensions": "^4.4.2",
     "@gltf-transform/functions": "^4.4.2",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ajv": "8.20.0",
     "konva": "^10.3.1",
+    "playwright": "1.62.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-konva": "^19.2.5",
