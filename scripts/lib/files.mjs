@@ -73,8 +73,11 @@ export async function publishAtomically(outputDir, artifacts, { force = false, s
   let movedExisting = false
   try {
     for (const artifact of artifacts) {
-      const fileName = sanitizeArtifactName(artifact.fileName)
-      await writeExclusive(path.join(temporary, fileName), artifact.bytes)
+      const relativePath = artifact.relativePath
+        ? String(artifact.relativePath).split('/').filter(Boolean).map(sanitizeArtifactName).join(path.sep)
+        : sanitizeArtifactName(artifact.fileName)
+      if (!relativePath) throw new PathPolicyError('Artifact path is empty')
+      await writeExclusive(path.join(temporary, relativePath), artifact.bytes)
     }
     const exists = await stat(outputDir).then(() => true, () => false)
     if (exists && !force) {

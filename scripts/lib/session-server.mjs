@@ -103,6 +103,12 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
             sha256: sha256Bytes(bytes),
             width: Number(request.headers['x-artifact-width']) || undefined,
             height: Number(request.headers['x-artifact-height']) || undefined,
+            areaId: typeof request.headers['x-artifact-area-id'] === 'string'
+              ? decodeURIComponent(request.headers['x-artifact-area-id'])
+              : undefined,
+            channel: typeof request.headers['x-artifact-channel'] === 'string'
+              ? request.headers['x-artifact-channel']
+              : undefined,
             url: `${origin}/session/${session.id}/artifact/${encodeURIComponent(id)}?token=${session.token}`,
           }
           session.artifacts.set(id, artifact)

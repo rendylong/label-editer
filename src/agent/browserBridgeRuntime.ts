@@ -140,6 +140,8 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
       'x-artifact-file-name': encodeURIComponent(artifact.fileName),
       ...(artifact.width ? { 'x-artifact-width': String(artifact.width) } : {}),
       ...(artifact.height ? { 'x-artifact-height': String(artifact.height) } : {}),
+      ...(artifact.areaId ? { 'x-artifact-area-id': encodeURIComponent(artifact.areaId) } : {}),
+      ...(artifact.channel ? { 'x-artifact-channel': artifact.channel } : {}),
     },
     body: artifact.bytes as BodyInit,
   })
