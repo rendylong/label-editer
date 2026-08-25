@@ -133,6 +133,7 @@ function drawTextShape(ctx: CanvasRenderingContext2D, layer: TextLayer, gray: nu
   ctx.lineWidth = Math.max(1, layer.craft.find((effect) => effect.type === 'stroke')?.params.strokeWidth ?? 1)
   ctx.lineJoin = 'round'
   ctx.textAlign = layer.align
+  ctx.direction = resolvedTextDirection(layer)
   ctx.textBaseline = 'middle'
   if ('letterSpacing' in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${layer.letterSpacing}px`
   const lineH = layer.fontSize * (layer.lineHeight || 1.2)
@@ -143,6 +144,12 @@ function drawTextShape(ctx: CanvasRenderingContext2D, layer: TextLayer, gray: nu
     else ctx.fillText(layout.lines[i], x, startY + i * lineH)
   }
   ctx.restore()
+}
+
+function resolvedTextDirection(layer: TextLayer): CanvasDirection {
+  if (layer.writingDirection === 'rtl') return 'rtl'
+  if (layer.writingDirection === 'ltr') return 'ltr'
+  return /[\u0590-\u08ff]/u.test(layer.text) ? 'rtl' : 'ltr'
 }
 
 interface ImageBits {
@@ -420,6 +427,7 @@ export function LabelCanvas({ displayWidth }: Props): React.JSX.Element {
                       height={textLayout?.height}
                       wrap="none"
                       align={layer.align}
+                      direction={resolvedTextDirection(layer)}
                       fill={layer.color}
                       fillPriority={foilProps.fillPriority}
                       fillLinearGradientStartPoint={foilProps.fillLinearGradientStartPoint}

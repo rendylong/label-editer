@@ -22,6 +22,14 @@ const MIN_AREA_SIZE = 0.05
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value))
 const clean = (value: number): number => Number(value.toFixed(12))
 
+/** Geometry-aware first suggestion: centered portrait/near-square label with useful bottle-height coverage. */
+export function suggestDefaultAreaRange(surfaceAspect: number): LabelAreaRange {
+  const vHeight = 0.55
+  const targetAspect = 1.2
+  const uWidth = clamp(targetAspect * vHeight / Math.max(surfaceAspect, 0.1), 0.12, 0.4)
+  return normalizeAreaRange({ uStart: (1 - uWidth) / 2, uWidth, vStart: 0.2, vHeight })
+}
+
 /** 将区域约束在完整的 0..1 展开面内。 */
 export function normalizeAreaRange(range: LabelAreaRange): LabelAreaRange {
   const uWidth = clamp(range.uWidth, MIN_AREA_SIZE, 1)

@@ -48,4 +48,36 @@ describe('原生标签面语义识别', () => {
     expect(analysis.parts[0].kind).toBe('label')
     expect(candidate).toBe(analysis.parts[0].id)
   })
+
+  it('does not auto-promote a radial neck ring merely because it is named label', () => {
+    const doc = new Document()
+    const buffer = doc.createBuffer()
+    const positions: number[] = []
+    const normals: number[] = []
+    const indices: number[] = []
+    const segments = 12
+    for (let segment = 0; segment < segments; segment++) {
+      const a0 = segment / segments * Math.PI * 2
+      const a1 = (segment + 1) / segments * Math.PI * 2
+      const start = positions.length / 3
+      // Matches the real perfume neck decoration proportions: a shallow,
+      // elliptical full ring rather than an ideal circular sliver.
+      for (const [angle, z] of [[a0, 0], [a1, 0], [a1, 0.25], [a0, 0.25]]) {
+        positions.push(0.7 * Math.cos(angle), 0.45 * Math.sin(angle), z)
+        normals.push(Math.cos(angle), Math.sin(angle), 0)
+      }
+      indices.push(start, start + 1, start + 2, start, start + 2, start + 3)
+    }
+    const primitive = doc.createPrimitive()
+      .setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(new Float32Array(positions)).setBuffer(buffer))
+      .setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(new Float32Array(normals)).setBuffer(buffer))
+      .setIndices(doc.createAccessor().setType('SCALAR').setArray(new Uint16Array(indices)).setBuffer(buffer))
+    const node = doc.createNode('label').setMesh(doc.createMesh('neck-ring').addPrimitive(primitive))
+    doc.createScene('Scene').addChild(node)
+
+    const analysis = buildPartTree(doc)
+
+    expect(analysis.parts[0].kind).toBe('mesh')
+    expect(analysis.labelCandidates).toEqual([])
+  })
 })

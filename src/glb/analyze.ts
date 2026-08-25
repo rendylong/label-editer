@@ -63,10 +63,11 @@ export function buildPartTree(doc: Document): GlbAnalysis {
       const name = (gtNode.getName() || '').toLowerCase()
       const matName = (materialName || '').toLowerCase()
       const semantic = `${name} ${matName}`
-      if (/label|贴标|标签|sticker|decal|wall[_\s-]?paper/.test(semantic)) {
+      const radialNeckRing = isRadialNeckRing(prim)
+      if (/label|贴标|标签|sticker|decal|wall[_\s-]?paper/.test(semantic) && !radialNeckRing) {
         kind = 'label'
         labelCandidates.push(id)
-      } else if (hasTexture && mesh.listParents().length > 0) {
+      } else if (hasTexture && mesh.listParents().length > 0 && !radialNeckRing) {
         // 含纹理的叶子网格也可作候选（后置）
         labelCandidates.push(id)
       }
@@ -90,6 +91,30 @@ export function buildPartTree(doc: Document): GlbAnalysis {
   const candidates = prioritized.map((p) => p.id)
   const modelName = parts[0]?.name || 'model'
   return { parts, meshToNode, labelCandidates: candidates, modelName }
+}
+
+/** Reject thin annular parts whose normals fan around an axis (a common cap/neck-ring false positive). */
+function isRadialNeckRing(primitive: Primitive | undefined): boolean {
+  const position = primitive?.getAttribute('POSITION')?.getArray()
+  const normal = primitive?.getAttribute('NORMAL')?.getArray()
+  if (!position || !normal || position.length < 9 || normal.length !== position.length) return false
+  const min = [Infinity, Infinity, Infinity]
+  const max = [-Infinity, -Infinity, -Infinity]
+  let nx = 0, ny = 0, nz = 0
+  for (let index = 0; index < position.length; index += 3) {
+    for (let axis = 0; axis < 3; axis++) {
+      min[axis] = Math.min(min[axis], Number(position[index + axis]))
+      max[axis] = Math.max(max[axis], Number(position[index + axis]))
+    }
+    nx += Number(normal[index])
+    ny += Number(normal[index + 1])
+    nz += Number(normal[index + 2])
+  }
+  const count = position.length / 3
+  const coherence = Math.hypot(nx, ny, nz) / Math.max(count, 1)
+  const spans = min.map((value, axis) => max[axis] - value).sort((a, b) => a - b)
+  const isThinBand = spans[0] / Math.max(spans[1], 1e-9) < 0.35 && spans[1] / Math.max(spans[2], 1e-9) > 0.55
+  return coherence < 0.35 && isThinBand
 }
 
 function meshIndexOf(root: ReturnType<Document['getRoot']>, mesh: Mesh): number {

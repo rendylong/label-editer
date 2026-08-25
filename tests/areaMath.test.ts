@@ -8,6 +8,16 @@ import * as areaMath from '../src/glb/areaMath'
 import { surfaceToUV, uvToSurface, areaBoxPoints, areaControlPoints, applyDragToRange } from '../src/glb/areaMath'
 import type { MeshAccessors } from '../src/glb/uvRemap'
 
+it('suggests a practical portrait label instead of a fixed 40% square on wide bottle unwraps', () => {
+  const suggest = (areaMath as typeof areaMath & { suggestDefaultAreaRange?: (aspect: number) => { uStart: number; uWidth: number; vStart: number; vHeight: number } }).suggestDefaultAreaRange
+  expect(suggest).toBeTypeOf('function')
+  const range = suggest!(3.92)
+  expect(range.uStart + range.uWidth / 2).toBeCloseTo(0.5, 8)
+  expect(range.vHeight).toBeCloseTo(0.55, 8)
+  expect(3.92 * range.uWidth / range.vHeight).toBeGreaterThan(1)
+  expect(3.92 * range.uWidth / range.vHeight).toBeLessThan(1.35)
+})
+
 // 合成圆柱（半径 10、高 20、沿 Y）
 function synthCylinder(seg = 32, heightSeg = 8): MeshAccessors {
   const positions: number[] = []

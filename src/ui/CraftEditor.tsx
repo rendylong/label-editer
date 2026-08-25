@@ -56,8 +56,13 @@ export function CraftEditor({ craft, onChange, scope }: {
               <label>色系
                 <select value={effect.params.foilColor ?? 'gold'} onChange={(event) => update(index, { params: { foilColor: event.target.value as CraftEffect['params']['foilColor'] } })}>
                   {Object.entries(FOIL_COLORS).map(([id, color]) => <option value={id} key={id}>{color.name}</option>)}
+                  <option value="custom">自定义专色箔</option>
                 </select>
               </label>
+              {effect.params.foilColor === 'custom' && <div className="row2">
+                <label>金属箔颜色<input type="color" value={effect.params.foilCustomColor ?? '#b56f52'} onChange={(event) => update(index, { params: { foilCustomColor: event.target.value } })} /></label>
+                <label>专色版名<input type="text" value={effect.params.foilSpotName ?? 'FOIL_CUSTOM'} onChange={(event) => update(index, { params: { foilSpotName: event.target.value } })} /></label>
+              </div>}
               <label>渐变角 {effect.params.gradientAngle ?? 60}°
                 <input type="range" min={0} max={360} value={effect.params.gradientAngle ?? 60} onChange={(event) => update(index, { params: { gradientAngle: +event.target.value } })} />
               </label>

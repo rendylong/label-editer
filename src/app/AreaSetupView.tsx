@@ -11,6 +11,7 @@ import { AreaPicker } from './AreaPicker'
 import type { PartNode, LabelAreaRange } from '../label/types'
 import { Icon } from '../ui/icons'
 import { displayPartName } from '../glb/analyze'
+import { suggestDefaultAreaRange } from '../glb/areaMath'
 
 interface Preview {
   aspect: number
@@ -19,7 +20,7 @@ interface Preview {
   meshIndex: number
 }
 
-const DEFAULT_RANGE: LabelAreaRange = { uStart: 0.3, uWidth: 0.4, vStart: 0.3, vHeight: 0.4 }
+const DEFAULT_RANGE: LabelAreaRange = { uStart: 0.375, uWidth: 0.25, vStart: 0.2, vHeight: 0.55 }
 
 export function AreaSetupView(): React.JSX.Element {
   const parts = useModelStore((s) => s.parts)
@@ -28,10 +29,13 @@ export function AreaSetupView(): React.JSX.Element {
   const areas = useLabelStore((s) => s.areas)
   const setView = useUiStore((s) => s.setView)
   const setMode = useUiStore((s) => s.setMode)
+  const editAreaId = useUiStore((s) => s.areaSetupEditAreaId)
+  const initialSide = useUiStore((s) => s.areaSetupSide)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [loading, setLoading] = useState(false)
   const [range, setRange] = useState<LabelAreaRange>({ ...DEFAULT_RANGE })
   const [creating, setCreating] = useState(false)
+  const [side, setSide] = useState<'front' | 'back'>(initialSide)
   const initialAreaIds = useRef<Set<string> | null>(null)
   const autoPicked = useRef(false)
 
@@ -61,8 +65,8 @@ export function AreaSetupView(): React.JSX.Element {
       return
     }
     setPreview({ aspect: r.aspect, nodeName: node.name, nodeId: node.id, meshIndex: node.meshIndex! })
-    const existing = useLabelStore.getState().areas.find((a) => a.meshIndex === node.meshIndex)
-    setRange(existing ? { ...existing.range } : { ...DEFAULT_RANGE })
+    const existing = editAreaId ? useLabelStore.getState().areas.find((area) => area.id === editAreaId && area.meshIndex === node.meshIndex) : undefined
+    setRange(existing ? { ...existing.range } : suggestDefaultAreaRange(r.aspect))
   }
 
   useEffect(() => {
@@ -90,7 +94,7 @@ export function AreaSetupView(): React.JSX.Element {
       return
     }
     setCreating(true)
-    const r = await addAreaForNode(preview.nodeId, range)
+    const r = await addAreaForNode(preview.nodeId, range, { replaceAreaId: editingExisting ? editAreaId ?? undefined : undefined, side })
     setCreating(false)
     if (!r.ok) {
       flashToast(r.error ?? '创建失败', 'error')
@@ -98,11 +102,11 @@ export function AreaSetupView(): React.JSX.Element {
     }
     setView('editor')
     setMode('design')
-    const updatedExisting = areas.some((a) => a.meshIndex === preview.meshIndex)
+    const updatedExisting = editingExisting
     flashToast(`${updatedExisting ? '已更新' : '已创建'}贴标区域「${preview.nodeName}」（环绕 ${Math.round(range.uWidth * 100)}% · 高 ${Math.round(range.vHeight * 100)}%）`, 'success')
   }
 
-  const editingExisting = preview ? areas.some((a) => a.meshIndex === preview.meshIndex) : false
+  const editingExisting = preview ? areas.some((area) => area.id === editAreaId && area.meshIndex === preview.meshIndex) : false
 
   return (
     <div className="setup-root">
@@ -127,7 +131,8 @@ export function AreaSetupView(): React.JSX.Element {
           <div className="tree">
             {meshes.length === 0 && <div className="empty-hint">没有可用的网格部件</div>}
             {meshes.map((m) => {
-              const hasArea = areas.some((a) => a.meshIndex === m.meshIndex)
+              const areaCount = areas.filter((area) => area.meshIndex === m.meshIndex).length
+              const hasArea = areaCount > 0
               const isPicked = preview?.nodeId === m.id
               return (
                 <div key={m.id} className={`tree-row ${isPicked ? 'selected' : ''}`} onClick={() => void onPickMesh(m)}>
@@ -135,7 +140,7 @@ export function AreaSetupView(): React.JSX.Element {
                     {hasArea ? Icon.label(13) : Icon.cube(13)}
                   </span>
                   <span className="tree-name">{displayPartName(m.name)}</span>
-                  {hasArea && <span className="tree-badge">可编辑</span>}
+                  {hasArea && <span className="tree-badge">{areaCount} 个区域</span>}
                   {m.triangleCount !== undefined && <span className="tree-meta">{m.triangleCount.toLocaleString()}▲</span>}
                 </div>
               )
@@ -150,6 +155,7 @@ export function AreaSetupView(): React.JSX.Element {
                 <label>高度比例：{Math.round(range.vHeight * 100)}%</label>
                 <label>环绕起点：{Math.round(range.uStart * 100)}%</label>
                 <label>距底部：{Math.round(range.vStart * 100)}%</label>
+                {!editingExisting && <label>朝向<select value={side} onChange={(event) => setSide(event.target.value as 'front' | 'back')}><option value="front">正面</option><option value="back">背面（自动旋转 180°）</option></select></label>}
                 <div className="hint">蓝色选区是最终贴标范围；中央为模型正面，两侧为背部接缝</div>
               </div>
             </div>

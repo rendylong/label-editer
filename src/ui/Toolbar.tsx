@@ -5,13 +5,14 @@
 import { useRef, useState } from 'react'
 import { useModelStore, useLabelStore, useUiStore, flashToast } from '../state/stores'
 import { loadSample, loadModelFromBytes } from '../app/modelLoader'
-import { exportPng, exportGlbFile, exportProject, importProject } from '../app/actions'
+import { exportPng, exportGlbFile, exportProject, importProject, importStructuredLabelSpec, exportPrintManifest } from '../app/actions'
 import { Icon } from './icons'
 import { ViewModeSwitch } from './ViewModeSwitch'
 
 export function Toolbar(): React.JSX.Element {
   const glbInputRef = useRef<HTMLInputElement>(null)
   const projectInputRef = useRef<HTMLInputElement>(null)
+  const specInputRef = useRef<HTMLInputElement>(null)
   const status = useModelStore((s) => s.status)
   const modelName = useModelStore((s) => s.modelName)
   const activeArea = useLabelStore((s) => s.activeArea)
@@ -64,6 +65,13 @@ export function Toolbar(): React.JSX.Element {
     e.target.value = ''
   }
 
+  const onSpecImport = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try { await importStructuredLabelSpec(file) } catch (err) { flashToast(err instanceof Error ? err.message : 'Label Spec 导入失败', 'error') }
+    e.target.value = ''
+  }
+
   return (
     <div className="toolbar">
       <div className="brand">
@@ -75,11 +83,7 @@ export function Toolbar(): React.JSX.Element {
         <button
           className="btn primary sm"
           title="设置贴标区域（选择目标表面 → 2D 展开图框选 → 完成）"
-          onClick={() => {
-            useUiStore.getState().setWorkspaceTab('model')
-            useUiStore.getState().setView('areaSetup')
-            useUiStore.getState().setMode('browse')
-          }}
+          onClick={() => useUiStore.getState().startAreaSetup(null, 'front')}
         >
           + 贴标区域
         </button>
@@ -98,6 +102,7 @@ export function Toolbar(): React.JSX.Element {
         <button className="btn ghost sm" onClick={exportProject} disabled={!labelActive} title="导出 .lbl 项目（设计数据）">
           项目↓
         </button>
+        <button className="btn ghost sm" onClick={exportPrintManifest} disabled={!labelActive} title="导出物理尺寸、刀模、专色版和检查结果">印刷清单↓</button>
         <button
           className="btn ghost sm"
           type="button"
@@ -108,6 +113,8 @@ export function Toolbar(): React.JSX.Element {
           项目↑
         </button>
         <input ref={projectInputRef} type="file" accept=".json,.lbl" hidden tabIndex={-1} aria-hidden="true" onChange={(e) => void onProjectImport(e)} />
+        <button className="btn ghost sm" type="button" title="导入结构化 Label Spec JSON" onClick={() => specInputRef.current?.click()} onKeyDown={(event) => activatePicker(event, specInputRef)}>规格↑</button>
+        <input ref={specInputRef} type="file" accept=".json" hidden tabIndex={-1} aria-hidden="true" onChange={(e) => void onSpecImport(e)} />
       </div>
       <div className="toolbar-group">
         <button className="btn ghost sm" onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)">
@@ -130,7 +137,7 @@ export function Toolbar(): React.JSX.Element {
           </select>
         )}
         <button className="btn secondary sm" onClick={() => void runExport('png')} disabled={!hasBake || exporting !== null} aria-busy={exporting === 'png'}>
-          {exporting === 'png' ? '导出中…' : '导出纹理 PNG'}
+          {exporting === 'png' ? '导出中…' : '导出当前通道 PNG'}
         </button>
         <button className="btn primary sm" onClick={() => void runExport('glb')} disabled={!hasBake || status !== 'ready' || exporting !== null} aria-busy={exporting === 'glb'}>
           {exporting === 'glb' ? '导出中…' : '导出 GLB'}

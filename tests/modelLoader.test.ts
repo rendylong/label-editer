@@ -73,7 +73,7 @@ describe('贴标区域设置提交', () => {
     const result = await addAreaForNode(nodeId, requested)
 
     expect(result.ok).toBe(true)
-    expect(useLabelStore.getState().areas).toHaveLength(1)
+    expect(useLabelStore.getState().areas).toHaveLength(2)
     expect(useLabelStore.getState().activeArea?.range).toEqual(requested)
   })
 

@@ -184,6 +184,7 @@ export function commitLoadedFontSelection(
 const CATEGORIES: Array<{ id: FontCategoryFilter; label: string }> = [
   { id: 'all', label: '全部' },
   { id: 'chinese', label: '中文' },
+  { id: 'arabic', label: '阿拉伯文' },
   { id: 'sans', label: '无衬线' },
   { id: 'serif', label: '衬线' },
   { id: 'display', label: '展示' },
@@ -195,6 +196,7 @@ const CATEGORIES: Array<{ id: FontCategoryFilter; label: string }> = [
 type FontLoadState = 'idle' | 'loading' | 'ready' | 'error'
 
 function coverageLabel(entry: FontCatalogEntry): string {
+  if (entry.languages.includes('ar')) return 'Arabic / Latin'
   if (entry.languages.includes('zh-Hans') && entry.languages.includes('zh-Hant')) return '简繁 / Latin'
   if (entry.languages.includes('zh-Hans')) return '简中 / Latin'
   if (entry.languages.includes('zh-Hant')) return '繁中 / Latin'

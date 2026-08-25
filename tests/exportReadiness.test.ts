@@ -489,7 +489,7 @@ describe('export font and bake readiness', () => {
 
     expect(external.canvasToPngBytes).toHaveBeenCalledWith(expect.objectContaining({ dataset: { name: 'flushed-color' } }))
     expect(external.downloadBytes).toHaveBeenCalledOnce()
-    expect(useUiStore.getState().toast).toEqual({ msg: '已导出标签纹理 640×320px', kind: 'success' })
+    expect(useUiStore.getState().toast).toEqual({ msg: '已导出 color 通道 640×320px', kind: 'success' })
   })
 
   it('does not let an unregistered stale surface remove the current registered owner', async () => {

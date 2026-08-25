@@ -1,4 +1,4 @@
 interface:
   display_name: "Cosmetic Label Editor"
-  short_description: "Design and export labels on cosmetic GLB packaging"
-  default_prompt: "Inspect this cosmetic packaging GLB, apply a structured label design, and export a verified labeled GLB."
+  short_description: "Produce approved label designs on cosmetic GLBs"
+  default_prompt: "Use $cosmetic-label-editor after $cosmetic-label to turn the approved Editor Handoff into a validated, editable labeled GLB."

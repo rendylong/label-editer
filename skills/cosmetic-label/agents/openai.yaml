@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cosmetic Label"
+  short_description: "Design cosmetic labels and editor handoffs"
+  default_prompt: "Use $cosmetic-label to design this cosmetic package label and prepare the approved Editor Handoff for $cosmetic-label-editor."

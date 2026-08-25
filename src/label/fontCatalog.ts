@@ -1,11 +1,11 @@
-export type FontCategory = 'chinese' | 'sans' | 'serif' | 'display' | 'handwriting' | 'mono'
+export type FontCategory = 'chinese' | 'arabic' | 'sans' | 'serif' | 'display' | 'handwriting' | 'mono'
 
 export interface FontCatalogEntry {
   id: string
   name: string
   family: string
   category: FontCategory
-  languages: Array<'zh-Hans' | 'zh-Hant' | 'latin'>
+  languages: Array<'zh-Hans' | 'zh-Hant' | 'ar' | 'latin'>
   weights: number[]
   styles: Array<'normal' | 'italic'>
   files: Partial<Record<`${number}-${'normal' | 'italic'}`, string>>
@@ -21,6 +21,7 @@ function catalogEntry(
   category: FontCategory,
   languages: FontCatalogEntry['languages'] = ['latin'],
   license: FontCatalogEntry['license'] = { name: OFL, path: `/fonts/${id}/OFL.txt` },
+  normalAsset = `/fonts/${id}/400-normal.woff2`,
 ): FontCatalogEntry {
   const genericFallback = category === 'serif' ? 'serif' : category === 'mono' ? 'monospace' : 'sans-serif'
   const fallback = category === 'chinese'
@@ -34,7 +35,7 @@ function catalogEntry(
     languages,
     weights: [400],
     styles: ['normal'],
-    files: { '400-normal': `/fonts/${id}/400-normal.woff2` },
+    files: { '400-normal': normalAsset },
     license,
     fallback,
   }
@@ -45,6 +46,7 @@ function catalogEntry(
  * ordering used by category browsers.
  */
 export const FONT_CATALOG: FontCatalogEntry[] = [
+  catalogEntry('noto-sans-arabic', 'Noto Sans Arabic', 'arabic', ['ar', 'latin'], { name: OFL, path: '/fonts/noto-sans-arabic/OFL.txt' }, '/fonts/noto-sans-arabic/400-normal.ttf'),
   catalogEntry('noto-sans-sc', 'Noto Sans SC', 'chinese', ['zh-Hans', 'latin']),
   catalogEntry('noto-serif-sc', 'Noto Serif SC', 'chinese', ['zh-Hans', 'latin']),
   catalogEntry('source-han-sans-sc', 'Source Han Sans SC', 'chinese', ['zh-Hans', 'latin']),

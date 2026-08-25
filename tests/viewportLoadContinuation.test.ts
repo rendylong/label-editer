@@ -143,7 +143,7 @@ describe('Viewport async load continuation boundary', () => {
 
     await act(async () => useLabelStore.getState().removeArea(areaA.id))
 
-    expect(controller.reconcileLabelAreas.mock.calls.at(-1)?.[0]).toEqual([areaB.nodeName])
+    expect(controller.reconcileLabelAreas.mock.calls.at(-1)?.[0]).toEqual([areaB.id])
     expect(useLabelStore.getState().areas.map((item) => item.id)).toEqual([areaB.id])
     expect(useLabelStore.getState().bakeMap[areaA.id]).toBeUndefined()
     expect(useLabelStore.getState().bakeMap[areaB.id]).toBeDefined()

@@ -9,7 +9,11 @@ export type CraftType = 'foil' | 'emboss' | 'deboss' | 'matte' | 'uv' | 'stroke'
 /** 工艺参数（物理值）。 */
 export interface CraftParams {
   /** 烫金：色系预设 key */
-  foilColor?: 'gold' | 'silver' | 'rose' | 'champagne' | 'holographic'
+  foilColor?: 'gold' | 'silver' | 'rose' | 'champagne' | 'holographic' | 'custom'
+  /** 自定义金属箔基色；foilColor=custom 时使用。 */
+  foilCustomColor?: string
+  /** 印刷专色/箔版名称。 */
+  foilSpotName?: string
   /** 渐变角度（度） */
   gradientAngle?: number
   /** 高光强度 0-1 */
@@ -52,6 +56,10 @@ export interface TextLayer {
   italic: boolean
   /** 文字朝向：horizontal = 沿瓶身环绕（默认）；vertical = 沿瓶高 */
   direction?: 'horizontal' | 'vertical'
+  /** 语言书写方向；auto 会根据首个强方向字符推断。 */
+  writingDirection?: 'auto' | 'ltr' | 'rtl'
+  /** BCP-47 语言标签，用于字体覆盖与交付检查。 */
+  language?: string
   /** 画布坐标（px，相对画布左上角） */
   x: number
   y: number
@@ -143,6 +151,17 @@ export interface LabelPaper {
   opacity: number
 }
 
+/** 面向印刷交付的物理规格；像素画布仅负责预览与烘焙。 */
+export interface LabelPrintSpec {
+  physicalWidthMm: number
+  physicalHeightMm: number
+  bleedMm: number
+  cornerRadiusMm: number
+  minTextHeightMm: number
+  dieCutShape: 'rectangle' | 'rounded-rectangle' | 'custom'
+  spotColors: string[]
+}
+
 /** 全局工艺（作用于整个标签）。 */
 export interface GlobalCraft {
   craft: CraftEffect[]
@@ -206,12 +225,16 @@ export interface LabelAreaConfig {
    * replace：目标本身就是独立标签网格，用编辑器内容替换原标签外观。
    */
   surfaceMode?: 'overlay' | 'replace'
+  /** Explicit side identity keeps repeated spec imports from swapping front/back offsets. */
+  side?: 'front' | 'back'
   remap: RemapParams
   /** 区域范围（尺寸/位置，可调） */
   range: LabelAreaRange
   canvas: CanvasSpec
   /** 显式纸张底色；不提供时透明。 */
   paper?: LabelPaper
+  /** 可选印刷规格；旧项目未提供时保持未设置。 */
+  printSpec?: LabelPrintSpec
   layers: LabelLayer[]
   globalCraft: GlobalCraft
   /** 字体上传记录（名称 → 数据 URL），随 .lbl 导出可选携带 */

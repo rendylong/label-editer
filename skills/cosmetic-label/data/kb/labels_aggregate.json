@@ -1,0 +1,1133 @@
+{
+ "kb_version": "label-v1.0.0",
+ "records": 442,
+ "overall": {
+  "layout_pattern": [
+   [
+    "minimal_centered",
+    375
+   ],
+   [
+    "stacked_full_wrap",
+    30
+   ],
+   [
+    "left_aligned",
+    15
+   ],
+   [
+    "badge_seal",
+    6
+   ],
+   [
+    "bare_no_label",
+    6
+   ],
+   [
+    "other",
+    4
+   ],
+   [
+    "split_band",
+    3
+   ],
+   [
+    "asymmetric",
+    2
+   ],
+   [
+    "dense_informational",
+    1
+   ]
+  ],
+  "label_position": [
+   [
+    "front_center",
+    368
+   ],
+   [
+    "front_lower",
+    34
+   ],
+   [
+    "front_upper",
+    17
+   ],
+   [
+    "wrap_around",
+    7
+   ],
+   [
+    "none",
+    6
+   ],
+   [
+    "neck_band",
+    5
+   ],
+   [
+    "side",
+    2
+   ],
+   [
+    "bottom",
+    2
+   ],
+   [
+    "other",
+    1
+   ]
+  ],
+  "label_shape": [
+   [
+    "rectangle",
+    244
+   ],
+   [
+    "none",
+    97
+   ],
+   [
+    "full_wrap",
+    47
+   ],
+   [
+    "rounded_rect",
+    20
+   ],
+   [
+    "band",
+    10
+   ],
+   [
+    "square",
+    10
+   ],
+   [
+    "other",
+    7
+   ],
+   [
+    "circle",
+    5
+   ],
+   [
+    "die_cut",
+    2
+   ]
+  ],
+  "label_type": [
+   [
+    "direct_print",
+    357
+   ],
+   [
+    "paper_label",
+    54
+   ],
+   [
+    "foil_stamp",
+    16
+   ],
+   [
+    "clear_label",
+    7
+   ],
+   [
+    "bare_no_label",
+    6
+   ],
+   [
+    "band_wrap_label",
+    2
+   ]
+  ],
+  "label_substrate": [
+   [
+    "none",
+    161
+   ],
+   [
+    "other",
+    95
+   ],
+   [
+    "in_mold_plastic",
+    79
+   ],
+   [
+    "paper_matte",
+    60
+   ],
+   [
+    "foil",
+    14
+   ],
+   [
+    "glass",
+    12
+   ],
+   [
+    "transparent_film",
+    12
+   ],
+   [
+    "paper_gloss",
+    6
+   ],
+   [
+    "metal",
+    2
+   ],
+   [
+    "clear_vinyl",
+    1
+   ]
+  ],
+  "print_method": [
+   [
+    "screen_print",
+    221
+   ],
+   [
+    "offset_print",
+    167
+   ],
+   [
+    "hot_stamp_foil",
+    106
+   ],
+   [
+    "emboss",
+    14
+   ],
+   [
+    "deboss",
+    9
+   ],
+   [
+    "other",
+    6
+   ],
+   [
+    "digital_print",
+    1
+   ]
+  ],
+  "label_finish": [
+   [
+    "matte",
+    228
+   ],
+   [
+    "gloss_varnish",
+    132
+   ],
+   [
+    "metallic",
+    57
+   ],
+   [
+    "none",
+    9
+   ],
+   [
+    "soft_touch",
+    9
+   ],
+   [
+    "other",
+    7
+   ]
+  ],
+  "tactile": [
+   [
+    "smooth",
+    421
+   ],
+   [
+    "emboss_logo",
+    17
+   ],
+   [
+    "deboss",
+    4
+   ]
+  ],
+  "typography_class": [
+   [
+    "sans_geometric",
+    201
+   ],
+   [
+    "serif_display",
+    95
+   ],
+   [
+    "sans_humanist",
+    69
+   ],
+   [
+    "mixed",
+    66
+   ],
+   [
+    "other",
+    10
+   ],
+   [
+    "script_calligraphic",
+    1
+   ]
+  ],
+  "typography_weight": [
+   [
+    "mixed",
+    203
+   ],
+   [
+    "regular",
+    177
+   ],
+   [
+    "light",
+    31
+   ],
+   [
+    "bold",
+    12
+   ],
+   [
+    "other",
+    10
+   ],
+   [
+    "medium",
+    9
+   ]
+  ],
+  "typography_case": [
+   [
+    "all_caps",
+    208
+   ],
+   [
+    "mixed",
+    175
+   ],
+   [
+    "title_case",
+    24
+   ],
+   [
+    "lowercase",
+    13
+   ],
+   [
+    "sentence_case",
+    12
+   ],
+   [
+    "other",
+    10
+   ]
+  ],
+  "letter_spacing": [
+   [
+    "normal",
+    277
+   ],
+   [
+    "wide",
+    130
+   ],
+   [
+    "very_wide",
+    25
+   ],
+   [
+    "other",
+    10
+   ]
+  ],
+  "font_pairing": [
+   [
+    "single_face",
+    330
+   ],
+   [
+    "two_face_serif_sans",
+    85
+   ],
+   [
+    "two_face_display_sans",
+    17
+   ],
+   [
+    "other",
+    10
+   ]
+  ],
+  "content_density": [
+   [
+    "sparse",
+    284
+   ],
+   [
+    "moderate",
+    145
+   ],
+   [
+    "dense",
+    9
+   ],
+   [
+    "other",
+    4
+   ]
+  ],
+  "content_elements": [
+   [
+    "brand_name",
+    406
+   ],
+   [
+    "product_name",
+    371
+   ],
+   [
+    "benefit_claim",
+    203
+   ],
+   [
+    "volume_size",
+    171
+   ],
+   [
+    "hero_ingredient",
+    109
+   ],
+   [
+    "brand_logo",
+    107
+   ],
+   [
+    "regulatory",
+    86
+   ],
+   [
+    "number_shade",
+    84
+   ],
+   [
+    "scent_variant",
+    34
+   ],
+   [
+    "usage_directions",
+    34
+   ],
+   [
+    "tagline",
+    31
+   ],
+   [
+    "ingredient_list",
+    15
+   ],
+   [
+    "product_type",
+    1
+   ],
+   [
+    "none",
+    1
+   ],
+   [
+    "barcode",
+    1
+   ]
+  ],
+  "brand_script": [
+   [
+    "latin",
+    417
+   ],
+   [
+    "mixed",
+    13
+   ],
+   [
+    "other",
+    10
+   ],
+   [
+    "korean",
+    2
+   ]
+  ],
+  "bilingual": [
+   [
+    false,
+    232
+   ],
+   [
+    true,
+    210
+   ]
+  ],
+  "design_feel": [
+   [
+    "clean",
+    219
+   ],
+   [
+    "minimal",
+    185
+   ],
+   [
+    "clinical minimal",
+    145
+   ],
+   [
+    "luxury",
+    145
+   ],
+   [
+    "modern",
+    130
+   ],
+   [
+    "apothecary",
+    73
+   ],
+   [
+    "minimalist",
+    72
+   ],
+   [
+    "clinical",
+    60
+   ],
+   [
+    "editorial serif",
+    55
+   ],
+   [
+    "metallic",
+    46
+   ],
+   [
+    "elegant",
+    40
+   ],
+   [
+    "editorial",
+    37
+   ],
+   [
+    "pharmaceutical",
+    33
+   ],
+   [
+    "pastel",
+    30
+   ],
+   [
+    "monochrome",
+    28
+   ],
+   [
+    "classic",
+    25
+   ],
+   [
+    "k-beauty",
+    21
+   ],
+   [
+    "k-beauty pastel",
+    19
+   ],
+   [
+    "soft",
+    18
+   ],
+   [
+    "premium",
+    16
+   ],
+   [
+    "bold",
+    16
+   ],
+   [
+    "art-deco",
+    12
+   ],
+   [
+    "functional",
+    12
+   ],
+   [
+    "playful",
+    11
+   ],
+   [
+    "professional",
+    11
+   ],
+   [
+    "glamorous",
+    10
+   ],
+   [
+    "feminine",
+    10
+   ],
+   [
+    "soft pastel",
+    10
+   ],
+   [
+    "gold",
+    10
+   ],
+   [
+    "bright",
+    9
+   ]
+  ],
+  "brand": 82,
+  "tiers": {
+   "mass": 70,
+   "luxury": 51,
+   "prestige": 232,
+   "masstige": 89
+  },
+  "content_hierarchy_top": [
+   [
+    "brand logo > brand name > product name",
+    36
+   ],
+   [
+    "brand logo > product name > benefit claim > volume size",
+    32
+   ],
+   [
+    "brand name",
+    25
+   ],
+   [
+    "brand logo",
+    22
+   ],
+   [
+    "brand name > product name",
+    19
+   ],
+   [
+    "brand name > product name > benefit claim > volume size",
+    17
+   ],
+   [
+    "brand logo > product name > number shade",
+    15
+   ],
+   [
+    "brand name > product name > scent variant",
+    10
+   ],
+   [
+    "brand logo > brand name > product name > benefit claim > volume",
+    10
+   ],
+   [
+    "brand logo > product name > benefit claim > volume",
+    9
+   ],
+   [
+    "brand logo > brand name > product name > benefit claim > volume size",
+    9
+   ],
+   [
+    "brand name > product name > benefit claim > hero ingredient",
+    9
+   ],
+   [
+    "brand name > product name > volume size",
+    8
+   ],
+   [
+    "brand name > product name > benefit claim",
+    8
+   ],
+   [
+    "brand name > product name > scent variant > volume size",
+    7
+   ],
+   [
+    "product name > brand name",
+    6
+   ],
+   [
+    "brand logo > product name",
+    6
+   ],
+   [
+    "brand name > product name > shade names",
+    6
+   ],
+   [
+    "brand_name",
+    5
+   ],
+   [
+    "brand logo > product name > SPF number > benefit claim > volume",
+    5
+   ],
+   [
+    "brand name > product name > benefit claim > hero ingredient > volume size",
+    4
+   ],
+   [
+    "brand logo > product name > benefit claim > hero ingredient > volume size",
+    4
+   ],
+   [
+    "brand logo > product name > hero ingredient > benefit claim > usage directions",
+    4
+   ],
+   [
+    "brand logo > brand name > product name > hero ingredient > volume size",
+    4
+   ],
+   [
+    "brand name > product name > hero ingredient > benefit claim",
+    4
+   ],
+   [
+    "brand logo > product name > bilingual descriptor",
+    4
+   ],
+   [
+    "brand logo > product name > benefit claim",
+    3
+   ],
+   [
+    "none",
+    3
+   ],
+   [
+    "brand logo > brand name > product name > benefit claim",
+    3
+   ],
+   [
+    "brand logo > product name > shade number",
+    3
+   ]
+  ]
+ },
+ "by_category": {
+  "01_perfume": {
+   "n": 32,
+   "layout_pattern": [
+    "minimal_centered"
+   ],
+   "label_position": [
+    "front_center",
+    "neck_band"
+   ],
+   "label_type": [
+    "direct_print",
+    "paper_label"
+   ],
+   "print_method": [
+    "screen_print",
+    "hot_stamp_foil",
+    "offset_print"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "serif_display",
+    "mixed"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "scent_variant",
+    "tagline",
+    "brand_logo",
+    "product_type"
+   ]
+  },
+  "02_shampoo": {
+   "n": 34,
+   "layout_pattern": [
+    "minimal_centered",
+    "stacked_full_wrap",
+    "badge_seal"
+   ],
+   "label_position": [
+    "front_center",
+    "wrap_around"
+   ],
+   "label_type": [
+    "direct_print"
+   ],
+   "print_method": [
+    "offset_print",
+    "screen_print",
+    "hot_stamp_foil"
+   ],
+   "typography_class": [
+    "mixed",
+    "serif_display",
+    "sans_geometric"
+   ],
+   "content_elements": [
+    "brand_name",
+    "volume_size",
+    "product_name",
+    "benefit_claim",
+    "hero_ingredient",
+    "tagline"
+   ]
+  },
+  "03_conditioner": {
+   "n": 34,
+   "layout_pattern": [
+    "minimal_centered",
+    "left_aligned"
+   ],
+   "label_position": [
+    "front_center"
+   ],
+   "label_type": [
+    "direct_print",
+    "paper_label"
+   ],
+   "print_method": [
+    "offset_print",
+    "screen_print",
+    "hot_stamp_foil"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "mixed",
+    "serif_display"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "volume_size",
+    "benefit_claim",
+    "regulatory",
+    "brand_logo"
+   ]
+  },
+  "04_serum": {
+   "n": 40,
+   "layout_pattern": [
+    "minimal_centered",
+    "stacked_full_wrap",
+    "split_band"
+   ],
+   "label_position": [
+    "front_center",
+    "front_lower"
+   ],
+   "label_type": [
+    "direct_print",
+    "paper_label"
+   ],
+   "print_method": [
+    "screen_print",
+    "hot_stamp_foil",
+    "offset_print"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "sans_humanist",
+    "mixed"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "brand_logo",
+    "benefit_claim",
+    "hero_ingredient",
+    "usage_directions"
+   ]
+  },
+  "05_face_cream": {
+   "n": 49,
+   "layout_pattern": [
+    "minimal_centered",
+    "stacked_full_wrap",
+    "bare_no_label"
+   ],
+   "label_position": [
+    "front_center",
+    "none"
+   ],
+   "label_type": [
+    "direct_print",
+    "paper_label"
+   ],
+   "print_method": [
+    "screen_print",
+    "hot_stamp_foil",
+    "offset_print"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "serif_display",
+    "sans_humanist"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "brand_logo",
+    "benefit_claim",
+    "hero_ingredient",
+    "volume_size"
+   ]
+  },
+  "06_toner": {
+   "n": 36,
+   "layout_pattern": [
+    "minimal_centered",
+    "left_aligned",
+    "split_band"
+   ],
+   "label_position": [
+    "front_center",
+    "wrap_around"
+   ],
+   "label_type": [
+    "direct_print",
+    "paper_label"
+   ],
+   "print_method": [
+    "screen_print",
+    "offset_print",
+    "hot_stamp_foil"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "mixed",
+    "sans_humanist"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "benefit_claim",
+    "hero_ingredient",
+    "volume_size",
+    "brand_logo"
+   ]
+  },
+  "07_lipstick": {
+   "n": 40,
+   "layout_pattern": [
+    "minimal_centered",
+    "stacked_full_wrap",
+    "bare_no_label"
+   ],
+   "label_position": [
+    "front_center",
+    "front_lower"
+   ],
+   "label_type": [
+    "direct_print",
+    "foil_stamp"
+   ],
+   "print_method": [
+    "hot_stamp_foil",
+    "screen_print",
+    "emboss"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "serif_display",
+    "mixed"
+   ],
+   "content_elements": [
+    "brand_name",
+    "brand_logo",
+    "product_name",
+    "number_shade",
+    "volume_size",
+    "benefit_claim"
+   ]
+  },
+  "08_eyeshadow": {
+   "n": 37,
+   "layout_pattern": [
+    "minimal_centered",
+    "other",
+    "badge_seal"
+   ],
+   "label_position": [
+    "front_upper",
+    "front_lower"
+   ],
+   "label_type": [
+    "direct_print",
+    "foil_stamp"
+   ],
+   "print_method": [
+    "hot_stamp_foil",
+    "offset_print",
+    "screen_print"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "serif_display",
+    "other"
+   ],
+   "content_elements": [
+    "brand_name",
+    "number_shade",
+    "product_name",
+    "volume_size",
+    "brand_logo",
+    "none"
+   ]
+  },
+  "09_sunscreen": {
+   "n": 37,
+   "layout_pattern": [
+    "minimal_centered",
+    "stacked_full_wrap",
+    "split_band"
+   ],
+   "label_position": [
+    "front_center",
+    "side"
+   ],
+   "label_type": [
+    "direct_print"
+   ],
+   "print_method": [
+    "offset_print",
+    "screen_print",
+    "hot_stamp_foil"
+   ],
+   "typography_class": [
+    "mixed",
+    "sans_humanist",
+    "sans_geometric"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "benefit_claim",
+    "volume_size",
+    "regulatory",
+    "hero_ingredient"
+   ]
+  },
+  "10_makeup_remover": {
+   "n": 32,
+   "layout_pattern": [
+    "minimal_centered",
+    "left_aligned",
+    "badge_seal"
+   ],
+   "label_position": [
+    "front_center",
+    "front_lower"
+   ],
+   "label_type": [
+    "direct_print",
+    "clear_label"
+   ],
+   "print_method": [
+    "offset_print",
+    "screen_print",
+    "hot_stamp_foil"
+   ],
+   "typography_class": [
+    "sans_geometric",
+    "sans_humanist",
+    "mixed"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "benefit_claim",
+    "volume_size",
+    "regulatory",
+    "hero_ingredient"
+   ]
+  },
+  "11_hand_cream": {
+   "n": 37,
+   "layout_pattern": [
+    "minimal_centered",
+    "stacked_full_wrap",
+    "bare_no_label"
+   ],
+   "label_position": [
+    "front_center",
+    "wrap_around"
+   ],
+   "label_type": [
+    "direct_print",
+    "paper_label"
+   ],
+   "print_method": [
+    "screen_print",
+    "offset_print",
+    "deboss"
+   ],
+   "typography_class": [
+    "serif_display",
+    "sans_humanist",
+    "sans_geometric"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "usage_directions",
+    "volume_size",
+    "scent_variant",
+    "benefit_claim"
+   ]
+  },
+  "12_nail": {
+   "n": 34,
+   "layout_pattern": [
+    "minimal_centered",
+    "bare_no_label"
+   ],
+   "label_position": [
+    "front_center",
+    "none"
+   ],
+   "label_type": [
+    "direct_print",
+    "paper_label"
+   ],
+   "print_method": [
+    "screen_print",
+    "offset_print"
+   ],
+   "typography_class": [
+    "serif_display",
+    "mixed",
+    "sans_geometric"
+   ],
+   "content_elements": [
+    "brand_name",
+    "product_name",
+    "number_shade",
+    "benefit_claim",
+    "scent_variant",
+    "regulatory"
+   ]
+  }
+ }
+}

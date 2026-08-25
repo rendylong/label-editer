@@ -19,8 +19,17 @@ export function craftTypesForScope(scope: CraftScope): CraftType[] {
   return scope === 'global' ? [...GLOBAL_CRAFT_TYPES] : [...LAYER_CRAFT_TYPES]
 }
 
-export function foilGradientStops(key: string): string[] {
-  return FOIL_COLORS[key]?.stops ?? FOIL_COLORS.gold.stops
+function customFoilStops(color: string): string[] {
+  const match = /^#([0-9a-f]{6})$/i.exec(color)
+  if (!match) return FOIL_COLORS.rose.stops
+  const value = Number.parseInt(match[1], 16)
+  const channels = [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+  const tone = (factor: number): string => `#${channels.map((channel) => Math.max(0, Math.min(255, Math.round(channel * factor))).toString(16).padStart(2, '0')).join('')}`
+  return [tone(0.72), tone(1.38), tone(0.92), tone(1.2), tone(0.62)]
+}
+
+export function foilGradientStops(key: string, customColor?: string): string[] {
+  return key === 'custom' ? customFoilStops(customColor ?? '#b56f52') : FOIL_COLORS[key]?.stops ?? FOIL_COLORS.gold.stops
 }
 
 export function foilKonvaGradient(craft: CraftEffect | undefined, width: number, height: number): {
@@ -33,7 +42,7 @@ export function foilKonvaGradient(craft: CraftEffect | undefined, width: number,
   const span = Math.max(width, height, 1)
   const dx = Math.cos(angle) * span * 0.5
   const dy = Math.sin(angle) * span * 0.5
-  const colors = foilGradientStops(craft.params.foilColor ?? 'gold')
+  const colors = foilGradientStops(craft.params.foilColor ?? 'gold', craft.params.foilCustomColor)
   const pairs = colors.map((color, index) => ({ offset: index / Math.max(colors.length - 1, 1), color }))
   const highlight = clamp01(craft.params.highlight ?? 0.4)
   if (highlight > 0) pairs.push({ offset: 0.38, color: `rgba(255,255,255,${(0.15 + highlight * 0.55).toFixed(3)})` })

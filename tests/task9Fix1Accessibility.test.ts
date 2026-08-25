@@ -34,7 +34,9 @@ vi.mock('../src/app/actions', () => ({
   exportPng: mocks.exportPng,
   exportGlbFile: mocks.exportGlbFile,
   exportProject: vi.fn(),
+  exportPrintManifest: vi.fn(),
   importProject: mocks.importProject,
+  importStructuredLabelSpec: vi.fn(async () => undefined),
 }))
 
 const css = readFileSync(new URL('../src/app/styles.css', import.meta.url), 'utf8')
@@ -205,6 +207,7 @@ describe('Task 9 Fix Round 1 accessibility and visual contracts', () => {
 
     expect(document.body.textContent).not.toContain('显示原始参考纹理')
     expect(document.body.textContent).toContain('重建 UV 后原始纹理不能直接作为参考')
+    expect(document.body.textContent).toContain('尚未设置物理尺寸、出血与刀模')
   })
 
   it('uses repaired Blender names in the area target picker', async () => {
@@ -230,7 +233,7 @@ describe('Task 9 Fix Round 1 accessibility and visual contracts', () => {
     useModelStore.setState({ status: 'ready' })
     await withMountedDom(async (dom, root) => {
       await act(async () => root.render(createElement(Toolbar)))
-      const png = buttonByText(dom.window.document, '导出纹理 PNG')
+      const png = buttonByText(dom.window.document, '导出当前通道 PNG')
       const glb = buttonByText(dom.window.document, '导出 GLB')
 
       await act(async () => png.click())
@@ -240,7 +243,7 @@ describe('Task 9 Fix Round 1 accessibility and visual contracts', () => {
       expect(glb.disabled).toBe(true)
 
       await act(async () => { finish(); await Promise.resolve() })
-      expect(buttonByText(dom.window.document, '导出纹理 PNG').disabled).toBe(false)
+      expect(buttonByText(dom.window.document, '导出当前通道 PNG').disabled).toBe(false)
     })
   })
 

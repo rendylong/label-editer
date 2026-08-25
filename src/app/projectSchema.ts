@@ -13,6 +13,7 @@ import type {
   ShapeLayer,
   TextLayer,
   UploadedFontRecord,
+  LabelPrintSpec,
 } from '../label/types'
 
 export const PROJECT_VERSION = 3 as const
@@ -118,8 +119,8 @@ function validateCraftList(value: unknown, path: string, fail: (message: string)
     }
     for (const [key, value] of Object.entries(effect.params)) {
       if (key === 'foilColor') {
-        if (!['gold', 'silver', 'rose', 'champagne', 'holographic'].includes(String(value))) fail(`${path}[${index}].params.foilColor 无效`)
-      } else if (key === 'strokeColor') {
+        if (!['gold', 'silver', 'rose', 'champagne', 'holographic', 'custom'].includes(String(value))) fail(`${path}[${index}].params.foilColor 无效`)
+      } else if (key === 'strokeColor' || key === 'foilCustomColor' || key === 'foilSpotName') {
         if (typeof value !== 'string') fail(`${path}[${index}].params.strokeColor 必须是字符串`)
       } else if (['gradientAngle', 'highlight', 'depth', 'lightAngle', 'intensity', 'noise', 'gloss', 'strokeWidth'].includes(key)) {
         if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${path}[${index}].params.${key} 必须是有限数字`)
@@ -175,6 +176,8 @@ function normalizeLayer(raw: unknown): LabelLayer {
     if (raw.align !== 'left' && raw.align !== 'center' && raw.align !== 'right') layerError('align 无效')
     requiredBoolean(raw, 'italic')
     if (raw.direction !== undefined && raw.direction !== 'horizontal' && raw.direction !== 'vertical') layerError('direction 无效')
+    if (raw.writingDirection !== undefined && raw.writingDirection !== 'auto' && raw.writingDirection !== 'ltr' && raw.writingDirection !== 'rtl') layerError('writingDirection 无效')
+    if (raw.language !== undefined && typeof raw.language !== 'string') layerError('language 必须是字符串')
     const layer = cloneValue(raw) as unknown as TextLayer
     return { ...layer, fontFamily: legacyFontId(fontFamily) }
   }
@@ -277,6 +280,21 @@ function normalizeFonts(value: unknown): UploadedFontRecord[] {
   })
 }
 
+function normalizePrintSpec(value: unknown): LabelPrintSpec | undefined {
+  if (value === undefined) return undefined
+  const raw = areaRecord(value, 'printSpec')
+  const physicalWidthMm = areaFiniteNumber(raw.physicalWidthMm, 'printSpec.physicalWidthMm')
+  const physicalHeightMm = areaFiniteNumber(raw.physicalHeightMm, 'printSpec.physicalHeightMm')
+  const bleedMm = areaFiniteNumber(raw.bleedMm, 'printSpec.bleedMm')
+  const cornerRadiusMm = areaFiniteNumber(raw.cornerRadiusMm, 'printSpec.cornerRadiusMm')
+  const minTextHeightMm = areaFiniteNumber(raw.minTextHeightMm, 'printSpec.minTextHeightMm')
+  if (physicalWidthMm <= 0 || physicalHeightMm <= 0) areaError('printSpec', '物理尺寸必须大于 0')
+  if (bleedMm < 0 || cornerRadiusMm < 0 || minTextHeightMm <= 0) areaError('printSpec', '出血、圆角或最小字高无效')
+  if (raw.dieCutShape !== 'rectangle' && raw.dieCutShape !== 'rounded-rectangle' && raw.dieCutShape !== 'custom') areaError('printSpec.dieCutShape', '无效')
+  if (!Array.isArray(raw.spotColors) || raw.spotColors.some((color) => typeof color !== 'string' || color.length === 0)) areaError('printSpec.spotColors', '必须是非空字符串数组')
+  return { physicalWidthMm, physicalHeightMm, bleedMm, cornerRadiusMm, minTextHeightMm, dieCutShape: raw.dieCutShape, spotColors: [...raw.spotColors] }
+}
+
 function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeof PROJECT_VERSION): SerializedArea {
   if (!isRecord(raw)) throw new Error('项目区域无效')
   const legacy = sourceVersion < PROJECT_VERSION
@@ -292,6 +310,9 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
   const name = typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : nodeNameValue
   if (raw.surfaceMode !== undefined && raw.surfaceMode !== 'overlay' && raw.surfaceMode !== 'replace') {
     areaError('surfaceMode', '必须是 overlay 或 replace')
+  }
+  if (raw.side !== undefined && raw.side !== 'front' && raw.side !== 'back') {
+    areaError('side', '必须是 front 或 back')
   }
 
   const range = normalizeRange(requiredAreaValue(raw, 'range', legacy, { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }))
@@ -317,10 +338,12 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     surfaceMode: raw.surfaceMode === 'overlay' || raw.surfaceMode === 'replace'
       ? raw.surfaceMode
       : /label|贴标|标签/i.test(nodeNameValue) ? 'replace' : 'overlay',
+    ...(raw.side === 'front' || raw.side === 'back' ? { side: raw.side } : {}),
     remap,
     range,
     canvas,
     paper: resolveLabelPaper(paperInput),
+    ...(raw.printSpec === undefined ? {} : { printSpec: normalizePrintSpec(raw.printSpec) }),
     layers: layersValue.map(normalizeLayer),
     globalCraft,
     fonts,

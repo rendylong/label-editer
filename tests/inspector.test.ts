@@ -238,12 +238,12 @@ describe('selected-object header', () => {
 })
 
 describe('font browser boundaries', () => {
-  it('searches all 60 catalog entries while capping only rendered result rows', () => {
+  it('searches all 61 catalog entries while capping only rendered result rows', () => {
     const all = buildFontBrowserView('', 'all', [], [], 20)
     const chineseSans = buildFontBrowserView('Noto Sans SC', 'chinese', [], [], 20)
 
-    expect(FONT_CATALOG).toHaveLength(60)
-    expect(all.total).toBe(60)
+    expect(FONT_CATALOG).toHaveLength(61)
+    expect(all.total).toBe(61)
     expect(all.rows).toHaveLength(20)
     expect(chineseSans.rows.map((font) => font.id)).toEqual(['noto-sans-sc'])
   })

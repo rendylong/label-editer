@@ -125,6 +125,11 @@ describe('3D 标签纹理尺寸更新', () => {
     expect(configure).toBeDefined()
     expect(texture.flipY).toBe(false)
     expect(texture.colorSpace).toBe(THREE.SRGBColorSpace)
+    expect(texture.generateMipmaps).toBe(false)
+    expect(texture.minFilter).toBe(THREE.LinearFilter)
+    expect(texture.magFilter).toBe(THREE.LinearFilter)
+    expect(texture.wrapS).toBe(THREE.ClampToEdgeWrapping)
+    expect(texture.wrapT).toBe(THREE.ClampToEdgeWrapping)
   })
 
   it('普通瓶身使用独立贴标叠加层，不替换原几何或原材质', () => {

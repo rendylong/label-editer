@@ -5,6 +5,8 @@ import { configureTransparentLabelExport } from './textures'
 import { offsetOverlayPositions } from './overlayGeometry'
 
 export interface AreaJob {
+  /** Stable editor area identity; required for multiple overlays on one source mesh. */
+  areaId?: string
   meshIndex: number
   nodeName: string
   surfaceMode: 'overlay' | 'replace'
@@ -54,9 +56,10 @@ function applyTextures(doc: Document, material: Material, job: AreaJob): void {
     setSlot(texture)
     getInfo()?.setWrapS(wrap).setWrapT(wrap)
   }
-  setTexture('label_color', job.colorPng, (texture) => material.setBaseColorTexture(texture), () => material.getBaseColorTextureInfo())
-  setTexture('label_metalrough', job.metalRoughPng, (texture) => material.setMetallicRoughnessTexture(texture), () => material.getMetallicRoughnessTextureInfo())
-  setTexture('label_normal', job.normalPng, (texture) => material.setNormalTexture(texture), () => material.getNormalTextureInfo())
+  const suffix = job.areaId ? `_${job.areaId}` : ''
+  setTexture(`label_color${suffix}`, job.colorPng, (texture) => material.setBaseColorTexture(texture), () => material.getBaseColorTextureInfo())
+  setTexture(`label_metalrough${suffix}`, job.metalRoughPng, (texture) => material.setMetallicRoughnessTexture(texture), () => material.getMetallicRoughnessTextureInfo())
+  setTexture(`label_normal${suffix}`, job.normalPng, (texture) => material.setNormalTexture(texture), () => material.getNormalTextureInfo())
   material.setBaseColorFactor([1, 1, 1, 1]).setMetallicFactor(1).setRoughnessFactor(1)
   configureTransparentLabelExport(material)
 }
@@ -83,16 +86,17 @@ export function applyLabelJobToDocument(doc: Document, job: AreaJob): number {
     return job.meshIndex
   }
 
-  const material = doc.createMaterial(`${job.nodeName} Label Overlay`)
+  const identity = job.areaId ? ` ${job.areaId}` : ''
+  const material = doc.createMaterial(`${job.nodeName} Label Overlay${identity}`)
   const overlayPrimitive = createRemappedPrimitive(doc, job, material)
-  const overlayMesh = doc.createMesh(`${job.nodeName} Label Overlay`).addPrimitive(overlayPrimitive)
+  const overlayMesh = doc.createMesh(`${job.nodeName} Label Overlay${identity}`).addPrimitive(overlayPrimitive)
   applyTextures(doc, material, job)
 
   const sourceNodes = root.listNodes().filter((node) => node.getMesh() === sourceMesh)
   if (sourceNodes.length === 0) throw new Error(`mesh[${job.meshIndex}] 未被场景节点引用`)
   for (const sourceNode of sourceNodes) {
     const overlayNode = doc
-      .createNode(`${sourceNode.getName() || job.nodeName}__label_overlay`)
+      .createNode(`${sourceNode.getName() || job.nodeName}__label_overlay${job.areaId ? `__${job.areaId}` : ''}`)
       .setMesh(overlayMesh)
       .setMatrix(sourceNode.getMatrix())
     const parents = sourceNode.listParents()
@@ -105,4 +109,16 @@ export function applyLabelJobToDocument(doc: Document, job: AreaJob): number {
   const overlayMeshIndex = root.listMeshes().indexOf(overlayMesh)
   if (overlayMeshIndex < 0) throw new Error(`区域「${job.nodeName}」的叠加网格未进入导出文档`)
   return overlayMeshIndex
+}
+
+export const EDITABLE_PROJECT_EXTRAS_KEY = 'glbLabelEditorProject'
+
+/** Embed the complete editable .lbl payload into GLB asset extras for one-file round trips. */
+export function embedEditableProjectMetadata(doc: Document, project: unknown): void {
+  doc.getRoot().setExtras({ ...doc.getRoot().getExtras(), [EDITABLE_PROJECT_EXTRAS_KEY]: project })
+}
+
+/** Read editable project metadata without trusting or normalizing it at this low-level boundary. */
+export function readEditableProjectMetadata(doc: Document): unknown {
+  return doc.getRoot().getExtras()[EDITABLE_PROJECT_EXTRAS_KEY]
 }

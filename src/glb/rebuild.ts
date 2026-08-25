@@ -28,6 +28,7 @@ function resetWorker(target: Worker, error: Error): void {
 }
 
 export interface ExportAreaInput {
+  areaId?: string
   meshIndex: number
   nodeName: string
   surfaceMode: 'overlay' | 'replace'
@@ -42,6 +43,8 @@ export interface ExportOptions {
   glb: Uint8Array
   /** 一个或多个贴标区域 */
   areas: ExportAreaInput[]
+  /** Complete editable project embedded into GLB extras for round-trip editing. */
+  editableProject?: unknown
   /** Worker 重打包超时；生产默认 120 秒，测试可注入更短边界。 */
   workerTimeoutMs?: number
 }
@@ -82,7 +85,7 @@ interface CrossCheckAssociation {
 
 function exportedTargetName(area: ExportAreaInput): string {
   return area.surfaceMode === 'overlay'
-    ? `${area.nodeName}__label_overlay`
+    ? `${area.nodeName}__label_overlay${area.areaId ? `__${area.areaId}` : ''}`
     : area.nodeName
 }
 
@@ -220,6 +223,7 @@ export async function exportGlb(opts: ExportOptions): Promise<ExportResult> {
   try {
     // 区域纹理已在 areaExporter 预编码
     const jobs: AreaJob[] = opts.areas.map((area) => ({
+      areaId: area.areaId,
       meshIndex: area.meshIndex,
       nodeName: area.nodeName,
       surfaceMode: area.surfaceMode,
@@ -235,6 +239,7 @@ export async function exportGlb(opts: ExportOptions): Promise<ExportResult> {
       requestId: nextRequestId++,
       glb: toArrayBuffer(opts.glb),
       areas: jobs,
+      editableProject: opts.editableProject,
     }
 
     const transfers: ArrayBuffer[] = [req.glb]

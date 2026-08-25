@@ -4,7 +4,7 @@
  */
 
 import { NodeIO, VertexLayout } from '@gltf-transform/core'
-import { applyLabelJobToDocument, type AreaJob } from './rebuildCore'
+import { applyLabelJobToDocument, embedEditableProjectMetadata, type AreaJob } from './rebuildCore'
 import { registerSupportedGltfExtensions } from './gltfExtensions'
 export type { AreaJob } from './rebuildCore'
 
@@ -13,6 +13,7 @@ export interface RebuildRequest {
   requestId: number
   glb: ArrayBuffer
   areas: AreaJob[]
+  editableProject?: unknown
 }
 
 export interface RebuildResponse {
@@ -55,6 +56,7 @@ self.onmessage = async (ev: MessageEvent<RebuildRequest>) => {
     const doc = await io.readBinary(new Uint8Array(req.glb))
 
     const targetMeshIndices = applyJobs(doc, req.areas)
+    if (req.editableProject !== undefined) embedEditableProjectMetadata(doc, req.editableProject)
 
     // 4) 写出。
     // 注：浏览器端第一次 writeBinary 会物化/延迟创建 buffer，二次写出同一 doc 会触发

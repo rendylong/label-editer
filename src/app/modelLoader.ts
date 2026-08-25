@@ -6,6 +6,8 @@ import { readGlb, buildPartTree, extractMeshAccessors, findPart, isMeshWorldMirr
 import { computeRemap, makeDefaultRemap, deriveCanvasSpec, deriveSurfaceCanvasSpec, fitCylinder, axisSpan, type MeshAccessors } from '../glb/uvRemap'
 import { useModelStore, useLabelStore, useUiStore, flashToast } from '../state/stores'
 import type { RemapParams, LabelAreaRange } from '../label/types'
+import { parseLabelProject } from './projectSchema'
+import { readEditableProjectMetadata } from '../glb/rebuildCore'
 
 /** 版本戳（用于验证浏览器加载的是最新 bundle）。 */
 export const GLB_EDITOR_VERSION = '0.2.0-multi'
@@ -38,6 +40,27 @@ export async function loadModelFromBytes(modelName: string, bytes: Uint8Array): 
     const doc = await readGlb(bytes)
     const analysis = buildPartTree(doc)
     ms.loadModel(modelName, bytes, analysis)
+
+    const embedded = readEditableProjectMetadata(doc)
+    if (embedded !== undefined) {
+      const project = parseLabelProject(embedded)
+      const restored = project.areas.filter((area) => area.meshIndex < doc.getRoot().listMeshes().length)
+      if (restored.length > 0) {
+        const ls = useLabelStore.getState()
+        restored.forEach((area) => ls.addArea(area))
+        const active = restored[restored.length - 1]
+        const mesh = extractMeshAccessors(doc, active.meshIndex)
+        const remap = { ...active.remap, mirrorU: active.remap.mirrorU ?? isMeshWorldMirrored(doc, active.meshIndex) }
+        const output = computeRemap(mesh, remap, active.range, { exteriorOnly: active.surfaceMode === 'overlay' })
+        ls.applyAreaOp(active.id, (area) => ({ ...area, remap }), { commit: false })
+        ls.setAreaData(output, mesh)
+        const partId = analysis.meshToNode[active.meshIndex]
+        if (partId) ms.selectPart(partId)
+        useUiStore.getState().setWorkspaceTab('labels')
+        useUiStore.getState().setMode('design')
+        return { labelActivated: true }
+      }
+    }
 
     const candidateId = analysis.labelCandidates[0]
     if (candidateId) {
@@ -88,7 +111,11 @@ export async function loadSample(): Promise<{ labelActivated: boolean; error?: s
 
 /** 将指定部件创建为新的贴标区域（可多个；同一部件重复创建会替换其区域）。
  *  @param range 可选：创建时直接使用指定区域范围（可视化框选结果），避免创建后再重算。 */
-export async function addAreaForNode(nodeId: string, range?: LabelAreaRange): Promise<{ ok: boolean; error?: string; areaId?: string }> {
+export async function addAreaForNode(
+  nodeId: string,
+  range?: LabelAreaRange,
+  options: { replaceAreaId?: string; side?: 'front' | 'back' } = {},
+): Promise<{ ok: boolean; error?: string; areaId?: string }> {
   const ms = useModelStore.getState()
   if (!ms.glbBytes || !ms.analysis) return { ok: false, error: '请先加载模型' }
   const node = findPart(ms.analysis.parts, nodeId)
@@ -99,18 +126,20 @@ export async function addAreaForNode(nodeId: string, range?: LabelAreaRange): Pr
     const doc = await readGlb(ms.glbBytes)
     const mesh = extractMeshAccessors(doc, node.meshIndex)
     const params = makeDefaultRemap(mesh, isMeshWorldMirrored(doc, node.meshIndex), meshLocalFrontDirection(doc, node.meshIndex))
+    if (options.side === 'back') params.offset = (params.offset + 0.5) % 1
     const areaRange: LabelAreaRange = range ?? { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }
     const surfaceMode = node.kind === 'label' ? 'replace' : 'overlay'
     const { output, spec, axisMin, axisMax } = computeLabelSetup(mesh, params, areaRange, surfaceMode)
     const ls = useLabelStore.getState()
-    // 同一网格已有区域 → 替换
-    const existing = ls.areas.find((a) => a.meshIndex === node.meshIndex)
+    // 同一网格允许多个区域；只有显式编辑指定区域时才复用设计数据与 id。
+    const existing = options.replaceAreaId ? ls.areas.find((area) => area.id === options.replaceAreaId) : undefined
     const id = ls.addArea({
       id: existing?.id,
-      name: node.name,
+      name: existing?.name ?? `${node.name}${options.side === 'back' ? ' · 背标' : options.side === 'front' ? ' · 正标' : ''}`,
       meshIndex: node.meshIndex,
       nodeName: node.name,
       surfaceMode,
+      side: options.side ?? existing?.side,
       remap: params,
       // 用户在 2D 展开图中确认的范围始终是本次提交的真值；
       // 已有区域只复用设计内容与 id，不得吞掉新的框选结果。

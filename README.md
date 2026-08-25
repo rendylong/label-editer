@@ -2,7 +2,7 @@
 
 面向美妆包装 GLB 的 Agent 贴标插件。Codex 或其他 MCP Agent 可以检查模型、选择稳定贴标目标、应用正标/背标/环绕标设计、渲染工艺预览，并原子导出可编辑项目、PBR 通道与已贴标 GLB。需要人工调整时，可打开带会话令牌的本地可视化编辑器继续操作。
 
-插件由三层共用同一套运行时：Codex Skill 负责工作流决策，MCP 提供六个粗粒度工具，`label-cli` 提供可脚本化的 JSON 接口。Agent 不需要依赖 DOM 选择器操作前端。
+插件由三层共用同一套运行时：两个 Codex Skill 分别负责贴标设计和 GLB 制作，MCP 提供六个粗粒度工具，`label-cli` 提供可脚本化的 JSON 接口。Agent 不需要依赖 DOM 选择器操作前端。
 
 ## 准备运行环境
 
@@ -12,7 +12,7 @@ pnpm exec playwright install chromium
 pnpm build
 ```
 
-要求 Node.js 22+、pnpm 和可运行 Chromium/WebGL 的本机环境。插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)，MCP 配置位于 [`.mcp.json`](.mcp.json)，Agent 工作流位于 [`skills/cosmetic-label-editor/SKILL.md`](skills/cosmetic-label-editor/SKILL.md)。
+要求 Node.js 22+、pnpm 和可运行 Chromium/WebGL 的本机环境。插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)，MCP 配置位于 [`.mcp.json`](.mcp.json)。插件安装时会同时安装 [`cosmetic-label`](skills/cosmetic-label/SKILL.md) 和 [`cosmetic-label-editor`](skills/cosmetic-label-editor/SKILL.md)。
 
 安装到 Codex 时，将本目录作为 `glb-label-editor` 插件源加入个人或团队 marketplace，再执行：
 
@@ -29,6 +29,16 @@ codex mcp add glb-label-editor -- node /absolute/path/to/glb-label-editor/script
 
 安装或更新插件后，请新建 Codex 会话，使 Skill 和 MCP 工具重新加载。
 
+## 两阶段工作流
+
+完整顺序固定为 `$cosmetic-label` → `$cosmetic-label-editor`：
+
+1. `$cosmetic-label` 完成需求澄清、案例依据、排版/字体/工艺/内容四维设计、正背标 mockup 和 Editor Handoff。
+2. 用户确认方向；若用户明确要求不中断快速执行，则交接状态标记为 `assumed_for_fast_run` 并公开全部假设。
+3. `$cosmetic-label-editor` 读取交接，再检查 GLB、解析稳定 mesh、生成并校验 Label Spec v2，最后发布完整产物。
+
+设计阶段不猜 mesh、`stableSelector` 或 UV；制作阶段不擅自重做品牌、文案、字体、颜色、工艺和内容层级。Editor Handoff 合约位于 [`skills/cosmetic-label/references/editor_handoff.md`](skills/cosmetic-label/references/editor_handoff.md)。
+
 ## Agent 工具
 
 | MCP 工具 | 用途 | 是否写文件 |
@@ -40,7 +50,7 @@ codex mcp add glb-label-editor -- node /absolute/path/to/glb-label-editor/script
 | `export_label_assets` | 从已保存 `.lbl` 项目再次导出完整交付物 | 是 |
 | `open_label_editor` | 返回同一会话的本机令牌化 URL，供人工审阅和接管 | 否 |
 
-推荐 Agent 顺序是 `inspect_model` → `validate_label_spec` → `apply_label_spec`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open_label_editor` 只用于人机接力，不是自动化所必需的步骤。
+进入 `$cosmetic-label-editor` 后，推荐工具顺序是 `inspect_model` → `validate_label_spec` → `apply_label_spec`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open_label_editor` 只用于人机接力，不是自动化所必需的步骤。
 
 ## CLI
 

@@ -9,6 +9,7 @@ import type { LabelAreaConfig } from '../label/types'
 import type { BakeInput } from './exportTypes'
 
 export interface PreparedArea {
+  areaId: string
   meshIndex: number
   nodeName: string
   surfaceMode: 'overlay' | 'replace'
@@ -33,7 +34,7 @@ export async function prepareAllAreas(glbBytes: Uint8Array, areas: LabelAreaConf
       canvasToPngBytes(packMetalRough(bake.metalness, bake.roughness)),
       canvasToPngBytes(bumpToNormal(bake.bump)),
     ])
-    out.push({ meshIndex: area.meshIndex, nodeName: area.nodeName, surfaceMode: area.surfaceMode ?? 'replace', fullRange: area.range.uWidth >= 0.999 && area.range.vHeight >= 0.999, remap, colorPng, metalRoughPng, normalPng })
+    out.push({ areaId: area.id, meshIndex: area.meshIndex, nodeName: area.nodeName, surfaceMode: area.surfaceMode ?? 'replace', fullRange: area.range.uWidth >= 0.999 && area.range.vHeight >= 0.999, remap, colorPng, metalRoughPng, normalPng })
   }
   return out
 }

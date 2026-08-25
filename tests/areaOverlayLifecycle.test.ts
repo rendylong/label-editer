@@ -46,6 +46,33 @@ function controllerWithModel(model: THREE.Group): SceneController {
 }
 
 describe('per-area 3D overlay lifecycle', () => {
+  it('keeps front and back overlays independent when both target the same mesh', () => {
+    const model = new THREE.Group()
+    const source = sourceMesh('Bottle')
+    model.add(source)
+    const controller = controllerWithModel(model)
+    const applyGeometry = controller.applyLabelGeometry as unknown as (
+      remap: RemapOutput,
+      nodeName: string,
+      mode: 'overlay',
+      meshIndex: number | undefined,
+      areaId: string,
+    ) => void
+
+    applyGeometry.call(controller, REMAP, source.name, 'overlay', undefined, 'front')
+    applyGeometry.call(controller, { ...REMAP, uv: new Float32Array([0.5, 0, 1, 0, 0.5, 1]) }, source.name, 'overlay', undefined, 'back')
+    controller.applyLabelBake('front', { color: canvas(), metalness: canvas(), roughness: canvas(), bump: canvas() })
+    controller.applyLabelBake('back', { color: canvas(), metalness: canvas(), roughness: canvas(), bump: canvas() })
+
+    const internals = controller as unknown as {
+      labelMeshes: Map<string, THREE.Mesh>
+      labelTextures: Map<string, { color: THREE.Texture }>
+    }
+    expect([...internals.labelMeshes.keys()]).toEqual(['front', 'back'])
+    expect(internals.labelMeshes.get('front')).not.toBe(internals.labelMeshes.get('back'))
+    expect(internals.labelTextures.get('front')?.color).not.toBe(internals.labelTextures.get('back')?.color)
+  })
+
   it('resolves a Three.js-sanitized perfume mesh by stable mesh index, preserves it until bake, and highlights the overlay', () => {
     const model = new THREE.Group()
     const source = sourceMesh('label_Material008_0')

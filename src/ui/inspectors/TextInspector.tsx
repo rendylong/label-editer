@@ -78,9 +78,14 @@ export function TextInspector({ area, layer, patch, uploadFont = uploadFontFile,
             <label>行距 {layer.lineHeight}<input type="range" min={0.8} max={2.5} step={0.05} value={layer.lineHeight} onChange={(event) => patch({ lineHeight: +event.target.value })} /></label>
           </div>
           <div className="row2">
+            <label>文本框宽度<input type="number" min={8} max={4096} value={Math.round(layer.width ?? 320)} onChange={(event) => patch({ width: Math.max(8, +event.target.value || 8) })} /></label>
+            <label>书写方向<select value={layer.writingDirection ?? 'auto'} onChange={(event) => patch({ writingDirection: event.target.value as TextLayer['writingDirection'] })}><option value="auto">自动</option><option value="ltr">从左到右</option><option value="rtl">从右到左</option></select></label>
+          </div>
+          <div className="row2">
             <label>对齐<select value={layer.align} onChange={(event) => patch({ align: event.target.value as TextLayer['align'] })}><option value="left">左</option><option value="center">中</option><option value="right">右</option></select></label>
             <label>朝向<select value={layer.direction ?? 'horizontal'} onChange={(event) => patch({ direction: event.target.value as TextLayer['direction'] })}><option value="horizontal">横向环绕</option><option value="vertical">纵向瓶高</option></select></label>
           </div>
+          <label>语言标签<input type="text" value={layer.language ?? ''} placeholder="例如 ar、zh-Hans" onChange={(event) => patch({ language: event.target.value })} /></label>
           <label className="inline-toggle"><span>斜体{!italicSupported ? '（无真实斜体资源）' : ''}</span><input type="checkbox" checked={italicSupported && layer.italic} disabled={!italicSupported} onChange={(event) => patch({ italic: event.target.checked })} /></label>
         </div>
       </InspectorSection>

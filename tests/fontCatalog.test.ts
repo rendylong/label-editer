@@ -23,16 +23,21 @@ const expectedIdsByCategory = {
   ],
   handwriting: ['caveat', 'dancing-script', 'pacifico', 'sacramento', 'great-vibes', 'satisfy'],
   mono: ['ibm-plex-mono', 'jetbrains-mono', 'space-mono', 'roboto-mono'],
+  arabic: ['noto-sans-arabic'],
 } as const
 
 describe('font catalog', () => {
-  it('contains exactly the 60 required unique curated families in their categories', () => {
-    expect(FONT_CATALOG).toHaveLength(60)
-    expect(new Set(FONT_CATALOG.map((font) => font.id)).size).toBe(60)
+  it('contains the curated families plus a bundled Arabic family', () => {
+    expect(FONT_CATALOG).toHaveLength(61)
+    expect(new Set(FONT_CATALOG.map((font) => font.id)).size).toBe(61)
 
     for (const [category, ids] of Object.entries(expectedIdsByCategory)) {
       expect(FONT_CATALOG.filter((font) => font.category === category).map((font) => font.id)).toEqual(ids)
     }
+  })
+
+  it('provides real Arabic coverage instead of a system fallback', () => {
+    expect(fontEntry('noto-sans-arabic')).toMatchObject({ category: 'arabic', languages: expect.arrayContaining(['ar', 'latin']) })
   })
 
   it('maps old saved names to stable ids while preserving unknown names', () => {
@@ -58,7 +63,8 @@ describe('font catalog', () => {
       const fontPath = resolve(process.cwd(), `public${entry.files['400-normal']}`)
       const licensePath = resolve(process.cwd(), `public${entry.license.path}`)
       expect(existsSync(fontPath), `${entry.id} is missing ${fontPath}`).toBe(true)
-      expect(readFileSync(fontPath).subarray(0, 4).toString('ascii'), `${entry.id} is not WOFF2`).toBe('wOF2')
+      const signature = readFileSync(fontPath).subarray(0, 4)
+      expect([signature.toString('ascii'), signature.toString('hex')], `${entry.id} is not WOFF2 or TrueType`).toEqual(expect.arrayContaining([expect.stringMatching(/^(wOF2|00010000)$/)]))
       expect(existsSync(licensePath), `${entry.id} is missing ${licensePath}`).toBe(true)
       expect(readFileSync(licensePath, 'utf8').trim().length, `${entry.id} has an empty license`).toBeGreaterThan(100)
     }
