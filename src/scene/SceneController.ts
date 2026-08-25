@@ -544,8 +544,12 @@ export class SceneController {
       target: this.controls.target.clone(),
       channel: this.channelView,
       outlineSelection: [...this.outline.selectedObjects],
-      frontMarkerVisible: this.frontMarker?.visible,
-      areaControlVisible: this.areaControlGroup?.visible,
+      frontMarker: this.frontMarker
+        ? { object: this.frontMarker, visible: this.frontMarker.visible }
+        : null,
+      areaControl: this.areaControlGroup
+        ? { object: this.areaControlGroup, visible: this.areaControlGroup.visible }
+        : null,
     }
 
     try {
@@ -561,7 +565,7 @@ export class SceneController {
 
       const camera: QcCameraMetadata = {
         position: qcCamera.position.toArray(),
-        direction: qcCamera.direction.toArray(),
+        direction: this.camera.getWorldDirection(new THREE.Vector3()).toArray(),
         target: qcCamera.target.toArray(),
         up: qcCamera.up.toArray(),
         fov: this.camera.fov,
@@ -578,11 +582,11 @@ export class SceneController {
       this.controls.target.copy(previous.target)
       this.setChannelView(previous.channel)
       this.outline.selectedObjects = previous.outlineSelection
-      if (this.frontMarker && previous.frontMarkerVisible !== undefined) {
-        this.frontMarker.visible = previous.frontMarkerVisible
+      if (this.frontMarker && this.frontMarker === previous.frontMarker?.object) {
+        this.frontMarker.visible = previous.frontMarker.visible
       }
-      if (this.areaControlGroup && previous.areaControlVisible !== undefined) {
-        this.areaControlGroup.visible = previous.areaControlVisible
+      if (this.areaControlGroup && this.areaControlGroup === previous.areaControl?.object) {
+        this.areaControlGroup.visible = previous.areaControl.visible
       }
       this.requestRender()
     }

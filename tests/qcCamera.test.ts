@@ -93,6 +93,7 @@ function captureState(internals: QcControllerInternals) {
     cameraUp: internals.camera.up.toArray(),
     cameraFov: internals.camera.fov,
     cameraAspect: internals.camera.aspect,
+    cameraWorldDirection: internals.camera.getWorldDirection(new THREE.Vector3()).toArray(),
     controlsTarget: internals.controls.target.toArray(),
     channel: internals.channelView,
     rendererSize: internals.renderer.getSize(new THREE.Vector2()).toArray(),
@@ -216,10 +217,11 @@ describe('QC camera math', () => {
 
     expect(result.blob.type).toBe('image/png')
     expect(result.camera.target).toEqual([2, 0, 0])
-    expect(result.camera.direction[0]).toBeCloseTo(1, 5)
+    expect(result.camera.direction[0]).toBeCloseTo(-1, 5)
     expect(result.camera.direction[1]).toBeCloseTo(0, 5)
     expect(result.camera.direction[2]).toBeCloseTo(0, 5)
     expect(result.camera.position).toEqual(during?.cameraPosition)
+    expect(result.camera.direction).toEqual(during?.cameraWorldDirection)
     expect(result.camera.target).toEqual(during?.controlsTarget)
     expect(result.camera.up).toEqual(during?.cameraUp)
     expect(result.camera.fov).toBe(during?.cameraFov)
@@ -232,6 +234,30 @@ describe('QC camera math', () => {
       areaControlVisible: false,
     })
     expect(captureState(internals)).toEqual(before)
+  })
+
+  it('does not restore stale visibility onto markers replaced during async PNG encoding', async () => {
+    const { controller, internals } = qcControllerHarness()
+    let resolveEncoding!: (blob: Blob) => void
+    const encoding = new Promise<Blob>((resolve) => { resolveEncoding = resolve })
+    internals.encodePng = () => encoding
+    const originalMarker = internals.frontMarker
+    const originalAreaControl = internals.areaControlGroup
+
+    const capture = captureQc(controller, AREA_FACE_REQUEST)
+    const replacementMarker = new THREE.Object3D()
+    const replacementAreaControl = new THREE.Group()
+    replacementMarker.visible = false
+    replacementAreaControl.visible = false
+    internals.frontMarker = replacementMarker
+    internals.areaControlGroup = replacementAreaControl
+    resolveEncoding(new Blob(['png'], { type: 'image/png' }))
+
+    await expect(capture).resolves.toMatchObject({ blob: expect.any(Blob) })
+    expect(replacementMarker.visible).toBe(false)
+    expect(replacementAreaControl.visible).toBe(false)
+    expect(originalMarker.visible).toBe(false)
+    expect(originalAreaControl.visible).toBe(false)
   })
 
   it('restores every mutated scene state when PNG encoding rejects', async () => {
