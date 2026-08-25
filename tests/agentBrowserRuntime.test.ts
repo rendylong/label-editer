@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserAgentBridge } from '../src/agent/browserBridgeRuntime'
 import { registerAgentPreviewCapture } from '../src/agent/previewCapture'
 import type { QcCameraMetadata } from '../src/agent/contracts'
+import { designFontReadinessKey } from '../src/label/exportReadiness'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
 
@@ -205,9 +206,9 @@ describe('browser Agent QC runtime', () => {
           areaId: 'front-label', meshIndex: 7, nodeName: 'Bottle_Label',
           side: 'front', surfaceMode: 'replace',
           viewIds: [
-            'qc-area-front-label-face', 'qc-area-front-label-craft',
-            'qc-area-front-label-metalness', 'qc-area-front-label-roughness',
-            'qc-area-front-label-bump',
+            'area-front-label-face', 'area-front-label-craft',
+            'area-front-label-metalness', 'area-front-label-roughness',
+            'area-front-label-bump',
           ],
         }],
       },
@@ -215,6 +216,57 @@ describe('browser Agent QC runtime', () => {
     if (!result.ok) throw new Error('Expected successful QC result')
     expect(result.data.views.map((view) => view.artifact.id)).toEqual(requestIds.map((id) => `qc-${id}`))
     expect(result.data.views.at(-1)?.camera).toEqual(camera)
+  })
+
+  it('waits for the post-activation bake replacement before snapshotting guarded QC state', async () => {
+    const owner = area()
+    owner.layers.push({
+      id: 'copy', kind: 'text', text: 'QC READY', fontFamily: 'system-sans',
+      fontSize: 24, fontWeight: 400, letterSpacing: 0, lineHeight: 1.2,
+      width: 1, color: '#000000', align: 'center', italic: false,
+      direction: 'horizontal', writingDirection: 'auto', language: 'en',
+      x: 1, y: 1, rotation: 0, opacity: 1, visible: true, locked: false,
+      zIndex: 1, craft: [],
+    })
+    installOwner(owner)
+    const readinessKey = designFontReadinessKey(owner)
+    useLabelStore.setState({
+      activeAreaId: null,
+      activeArea: null,
+      bakeMap: { [owner.id]: { ...bake(owner), fontReadinessKey: readinessKey } },
+    })
+    const originalActivateArea = useLabelStore.getState().activateArea
+    const replacement = { ...bake(owner), version: 2, fontReadinessKey: readinessKey }
+    useLabelStore.setState({
+      activateArea: (id) => {
+        originalActivateArea(id)
+        setTimeout(() => useLabelStore.getState().setBake(owner.id, replacement), 400)
+      },
+    })
+    const capturedBakes: Array<BakeResult | undefined> = []
+    const camera: QcCameraMetadata = {
+      position: [1, 2, 3], direction: [0, 0, 1], target: [0, 0, 0],
+      up: [0, 1, 0], fov: 45,
+    }
+    disposeCapture = registerAgentPreviewCapture({
+      preview: async () => pngBlob('preview'),
+      qc: async (request) => {
+        capturedBakes.push(useLabelStore.getState().bakeMap[owner.id])
+        if (capturedBakes.length === 1) await new Promise((resolve) => setTimeout(resolve, 450))
+        return { blob: pngBlob(request.id), camera }
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+      const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
+      return { ok: true, json: async () => uploadedDescriptor(id) } as Response
+    }))
+
+    const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderQcEvidence()
+
+    expect(result).toMatchObject({ ok: true, operation: 'render_qc_evidence' })
+    expect(capturedBakes.length).toBeGreaterThan(0)
+    expect(capturedBakes.every((captured) => captured === replacement)).toBe(true)
   })
 
   it('returns a structured issue when a required craft channel has no contribution', async () => {

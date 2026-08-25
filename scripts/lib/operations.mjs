@@ -4,7 +4,8 @@ import { open, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { failure, success } from './envelope.mjs'
 import { publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
-import { inspectProject, patchLabelSpec } from './project-control.mjs'
+import { inspectProject, patchLabelSpec, revisionOf } from './project-control.mjs'
+import { buildQcManifest, parseQcCameraConfig, qcArtifactRelativePath, validateQcManifest } from './qc-output.mjs'
 import { startLivePreview } from './live-preview.mjs'
 
 const schemaPath = path.resolve(import.meta.dirname, '../../src/agent/label-spec-v2.schema.json')
@@ -137,6 +138,50 @@ function publicArtifact(artifact, relativePath) {
     areaId: artifact.areaId,
     channel: artifact.channel,
   }
+}
+
+function qcModelInspection(value) {
+  const fingerprint = typeof value?.fingerprint === 'string' && /^[a-f0-9]{64}$/.test(value.fingerprint)
+    ? `sha256:${value.fingerprint}`
+    : value?.fingerprint
+  return { ...value, fingerprint }
+}
+
+function exactQcArtifacts(evidence, received) {
+  if (!Array.isArray(evidence?.views) || !Array.isArray(received)) {
+    const error = new Error('QC evidence or stored artifacts are missing')
+    error.code = 'INVALID_USAGE'
+    throw error
+  }
+  const expectedIds = evidence.views.map((entry) => entry?.artifact?.id)
+  if (expectedIds.some((id) => typeof id !== 'string' || !id) || new Set(expectedIds).size !== expectedIds.length) {
+    const error = new Error('QC evidence contains missing or duplicate artifact ids')
+    error.code = 'INVALID_USAGE'
+    throw error
+  }
+  const storedById = new Map()
+  for (const artifact of received) {
+    if (!artifact || typeof artifact.id !== 'string' || storedById.has(artifact.id)) {
+      const error = new Error('Stored QC artifacts contain a missing or duplicate id')
+      error.code = 'INVALID_USAGE'
+      throw error
+    }
+    storedById.set(artifact.id, artifact)
+  }
+  if (storedById.size !== expectedIds.length || [...storedById.keys()].some((id) => !expectedIds.includes(id))) {
+    const error = new Error('Stored QC artifacts do not exactly match the captured evidence')
+    error.code = 'INVALID_USAGE'
+    throw error
+  }
+  return expectedIds.map((id) => {
+    const artifact = storedById.get(id)
+    if (!artifact) {
+      const error = new Error(`Stored QC artifact is missing: ${id}`)
+      error.code = 'INVALID_USAGE'
+      throw error
+    }
+    return artifact
+  })
 }
 
 function patchLockPath(targetPath) {
@@ -398,6 +443,115 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
         })
       } catch (error) {
         return failure('apply_label_spec', error, { sessionId: session?.id })
+      }
+    },
+
+    async qc({
+      inputPath,
+      glbPath,
+      outputDir,
+      preset = 'qc-standard',
+      cameraConfigPath,
+      width = 1440,
+      height = 1440,
+      force = false,
+    }) {
+      let session
+      try {
+        progress('Inspecting label input for QC')
+        const input = await readJsonInput(rootPolicy, { inputPath })
+        const project = inspectProject(input.value)
+        const revision = revisionOf(input.value)
+        const customViews = cameraConfigPath
+          ? parseQcCameraConfig((await readJsonInput(rootPolicy, {
+              inputPath: cameraConfigPath,
+              parseErrorCode: 'INVALID_USAGE',
+            })).value)
+          : []
+        const resolvedOutput = await assertOutputAvailable(runtime, outputDir, force)
+
+        session = await runtime.createSession({ glbPath })
+        progress('Loading model in browser renderer')
+        const inspected = await loadSessionModel(runtime, session)
+        const inspection = qcModelInspection(inspected.data)
+        progress('Applying label design for QC')
+        const applied = isLabelProjectValue(input.value)
+          ? unwrapBridge(await runtime.callBridge(session, 'applyProject', { project: input.value }))
+          : unwrapBridge(await runtime.callBridge(session, 'applySpec', {
+              spec: input.value,
+              assetUrls: await addSpecAssets(runtime, session, input.value, input.baseDir),
+            }))
+        unwrapBridge(await runtime.callBridge(session, 'waitForReady', { timeoutMs: 60_000 }))
+        progress('Capturing QC evidence')
+        const evidence = unwrapBridge(await runtime.callBridge(session, 'renderQcEvidence', {
+          preset,
+          width,
+          height,
+          customViews,
+        }))
+        const browserErrors = runtime.browserErrors(session.id)
+        if (browserErrors.length > 0) {
+          const error = new Error(`Browser reported errors: ${browserErrors.join('; ')}`)
+          error.code = 'BROWSER_NOT_READY'
+          throw error
+        }
+
+        const storedArtifacts = exactQcArtifacts(evidence.data, runtime.getArtifacts(session.id))
+        const manifest = validateQcManifest(buildQcManifest({
+          createdAt: new Date().toISOString(),
+          project,
+          inspection,
+          evidence: evidence.data,
+          artifacts: storedArtifacts,
+        }))
+        if (manifest.input.revision !== revision) {
+          const error = new Error('QC manifest revision does not match the current input')
+          error.code = 'INVALID_USAGE'
+          throw error
+        }
+        const relativePaths = new Map(manifest.artifacts.map((artifact) => [artifact.id, artifact.path]))
+        const publishArtifacts = evidence.data.views.map((entry, index) => ({
+          ...storedArtifacts[index],
+          relativePath: relativePaths.get(entry.artifact.id) ?? qcArtifactRelativePath(entry),
+        }))
+        const manifestBytes = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`)
+        const manifestArtifact = {
+          id: 'qc-manifest',
+          fileName: 'qc-manifest.json',
+          relativePath: 'qc-manifest.json',
+          mimeType: 'application/json',
+          bytes: manifestBytes,
+          byteLength: manifestBytes.byteLength,
+          sha256: sha256Bytes(manifestBytes),
+        }
+        publishArtifacts.push(manifestArtifact)
+        const publishedOutput = await runtime.publishArtifacts(
+          session.id,
+          resolvedOutput,
+          publishArtifacts,
+          force,
+        )
+        const manifestPath = path.join(publishedOutput, 'qc-manifest.json')
+        return success('render_label_qc', {
+          outputDir: publishedOutput,
+          manifestPath,
+          revision,
+          modelFingerprint: inspection.fingerprint,
+          preset,
+          artifacts: [
+            ...manifest.artifacts.map((artifact) => ({
+              ...artifact,
+              path: path.join(publishedOutput, artifact.path),
+            })),
+            publicArtifact(manifestArtifact, manifestPath),
+          ],
+          validation: evidence.data.validation,
+        }, {
+          sessionId: session.id,
+          warnings: [...inspected.warnings, ...applied.warnings, ...evidence.warnings],
+        })
+      } catch (error) {
+        return failure('render_label_qc', error, { sessionId: session?.id })
       }
     },
 

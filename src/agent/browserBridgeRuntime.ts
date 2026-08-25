@@ -5,6 +5,7 @@ import { restoreImportedAreaRuntime } from '../app/projectImportRuntime'
 import { extractMeshAccessors, isMeshWorldMirrored, meshLocalFrontDirection, readGlb } from '../glb/analyze'
 import { makeDefaultRemap } from '../glb/uvRemap'
 import type { LabelAreaConfig, LabelLayer } from '../label/types'
+import { designFontReadinessKey } from '../label/exportReadiness'
 import { validatePrintReadiness } from '../label/printReadiness'
 import { useLabelStore, useModelStore, useUiStore } from '../state/stores'
 import { createExportBundle, type BrowserArtifact } from './artifactExport'
@@ -186,7 +187,7 @@ function qcAreaEvidence(areas: LabelAreaConfig[], views: QcViewResult[]): QcArea
     nodeName: area.nodeName,
     ...(area.side ? { side: area.side } : {}),
     surfaceMode: area.surfaceMode ?? 'overlay',
-    viewIds: views.filter((result) => result.view.areaId === area.id).map((result) => result.artifact.id),
+    viewIds: views.filter((result) => result.view.areaId === area.id).map((result) => result.view.id),
   }))
 }
 
@@ -281,18 +282,60 @@ async function waitForBakes(timeoutMs = 30_000): Promise<void> {
   const areas = useLabelStore.getState().areas
   const glbBytes = useModelStore.getState().glbBytes
   if (!glbBytes) throw new Error('No model is loaded')
+  if (areas.length === 0) return
   for (const original of areas) {
     const runtime = await restoreImportedAreaRuntime(glbBytes, original)
+    const beforeActivation = useLabelStore.getState()
+    const previousBake = beforeActivation.bakeMap[original.id]
+    const requiresPostActivationBake = beforeActivation.activeAreaId !== original.id
     useLabelStore.getState().activateArea(original.id)
     useLabelStore.getState().setAreaData(runtime.remapOutput, runtime.meshAccessors)
+    await sleepFrame()
     while (true) {
       const state = useLabelStore.getState()
       const current = state.areas.find((area) => area.id === original.id)
       const bake = state.bakeMap[original.id]
-      if (current && bake?.areaOwner === current && bake.color.width > 0 && bake.color.height > 0) break
-      if (performance.now() - started > timeoutMs) throw new Error(`Timed out waiting for label bake: ${original.name}`)
+      if (current && bake?.areaOwner === current
+        && bake.color.width > 0 && bake.color.height > 0
+        && (bake.fontReadinessKey ?? '') === designFontReadinessKey(current)
+        && (!requiresPostActivationBake || bake !== previousBake)) break
+      if (performance.now() - started > timeoutMs) {
+        throw new Error(`Timed out waiting for ${requiresPostActivationBake ? 'post-activation ' : ''}label bake: ${original.name}`)
+      }
       await sleepFrame()
     }
+  }
+
+  const settleMs = 350
+  const settledBakes = new Map<string, BakeResult>()
+  let stableSince = performance.now()
+  while (true) {
+    const state = useLabelStore.getState()
+    let ready = true
+    let changed = settledBakes.size !== areas.length
+    for (const original of areas) {
+      const current = state.areas.find((area) => area.id === original.id)
+      const bake = state.bakeMap[original.id]
+      if (!current || bake?.areaOwner !== current || bake.color.width < 1 || bake.color.height < 1
+        || (bake.fontReadinessKey ?? '') !== designFontReadinessKey(current)) {
+        ready = false
+        break
+      }
+      if (settledBakes.get(original.id) !== bake) changed = true
+    }
+    const now = performance.now()
+    if (!ready) {
+      settledBakes.clear()
+      stableSince = now
+    } else if (changed) {
+      settledBakes.clear()
+      for (const original of areas) settledBakes.set(original.id, state.bakeMap[original.id])
+      stableSince = now
+    } else if (now - stableSince >= settleMs) {
+      return
+    }
+    if (now - started > timeoutMs) throw new Error('Timed out waiting for label bakes to settle')
+    await sleepFrame()
   }
 }
 

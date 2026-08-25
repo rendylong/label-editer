@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -138,6 +138,35 @@ describe('GLB label plugin E2E', () => {
     expect(previewCode, previewStdout[0]).toBe(0)
     expect((await readFile(previewOutput)).subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
     expect((await readdir(root)).some((name) => name.endsWith('.artifacts'))).toBe(false)
+
+    const qcOutput = path.join(root, 'label-qc', 'round-0')
+    await mkdir(path.dirname(qcOutput))
+    const qcStdout: string[] = []
+    const qcCode = await runCli([
+      'qc', workingSpec, '--glb', modelPath,
+      '--output', qcOutput, '--preset', 'qc-standard', '--json',
+    ], { ...dependencies, stdout: (value: string) => qcStdout.push(value) })
+    expect(qcCode, qcStdout[0]).toBe(0)
+    expect(qcStdout).toHaveLength(1)
+    const publishedQcOutput = path.join(await realpath(root), 'label-qc', 'round-0')
+    expect(JSON.parse(qcStdout[0])).toMatchObject({
+      ok: true,
+      operation: 'render_label_qc',
+      data: { outputDir: publishedQcOutput, manifestPath: path.join(publishedQcOutput, 'qc-manifest.json') },
+    })
+    const currentSpec = JSON.parse(await readFile(workingSpec, 'utf8'))
+    const qcManifest = JSON.parse(await readFile(path.join(qcOutput, 'qc-manifest.json'), 'utf8'))
+    expect(qcManifest.input.revision).toBe(revisionOf(currentSpec))
+    expect(qcManifest.artifacts.filter((item: { channel: string }) => item.channel === 'color').length).toBeGreaterThanOrEqual(10)
+    for (const artifact of qcManifest.artifacts) {
+      const png = await readFile(path.join(qcOutput, artifact.path))
+      expect(png.subarray(0, 8), artifact.path).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      expect(hash(png), artifact.path).toBe(artifact.sha256)
+    }
+    expect((await readdir(path.dirname(qcOutput))).some((name) => name.startsWith('.round-0.'))).toBe(false)
+    for (const forbidden of ['labeled.glb', 'project.lbl.json', 'label-spec.normalized.json', 'print-manifest.json', 'preview-3d.png', 'manifest.json']) {
+      expect(existsSync(path.join(qcOutput, forbidden)), forbidden).toBe(false)
+    }
 
     const runtime = await createPluginRuntime(dependencies.runtimeOptions)
     try {

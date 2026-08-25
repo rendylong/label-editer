@@ -3,7 +3,7 @@
 import { pathToFileURL } from 'node:url'
 import { exitCodeForEnvelope, failure } from './lib/envelope.mjs'
 
-const valueOptions = new Set(['glb', 'output', 'view', 'operations'])
+const valueOptions = new Set(['glb', 'output', 'view', 'operations', 'preset', 'camera-config', 'width', 'height'])
 const booleanOptions = new Set(['json', 'force', 'open'])
 
 function usageError(message) {
@@ -36,16 +36,27 @@ function parseArgv(argv) {
   return { command, positional, options }
 }
 
+function parseDimension(value, name) {
+  if (value === undefined) return 1440
+  if (!/^\d+$/.test(value)) throw usageError(`--${name} must be an integer from 1 to 4096`)
+  const number = Number(value)
+  if (number < 1 || number > 4096) throw usageError(`--${name} must be an integer from 1 to 4096`)
+  return number
+}
+
 function assertShape(parsed) {
   const { command, positional, options } = parsed
   if (command === 'schema') {
     if (positional.length !== 0) throw usageError('schema accepts no positional arguments')
     return
   }
-  if (!['inspect', 'project', 'patch', 'validate', 'apply', 'preview', 'live', 'export', 'open'].includes(command)) {
+  if (!['inspect', 'project', 'patch', 'validate', 'apply', 'preview', 'qc', 'live', 'export', 'open'].includes(command)) {
     throw usageError(`Unknown command: ${command}`)
   }
   if (positional.length !== 1) throw usageError(`${command} requires exactly one input path`)
+  if (command !== 'qc' && options['camera-config']) {
+    throw usageError('--camera-config is only supported by qc')
+  }
   if (command === 'inspect') return
   if (command === 'project') return
   if (command === 'patch') {
@@ -61,6 +72,9 @@ function assertShape(parsed) {
   if (!options.glb) throw usageError(`${command} requires --glb <model.glb>`)
   if (command === 'open') return
   if (!options.output) throw usageError(`${command} requires --output <path>`)
+  if (command === 'qc' && options.preset !== undefined && options.preset !== 'qc-standard') {
+    throw usageError('--preset must be qc-standard')
+  }
   if (command === 'preview' && options.view && !['2d', 'split', '3d'].includes(options.view)) {
     throw usageError('--view must be 2d, split, or 3d')
   }
@@ -82,6 +96,16 @@ async function invoke(parsed, operations) {
   if (parsed.command === 'live') return operations.live({ specPath: input, glbPath: options.glb })
   if (parsed.command === 'apply') return operations.apply({ specPath: input, glbPath: options.glb, outputDir: options.output, force: options.force === true, openEditor: options.open === true })
   if (parsed.command === 'preview') return operations.preview({ inputPath: input, glbPath: options.glb, outputPath: options.output, view: options.view ?? '3d' })
+  if (parsed.command === 'qc') return operations.qc({
+    inputPath: input,
+    glbPath: options.glb,
+    outputDir: options.output,
+    preset: options.preset ?? 'qc-standard',
+    cameraConfigPath: options['camera-config'],
+    width: parseDimension(options.width, 'width'),
+    height: parseDimension(options.height, 'height'),
+    force: options.force === true,
+  })
   if (parsed.command === 'export') return operations.export({ projectPath: input, glbPath: options.glb, outputDir: options.output, force: options.force === true })
   return operations.open({ inputPath: input, glbPath: options.glb })
 }
