@@ -265,7 +265,36 @@ function fitAlongAxis(
 /** 根据圆柱度自动选择模式：质量 < 0.5 → 平面投影。 */
 export function detectLabelMode(mesh: MeshAccessors): 'cylindrical' | 'planar' {
   const fit = fitCylinder(mesh.positions)
-  return fit.quality >= 0.5 ? 'cylindrical' : 'planar'
+  return isNearlyPlanar(mesh.positions) || fit.quality < 0.5 ? 'planar' : 'cylindrical'
+}
+
+/** A sparse rectangular label plane can have perfectly constant radius around its long axis. */
+function isNearlyPlanar(positions: Float32Array): boolean {
+  const count = positions.length / 3
+  if (count < 3) return false
+  const mean = [0, 0, 0]
+  for (let index = 0; index < count; index++) {
+    mean[0] += positions[index * 3]
+    mean[1] += positions[index * 3 + 1]
+    mean[2] += positions[index * 3 + 2]
+  }
+  mean[0] /= count
+  mean[1] /= count
+  mean[2] /= count
+  const covariance = [[0, 0, 0], [0, 0, 0], [0, 0, 0]]
+  for (let index = 0; index < count; index++) {
+    const delta = [
+      positions[index * 3] - mean[0],
+      positions[index * 3 + 1] - mean[1],
+      positions[index * 3 + 2] - mean[2],
+    ]
+    for (let row = 0; row < 3; row++) for (let column = row; column < 3; column++) covariance[row][column] += delta[row] * delta[column]
+  }
+  covariance[1][0] = covariance[0][1]
+  covariance[2][0] = covariance[0][2]
+  covariance[2][1] = covariance[1][2]
+  const values = eigenSymmetric(covariance).values.map(Math.abs).sort((a, b) => a - b)
+  return values[2] > 1e-12 && values[1] > values[2] * 1e-8 && values[0] <= values[2] * 1e-6
 }
 
 /** 由几何推导画布规格：width 固定 2048，height 按宽高比（含区域尺寸）。 */
@@ -408,23 +437,20 @@ export function computeRemap(
       vArr[i] = (along - aMin) / Math.max(aMax - aMin, 1e-6)
     }
   } else {
-    const [px0, py0, pz0] = planarBox.min
-    const [px1, py1, pz1] = planarBox.max
-    // 平面投影：按轴方向正交平面归一化（简化：用轴投影 + 平面两方向）
+    const horizontalMin = planarBox.min[0]
+    const verticalMin = planarBox.min[1]
+    const horizontalSpan = Math.max(planarBox.max[0] - horizontalMin, 1e-6)
+    const verticalSpan = Math.max(planarBox.max[1] - verticalMin, 1e-6)
+    // 平面投影：U 沿标签横向，V 沿标签长轴。planarBox 存的是这两个投影坐标的范围。
     for (let i = 0; i < n; i++) {
       const dx = positions[i * 3] - origin[0]
       const dy = positions[i * 3 + 1] - origin[1]
       const dz = positions[i * 3 + 2] - origin[2]
       const along = dx * axis[0] + dy * axis[1] + dz * axis[2]
-      const px = dx - along * axis[0]
-      const py = dy - along * axis[1]
-      const pz = dz - along * axis[2]
-      const e0 = px * u0[0] + py * u0[1] + pz * u0[2]
-      const e1 = px * u1[0] + py * u1[1] + pz * u1[2]
-      const w0 = Math.max(px1 - px0, 1e-6)
-      const w1 = Math.max(py1 - py0, pz1 - pz0, 1e-6)
-      uArr[i] = Math.min(0.9999, Math.max(0, (e0 + w0 / 2) / w0))
-      vArr[i] = Math.min(0.9999, Math.max(0, (e1 + w1 / 2) / w1))
+      const horizontal = dx * u0[0] + dy * u0[1] + dz * u0[2]
+      const u = Math.min(1, Math.max(0, (horizontal - horizontalMin) / horizontalSpan))
+      uArr[i] = params.mirrorU ? 1 - u : u
+      vArr[i] = Math.min(1, Math.max(0, (along - verticalMin) / verticalSpan))
     }
   }
 
@@ -637,11 +663,32 @@ export function makeDefaultRemap(
   preferredFront: [number, number, number] = [0, 0, 1],
 ): RemapParams {
   const fit = fitCylinder(mesh.positions)
-  const axis = stabilizeLabelAxis(fit.axis)
-  const mode = fit.quality >= 0.5 ? 'cylindrical' : 'planar'
-  const span = axisSpan(mesh.positions, axis, fit.origin)
-  const minV = span[0]
-  const maxV = span[1]
+  const mode = isNearlyPlanar(mesh.positions) || fit.quality < 0.5 ? 'planar' : 'cylindrical'
+  let axis = stabilizeLabelAxis(fit.axis)
+  if (mode === 'planar') {
+    const dominant = [0, 1, 2].reduce((best, index) => Math.abs(axis[index]) > Math.abs(axis[best]) ? index : best, 0)
+    if (axis[dominant] < 0) axis = axis.map((value) => -value) as [number, number, number]
+  }
+  const [verticalMin, verticalMax] = axisSpan(mesh.positions, axis, fit.origin)
+  const { u0 } = buildBasis(axis)
+  let horizontalMin = Infinity
+  let horizontalMax = -Infinity
+  for (let index = 0; index < mesh.positions.length; index += 3) {
+    const horizontal = (mesh.positions[index] - fit.origin[0]) * u0[0]
+      + (mesh.positions[index + 1] - fit.origin[1]) * u0[1]
+      + (mesh.positions[index + 2] - fit.origin[2]) * u0[2]
+    horizontalMin = Math.min(horizontalMin, horizontal)
+    horizontalMax = Math.max(horizontalMax, horizontal)
+  }
+  let resolvedMirrorU = mirrorU
+  if (mode === 'planar') {
+    const right = [
+      axis[1] * preferredFront[2] - axis[2] * preferredFront[1],
+      axis[2] * preferredFront[0] - axis[0] * preferredFront[2],
+      axis[0] * preferredFront[1] - axis[1] * preferredFront[0],
+    ]
+    if (norm3(right) > 1e-6 && u0[0] * right[0] + u0[1] * right[1] + u0[2] * right[2] < 0) resolvedMirrorU = !resolvedMirrorU
+  }
   return {
     mode,
     axis,
@@ -649,10 +696,10 @@ export function makeDefaultRemap(
     radius: fit.radius,
     wrap: 1,
     offset: mode === 'cylindrical' ? defaultFrontOffset(axis, preferredFront) : 0,
-    mirrorU,
+    mirrorU: resolvedMirrorU,
     planarBox: {
-      min: [minV, 0, 0],
-      max: [maxV, 0, 0],
+      min: [horizontalMin, verticalMin, 0],
+      max: [horizontalMax, verticalMax, 0],
     },
   }
 }

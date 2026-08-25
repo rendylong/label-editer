@@ -1,6 +1,6 @@
 /** Structured Label Spec -> editable area/layer mapping. */
 
-import type { CraftEffect, LabelAreaConfig, LabelLayer, LabelPrintSpec, ShapeKind } from '../label/types'
+import type { CraftEffect, LabelAreaConfig, LabelLayer, LabelPrintSpec, ShapeGeometry, ShapeKind } from '../label/types'
 import { validateLabelSpec } from '../agent/labelSpecSchema'
 
 type UnknownRecord = Record<string, unknown>
@@ -28,8 +28,24 @@ function ratio(value: unknown, fallback: number): number {
   return Math.max(0, Math.min(1, finite(value, fallback)))
 }
 
+function normalizedDimension(value: unknown, fallback: number, maximum = 1): number {
+  return Math.max(0, Math.min(maximum, finite(value, fallback)))
+}
+
 function craft(value: unknown): CraftEffect[] {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') as CraftEffect[] : []
+}
+
+function shapeGeometry(value: unknown): ShapeGeometry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const input = value as UnknownRecord
+  const geometry: ShapeGeometry = {}
+  const numericKeys = ['sides', 'points', 'innerRatio', 'amplitude', 'frequency', 'inset', 'rows', 'columns', 'gap'] as const
+  const booleanKeys = ['arrowStart', 'arrowEnd', 'parallel'] as const
+  for (const key of numericKeys) if (typeof input[key] === 'number' && Number.isFinite(input[key])) geometry[key] = input[key]
+  for (const key of booleanKeys) if (typeof input[key] === 'boolean') geometry[key] = input[key]
+  if (Array.isArray(input.dash)) geometry.dash = input.dash.filter((item): item is number => typeof item === 'number' && Number.isFinite(item))
+  return geometry
 }
 
 function printSpec(value: unknown, fallback?: LabelPrintSpec): LabelPrintSpec | undefined {
@@ -58,15 +74,15 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
   if (input.type === 'shape') {
     const shape = (typeof input.shape === 'string' ? input.shape : 'rectangle') as ShapeKind
     return {
-      ...common, kind: 'shape', shape, geometry: {}, width: Math.max(4, ratio(input.width, 0.25) * area.canvas.width),
-      height: Math.max(4, ratio(input.height, 0.1) * area.canvas.height), fill: typeof input.fill === 'string' ? input.fill : '#000000',
+      ...common, kind: 'shape', shape, geometry: shapeGeometry(input.geometry), width: Math.max(4, normalizedDimension(input.width, 0.25, 4) * area.canvas.width),
+      height: Math.max(4, normalizedDimension(input.height, 0.1, 4) * area.canvas.height), fill: typeof input.fill === 'string' ? input.fill : '#000000',
       stroke: typeof input.stroke === 'string' ? input.stroke : '#000000', strokeWidth: Math.max(0, finite(input.strokeWidth, 0)),
       cornerRadius: Math.max(0, finite(input.cornerRadius, 0)),
     }
   }
   if (input.type === 'image') {
-    const width = Math.max(4, ratio(input.width, 0.25) * area.canvas.width)
-    const height = Math.max(4, ratio(input.height, 0.25) * area.canvas.height)
+    const width = Math.max(4, normalizedDimension(input.width, 0.25, 4) * area.canvas.width)
+    const height = Math.max(4, normalizedDimension(input.height, 0.25, 4) * area.canvas.height)
     return {
       ...common,
       kind: 'image',

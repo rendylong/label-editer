@@ -8,14 +8,14 @@
   "interface": {
     "displayName": "GLB Label Editor",
     "shortDescription": "Design first, then produce cosmetic labels on GLBs",
-    "longDescription": "Use Cosmetic Label to design and approve the label system, then Cosmetic Label Editor to inspect packaging GLBs, apply front, back, and wrap labels, preview craft effects, validate print data, and export PNG/PBR assets plus labeled GLB files.",
+    "longDescription": "Always use Cosmetic Label to clarify and approve the label system first, then use Cosmetic Label Editor to inspect packaging GLBs, apply front, back, and wrap labels, keep a live browser preview open, validate print data, and export PNG/PBR assets plus labeled GLB files.",
     "developerName": "Realibox",
     "category": "Design",
     "capabilities": ["Interactive", "Write"],
     "defaultPrompt": [
       "Design this cosmetic label with $cosmetic-label, then produce it on the GLB with $cosmetic-label-editor.",
-      "Turn this approved label design into an Editor Handoff and export a labeled GLB.",
-      "Open the label editor so I can review the result."
+      "First use $cosmetic-label to clarify and normalize this approved design into an Editor Handoff, then export a labeled GLB with $cosmetic-label-editor.",
+      "First use $cosmetic-label to clarify this label edit, then use $cosmetic-label-editor and keep the browser preview open."
     ],
     "brandColor": "#356AE6"
   }

@@ -10,6 +10,7 @@ import {
   computeRemap,
   makeDefaultRemap,
   deriveCanvasSpec,
+  deriveSurfaceCanvasSpec,
   fitCylinder,
   detectLabelMode,
   basisForAxis,
@@ -190,6 +191,42 @@ describe('圆柱贴标阅读方向', () => {
 })
 
 describe('2D 画布与 3D 高度方向', () => {
+  it('把独立的竖向矩形标签面识别为平面，并保持真实宽高比与阅读方向', () => {
+    const mesh: MeshAccessors = {
+      positions: new Float32Array([
+        0, -0.75, -2.34,
+        0, 0.75, -2.34,
+        0, -0.75, 2.34,
+        0, 0.75, 2.34,
+      ]),
+      normals: new Float32Array([
+        1, 0, 0,
+        1, 0, 0,
+        1, 0, 0,
+        1, 0, 0,
+      ]),
+      uv: new Float32Array(8),
+      indices: new Uint16Array([0, 1, 2, 2, 1, 3]),
+      triangleCount: 2,
+    }
+
+    const params = makeDefaultRemap(mesh, false, [1, 0, 0])
+    const output = computeRemap(mesh, params)
+    const spec = deriveSurfaceCanvasSpec(output, 1)
+    const uvFor = (y: number, z: number): [number, number] => {
+      const vertex = Array.from({ length: output.vertexCount }, (_, index) => index)
+        .find((index) => Math.abs(output.positions[index * 3 + 1] - y) < 1e-5 && Math.abs(output.positions[index * 3 + 2] - z) < 1e-5)
+      expect(vertex).toBeDefined()
+      return [output.uv[vertex! * 2], output.uv[vertex! * 2 + 1]]
+    }
+
+    expect(params.mode).toBe('planar')
+    expect(spec.aspect).toBeCloseTo(1.5 / 4.68, 2)
+    expect(uvFor(-0.75, 2.34)[1]).toBeCloseTo(0, 5)
+    expect(uvFor(-0.75, -2.34)[1]).toBeCloseTo(1, 5)
+    expect(uvFor(0.75, -2.34)[0]).toBeGreaterThan(uvFor(-0.75, -2.34)[0])
+  })
+
   it('画布顶部 v=0 映射到圆柱轴向顶部，避免 2D 排版在 3D 上下颠倒', () => {
     const mesh: MeshAccessors = {
       positions: new Float32Array([

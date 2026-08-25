@@ -90,4 +90,41 @@ describe('Label Spec v2', () => {
       id: 'logo', kind: 'image', src: 'logo', width: 400, height: 100,
     })
   })
+
+  it('preserves shape geometry when mapping a v2 spec to editable native layers', () => {
+    const result = applyStructuredLabelSpec(baseArea, {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{
+          id: 'pulse-wave', type: 'shape', shape: 'wave', x: 0.5, y: 0.5,
+          width: 0.8, height: 0.2, geometry: { amplitude: 0.18, frequency: 3, dash: [12, 6] },
+        }],
+      }],
+    })
+
+    expect(result.areas[0].layers[0]).toMatchObject({
+      id: 'pulse-wave',
+      kind: 'shape',
+      geometry: { amplitude: 0.18, frequency: 3, dash: [12, 6] },
+    })
+  })
+
+  it('accepts oversized native shapes so decorative artwork can bleed beyond the die cut', () => {
+    const result = validateLabelSpec({
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{ id: 'orbit', type: 'shape', shape: 'ellipse', x: 0.25, y: 0.8, width: 1.4, height: 0.3 }],
+      }],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const mapped = applyStructuredLabelSpec(baseArea, result.spec)
+      expect(mapped.areas[0].layers[0]).toMatchObject({ kind: 'shape', width: 1400 })
+    }
+  })
 })

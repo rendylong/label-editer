@@ -27,12 +27,12 @@ When this skill is bundled with `$cosmetic-label-editor`, the required end-to-en
 
 `cosmetic-label -> cosmetic-label-editor`
 
-This skill owns design intent and approval. Complete the four design dimensions, exact copy or marked placeholders, and the visual mockup before GLB production begins. Then produce an **Editor Handoff** using `references/editor_handoff.md`.
+This skill is the mandatory entry point for every label editing or generation task. Use it before `$cosmetic-label-editor` even when the user supplies an approved design, an existing editable project, a minor change, an urgent deadline, or a request to skip clarification. Clarify the current brief or explicitly surface assumptions, produce or normalize the design proposal, complete the four design dimensions, exact copy or marked placeholders, and visual mockup, then produce an **Editor Handoff** using `references/editor_handoff.md` before GLB production begins.
 
 - If the user wants a review checkpoint, stop after the design directions and continue only after one direction is approved.
 - If the user explicitly asks for a fast uninterrupted run, select the strongest direction, mark the handoff `assumed_for_fast_run`, list every assumption, and continue.
 - Never invent mesh names, `stableSelector` values, or UV ranges. Those are model-specific production decisions owned by `$cosmetic-label-editor` after `inspect_model`.
-- A supplied, already-approved design spec may be normalized into the Editor Handoff without redesigning it.
+- Normalize a supplied, already-approved design into a fresh Editor Handoff without redesigning it; never use that approval to bypass this skill.
 
 ---
 

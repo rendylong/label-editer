@@ -1,0 +1,211 @@
+{
+  "version": 2,
+  "exports": [
+    "glb",
+    "project",
+    "normalized-spec",
+    "print-manifest",
+    "preview-3d",
+    "color",
+    "metalness",
+    "roughness",
+    "bump"
+  ],
+  "areas": [
+    {
+      "id": "front",
+      "name": "正面概念标签",
+      "target": {
+        "stableSelector": "mesh:1/node:3"
+      },
+      "surfaceMode": "overlay",
+      "side": "front",
+      "range": {
+        "uStart": 0.35,
+        "uWidth": 0.3,
+        "vStart": 0.19,
+        "vHeight": 0.62
+      },
+      "remap": {
+        "mode": "cylindrical",
+        "wrap": 1,
+        "offset": 0.5,
+        "mirrorU": false
+      },
+      "paper": {
+        "enabled": true,
+        "color": "#F2EBDD",
+        "opacity": 0.93
+      },
+      "print": {
+        "widthMm": 44,
+        "heightMm": 62,
+        "bleedMm": 2,
+        "cornerRadiusMm": 3,
+        "minTextHeightMm": 1.2,
+        "dieCutShape": "rounded-rectangle",
+        "spotColors": [
+          "FOIL_CHAMPAGNE"
+        ]
+      },
+      "globalCraft": [
+        {
+          "type": "matte",
+          "params": {
+            "intensity": 0.72,
+            "noise": 0.1
+          }
+        }
+      ],
+      "layers": [
+        {
+          "id": "outer-frame",
+          "type": "shape",
+          "shape": "frame",
+          "geometry": {
+            "inset": 0.03
+          },
+          "x": 0.5,
+          "y": 0.5,
+          "width": 0.9,
+          "height": 0.9,
+          "fill": "#F2EBDD",
+          "stroke": "#273B32",
+          "strokeWidth": 4,
+          "cornerRadius": 20,
+          "opacity": 1
+        },
+        {
+          "id": "brand-placeholder",
+          "type": "text",
+          "text": "YOUR BRAND",
+          "fontFamily": "system-sans",
+          "fontSize": 66,
+          "fontWeight": 700,
+          "letterSpacing": 8,
+          "width": 0.7,
+          "color": "#273B32",
+          "align": "center",
+          "language": "en",
+          "writingDirection": "ltr",
+          "x": 0.5,
+          "y": 0.14
+        },
+        {
+          "id": "top-rule",
+          "type": "shape",
+          "shape": "line",
+          "x": 0.5,
+          "y": 0.22,
+          "width": 0.54,
+          "height": 0.01,
+          "fill": "#B98955",
+          "stroke": "#B98955",
+          "strokeWidth": 3,
+          "cornerRadius": 0,
+          "craft": [
+            {
+              "type": "foil",
+              "params": {
+                "foilColor": "champagne",
+                "foilSpotName": "FOIL_CHAMPAGNE",
+                "gradientAngle": 18,
+                "highlight": 0.72
+              }
+            }
+          ]
+        },
+        {
+          "id": "edition-mark",
+          "type": "text",
+          "text": "N° 16",
+          "fontFamily": "system-serif",
+          "fontSize": 74,
+          "fontWeight": 400,
+          "letterSpacing": 3,
+          "width": 0.58,
+          "color": "#B98955",
+          "align": "center",
+          "language": "en",
+          "writingDirection": "ltr",
+          "x": 0.5,
+          "y": 0.31,
+          "craft": [
+            {
+              "type": "foil",
+              "params": {
+                "foilColor": "champagne",
+                "foilSpotName": "FOIL_CHAMPAGNE",
+                "gradientAngle": 18,
+                "highlight": 0.68
+              }
+            }
+          ]
+        },
+        {
+          "id": "product-name",
+          "type": "text",
+          "text": "NEROLI\nMIST",
+          "fontFamily": "system-serif",
+          "fontSize": 94,
+          "fontWeight": 700,
+          "letterSpacing": 2,
+          "lineHeight": 0.9,
+          "width": 0.76,
+          "color": "#273B32",
+          "align": "center",
+          "language": "en",
+          "writingDirection": "ltr",
+          "x": 0.5,
+          "y": 0.49
+        },
+        {
+          "id": "product-cn",
+          "type": "text",
+          "text": "橙花喷雾",
+          "fontFamily": "noto-sans-sc",
+          "fontSize": 68,
+          "fontWeight": 500,
+          "letterSpacing": 6,
+          "width": 0.66,
+          "color": "#273B32",
+          "align": "center",
+          "language": "zh-CN",
+          "writingDirection": "ltr",
+          "x": 0.5,
+          "y": 0.66
+        },
+        {
+          "id": "botanical-symbol",
+          "type": "shape",
+          "shape": "ellipse",
+          "x": 0.5,
+          "y": 0.76,
+          "width": 0.08,
+          "height": 0.08,
+          "fill": "#D46A4C",
+          "stroke": "#D46A4C",
+          "strokeWidth": 0,
+          "cornerRadius": 0,
+          "opacity": 1
+        },
+        {
+          "id": "descriptor",
+          "type": "text",
+          "text": "BOTANICAL SPRAY • CONCEPT LABEL",
+          "fontFamily": "system-sans",
+          "fontSize": 64,
+          "fontWeight": 600,
+          "letterSpacing": 3,
+          "width": 0.76,
+          "color": "#273B32",
+          "align": "center",
+          "language": "en",
+          "writingDirection": "ltr",
+          "x": 0.5,
+          "y": 0.86
+        }
+      ]
+    }
+  ]
+}

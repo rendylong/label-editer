@@ -43,6 +43,19 @@ describe('plugin skill bundle', () => {
     expect(editorSkill).toContain('Editor Handoff')
   })
 
+  it('requires a visible browser preview throughout label production', async () => {
+    const editorSkill = await readFile(
+      path.join(repoRoot, 'skills/cosmetic-label-editor/SKILL.md'),
+      'utf8',
+    )
+
+    expect(editorSkill).toContain('## Mandatory live browser preview')
+    expect(editorSkill).toContain('MUST call `open_label_editor`')
+    expect(editorSkill).toContain('Do not merely return the URL')
+    expect(editorSkill).toContain('Do not wait until final delivery')
+    expect(editorSkill).toContain('`open_editor: true`')
+  })
+
   it('provides explicit default prompts for both skills', async () => {
     const designMetadata = await readFile(
       path.join(repoRoot, 'skills/cosmetic-label/agents/openai.yaml'),
