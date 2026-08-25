@@ -323,13 +323,25 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
   if (typeof descriptor.id !== 'string' || descriptor.id.length === 0
     || typeof descriptor.fileName !== 'string' || descriptor.fileName.length === 0
     || typeof descriptor.mimeType !== 'string' || descriptor.mimeType.length === 0
-    || typeof descriptor.url !== 'string' || descriptor.url.length === 0
+    || typeof descriptor.url !== 'string'
     || !Number.isInteger(descriptor.byteLength) || (descriptor.byteLength ?? -1) < 0) {
+    throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
+  }
+  let locator: URL
+  try {
+    const value = descriptor.url.trim()
+    if (value.length === 0) throw new Error('Empty artifact locator')
+    locator = new URL(value, window.location.origin)
+    if ((locator.protocol !== 'http:' && locator.protocol !== 'https:')
+      || locator.origin !== window.location.origin) {
+      throw new Error('Artifact locator must be same-origin HTTP(S)')
+    }
+  } catch {
     throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
   }
   return {
     ...descriptor,
-    url: descriptor.url,
+    url: locator.href,
     id: artifact.id,
     fileName: artifact.fileName,
     mimeType: artifact.mimeType,

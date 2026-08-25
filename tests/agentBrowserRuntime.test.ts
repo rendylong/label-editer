@@ -379,7 +379,14 @@ describe('browser Agent QC runtime', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('rejects a malformed successful artifact upload response', async () => {
+  it.each([
+    ['empty object', {}],
+    ['empty locator', { ...uploadedDescriptor('qc-model-front'), url: '' }],
+    ['whitespace locator', { ...uploadedDescriptor('qc-model-front'), url: '   \t' }],
+    ['malformed locator', { ...uploadedDescriptor('qc-model-front'), url: 'http://[' }],
+    ['unsupported protocol', { ...uploadedDescriptor('qc-model-front'), url: 'javascript:alert(1)' }],
+    ['foreign origin', { ...uploadedDescriptor('qc-model-front'), url: 'https://example.com/artifact/qc-model-front' }],
+  ])('rejects a successful artifact upload response with %s', async (_label, responseDescriptor) => {
     installOwner()
     const camera: QcCameraMetadata = {
       position: [1, 2, 3], direction: [0, 0, 1], target: [0, 0, 0],
@@ -389,7 +396,7 @@ describe('browser Agent QC runtime', () => {
       preview: async () => pngBlob('preview'),
       qc: async (request) => ({ blob: pngBlob(request.id), camera }),
     })
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) }) as Response))
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => responseDescriptor }) as Response))
 
     await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderQcEvidence()).resolves.toMatchObject({
@@ -398,5 +405,28 @@ describe('browser Agent QC runtime', () => {
       error: { code: 'INTERNAL_ERROR', message: expect.stringMatching(/artifact upload response/i) },
     })
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('normalizes a valid relative same-origin artifact locator', async () => {
+    installOwner()
+    const camera: QcCameraMetadata = {
+      position: [1, 2, 3], direction: [0, 0, 1], target: [0, 0, 0],
+      up: [0, 1, 0], fov: 45,
+    }
+    disposeCapture = registerAgentPreviewCapture({
+      preview: async () => pngBlob('preview'),
+      qc: async (request) => ({ blob: pngBlob(request.id), camera }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+      const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
+      return { ok: true, json: async () => uploadedDescriptor(id) } as Response
+    }))
+
+    const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderQcEvidence()
+
+    expect(result).toMatchObject({ ok: true, operation: 'render_qc_evidence' })
+    if (!result.ok) throw new Error('Expected valid same-origin locator')
+    expect(result.data.views[0].artifact.url).toBe(new URL('/artifact/qc-model-front', window.location.origin).href)
   })
 })
