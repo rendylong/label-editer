@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 const ACTIVE_PUBLICATIONS = new Set()
 const PUBLICATION_LOCK_WAIT_MS = 30_000
 const PUBLICATION_LOCK_RETRY_MS = 20
 const EMPTY_LOCK_GRACE_MS = 200
-const DEFAULT_PUBLICATION_FILE_SYSTEM = { mkdir, open, readFile, rename, rm, stat }
+const DEFAULT_PUBLICATION_FILE_SYSTEM = { mkdir, open, readFile, readdir, rename, rm, stat }
 
 export class PathPolicyError extends Error {
   constructor(message) {
@@ -185,9 +185,39 @@ async function recoverLockedPublication(fileSystem, lockPath, outputDir) {
   await removeAndSync(fileSystem, journalPath, { force: true })
 }
 
+async function releasePublicationLock(fileSystem, lockPath, token) {
+  const releasedLockPath = `${lockPath}.${process.pid}.${token}.released`
+  try {
+    await renameAndSync(fileSystem, lockPath, releasedLockPath)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return
+    throw error
+  }
+  await removeAndSync(fileSystem, releasedLockPath, { recursive: true, force: true })
+}
+
+async function cleanupAbandonedLockResidue(fileSystem, lockPath) {
+  const parent = path.dirname(lockPath)
+  const prefix = `${path.basename(lockPath)}.`
+  for (const name of await fileSystem.readdir(parent)) {
+    if (!name.startsWith(prefix)) continue
+    const suffix = name.endsWith('.tmp') ? '.tmp' : name.endsWith('.released') ? '.released' : undefined
+    if (!suffix) continue
+    const identity = name.slice(prefix.length, -suffix.length)
+    const delimiter = identity.indexOf('.')
+    const initializer = delimiter > 0 ? {
+      pid: Number(identity.slice(0, delimiter)),
+      token: identity.slice(delimiter + 1),
+    } : undefined
+    if (!ownerIsActive(initializer)) {
+      await removeAndSync(fileSystem, path.join(parent, name), { recursive: true, force: true })
+    }
+  }
+}
+
 async function claimAndRecoverPublication(fileSystem, lockPath, outputDir, token) {
   const claimPath = path.join(lockPath, 'recovery.json')
-  const claimToken = `recovery:${token}`
+  const claimToken = `recovery-${token}`
   try {
     await writeDurableExclusive(fileSystem, claimPath, new TextEncoder().encode(JSON.stringify({
       version: 1,
@@ -206,7 +236,7 @@ async function claimAndRecoverPublication(fileSystem, lockPath, outputDir, token
   ACTIVE_PUBLICATIONS.add(claimToken)
   try {
     await recoverLockedPublication(fileSystem, lockPath, outputDir)
-    await removeAndSync(fileSystem, lockPath, { recursive: true, force: true })
+    await releasePublicationLock(fileSystem, lockPath, claimToken)
     return true
   } finally {
     ACTIVE_PUBLICATIONS.delete(claimToken)
@@ -215,40 +245,53 @@ async function claimAndRecoverPublication(fileSystem, lockPath, outputDir, token
 
 async function acquirePublicationLock(fileSystem, lockPath, outputDir, token) {
   const started = Date.now()
-  while (true) {
-    try {
-      await fileSystem.mkdir(lockPath, { recursive: false })
+  const lockTemporary = `${lockPath}.${process.pid}.${token}.tmp`
+  const ownerPath = path.join(lockTemporary, 'owner.json')
+  let acquired = false
+  ACTIVE_PUBLICATIONS.add(token)
+  try {
+    await cleanupAbandonedLockResidue(fileSystem, lockPath)
+    await fileSystem.mkdir(lockTemporary, { recursive: false })
+    await writeDurableExclusive(fileSystem, ownerPath, new TextEncoder().encode(JSON.stringify({
+      version: 1,
+      pid: process.pid,
+      token,
+    })))
+    while (true) {
       try {
-        await syncDirectory(fileSystem, path.dirname(lockPath))
+        await renameAndSync(fileSystem, lockTemporary, lockPath)
+        acquired = true
+        return
       } catch (error) {
-        await fileSystem.rm(lockPath, { recursive: true, force: true }).catch(() => undefined)
-        throw error
+        if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error
       }
-      ACTIVE_PUBLICATIONS.add(token)
-      return
-    } catch (error) {
-      if (error?.code !== 'EEXIST') throw error
-    }
 
-    const journal = await readJsonIfPresent(fileSystem, path.join(lockPath, 'transaction.json'))
-    let stale = journal ? !ownerIsActive(journal) : false
-    if (!journal) {
-      try {
-        stale = Date.now() - (await fileSystem.stat(lockPath)).mtimeMs >= EMPTY_LOCK_GRACE_MS
-      } catch (error) {
-        if (error?.code === 'ENOENT') continue
+      const owner = await readJsonIfPresent(fileSystem, path.join(lockPath, 'owner.json'))
+        ?? await readJsonIfPresent(fileSystem, path.join(lockPath, 'transaction.json'))
+      let stale = owner ? !ownerIsActive(owner) : false
+      if (!owner) {
+        try {
+          stale = Date.now() - (await fileSystem.stat(lockPath)).mtimeMs >= EMPTY_LOCK_GRACE_MS
+        } catch (error) {
+          if (error?.code === 'ENOENT') continue
+          throw error
+        }
+      }
+      if (stale) {
+        if (await claimAndRecoverPublication(fileSystem, lockPath, outputDir, token)) continue
+      }
+      if (Date.now() - started >= PUBLICATION_LOCK_WAIT_MS) {
+        const error = new Error(`Output publication is already in progress: ${outputDir}`)
+        error.code = 'OUTPUT_CONFLICT'
         throw error
       }
+      await new Promise((resolve) => setTimeout(resolve, PUBLICATION_LOCK_RETRY_MS))
     }
-    if (stale) {
-      if (await claimAndRecoverPublication(fileSystem, lockPath, outputDir, token)) continue
+  } finally {
+    if (!acquired) {
+      ACTIVE_PUBLICATIONS.delete(token)
+      await fileSystem.rm(lockTemporary, { recursive: true, force: true }).catch(() => undefined)
     }
-    if (Date.now() - started >= PUBLICATION_LOCK_WAIT_MS) {
-      const error = new Error(`Output publication is already in progress: ${outputDir}`)
-      error.code = 'OUTPUT_CONFLICT'
-      throw error
-    }
-    await new Promise((resolve) => setTimeout(resolve, PUBLICATION_LOCK_RETRY_MS))
   }
 }
 
@@ -321,11 +364,12 @@ export async function publishAtomically(outputDir, artifacts, {
     }
     throw error
   } finally {
-    ACTIVE_PUBLICATIONS.delete(token)
     try {
-      if (!journalInstalled) await removeAndSync(fileSystem, lockPath, { recursive: true, force: true })
+      if (!journalInstalled) await releasePublicationLock(fileSystem, lockPath, token)
     } catch (error) {
       if (!primaryError) throw error
+    } finally {
+      ACTIVE_PUBLICATIONS.delete(token)
     }
   }
 }

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -10,25 +10,36 @@ import { publishAtomically } from '../scripts/lib/files.mjs'
 const temporaryDirectories: string[] = []
 const filesModuleUrl = pathToFileURL(path.resolve(import.meta.dirname, '../scripts/lib/files.mjs')).href
 const childPublisher = String.raw`
-  import { rename, rm } from 'node:fs/promises'
+  import { open, rename, rm } from 'node:fs/promises'
   const { publishAtomically } = await import(process.env.FILES_MODULE_URL)
   const output = process.env.OUTPUT_DIR
   const round = process.env.ROUND
   const boundary = process.env.FAIL_BOUNDARY || ''
+  let initializationDelayMs = Number(process.env.INITIALIZATION_DELAY_MS || 0)
   const crash = () => process.exit(86)
   const fileSystem = {
+    async open(target, flags) {
+      if (boundary === 'initialize-owner' && target.endsWith('owner.json')) crash()
+      if (initializationDelayMs > 0 && /transaction\.[^.]+\.tmp$/.test(String(target))) {
+        const delay = initializationDelayMs
+        initializationDelayMs = 0
+        await new Promise((resolve) => setTimeout(resolve, delay))
+      }
+      return open(target, flags)
+    },
     async rename(source, target) {
       await rename(source, target)
       if (boundary === 'rename-journal' && target.endsWith('transaction.json')) crash()
       if (boundary === 'rename-existing' && source === output && target.endsWith('.backup')) crash()
       if (boundary === 'rename-staging' && source.endsWith('.tmp') && target === output) crash()
+      if (boundary === 'rename-lock-release' && source.endsWith('.publish.lock') && target.endsWith('.released')) crash()
     },
     async rm(target, options) {
       await rm(target, options)
       if (boundary === 'cleanup-backup' && target.endsWith('.backup')) crash()
       if (boundary === 'cleanup-marker' && target.endsWith('staged.complete')) crash()
       if (boundary === 'cleanup-journal' && target.endsWith('transaction.json')) crash()
-      if (boundary === 'cleanup-lock' && target.endsWith('.publish.lock')) crash()
+      if (boundary === 'cleanup-lock' && target.endsWith('.released')) crash()
     },
   }
   const artifacts = [
@@ -70,7 +81,13 @@ async function readRound(output: string) {
   return one.slice(0, -4)
 }
 
-function runPublisher(input: { output: string; round: string; force: boolean; boundary?: string }) {
+function runPublisher(input: {
+  output: string
+  round: string
+  force: boolean
+  boundary?: string
+  initializationDelayMs?: number
+}) {
   return new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
     const child = spawn(process.execPath, ['--input-type=module', '-e', childPublisher], {
       env: {
@@ -80,6 +97,7 @@ function runPublisher(input: { output: string; round: string; force: boolean; bo
         ROUND: input.round,
         FORCE: input.force ? '1' : '0',
         FAIL_BOUNDARY: input.boundary ?? '',
+        INITIALIZATION_DELAY_MS: String(input.initializationDelayMs ?? 0),
       },
       stdio: ['ignore', 'ignore', 'pipe'],
     })
@@ -91,15 +109,26 @@ function runPublisher(input: { output: string; round: string; force: boolean; bo
   })
 }
 
+async function waitForPath(target: string) {
+  const started = Date.now()
+  while (true) {
+    if (await stat(target).then(() => true, (error) => error?.code === 'ENOENT' ? false : Promise.reject(error))) return
+    if (Date.now() - started >= 2_000) throw new Error(`Timed out waiting for path: ${target}`)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
 describe('atomic directory publication recovery', () => {
   it.each([
+    ['initialize-owner', 'old'],
     ['rename-journal', 'old'],
     ['rename-existing', 'new-rename-existing'],
     ['rename-staging', 'new-rename-staging'],
+    ['rename-lock-release', 'new-rename-lock-release'],
     ['cleanup-backup', 'new-cleanup-backup'],
     ['cleanup-marker', 'new-cleanup-marker'],
     ['cleanup-journal', 'new-cleanup-journal'],
@@ -130,6 +159,38 @@ describe('atomic directory publication recovery', () => {
 
     expect(results, results.map((result) => result.stderr).join('\n')).toMatchObject([{ code: 0 }, { code: 0 }])
     expect(['writer-a', 'writer-b']).toContain(await readRound(output))
+    expect(await readdir(root)).toEqual(['round-0'])
+  })
+
+  it('does not steal a live publisher delayed before journal initialization', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'round-0')
+    await publishAtomically(output, artifacts('old'), { sessionId: 'old' })
+
+    const first = runPublisher({
+      output,
+      round: 'delayed-writer',
+      force: true,
+      initializationDelayMs: 600,
+    })
+    await waitForPath(path.join(root, '.round-0.publish.lock'))
+    const second = runPublisher({ output, round: 'following-writer', force: true })
+    const results = await Promise.all([first, second])
+
+    expect(results, results.map((result) => result.stderr).join('\n')).toMatchObject([{ code: 0 }, { code: 0 }])
+    expect(['delayed-writer', 'following-writer']).toContain(await readRound(output))
+    expect(await readdir(root)).toEqual(['round-0'])
+  })
+
+  it('recovers an orphaned pre-owner lock directory', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'round-0')
+    await mkdir(path.join(root, '.round-0.publish.lock'))
+
+    const result = await runPublisher({ output, round: 'recovered', force: true })
+
+    expect(result, result.stderr).toMatchObject({ code: 0 })
+    expect(await readRound(output)).toBe('recovered')
     expect(await readdir(root)).toEqual(['round-0'])
   })
 
