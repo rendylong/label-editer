@@ -16,6 +16,8 @@ import { fitCanvasDisplayWidth } from './canvasLayout'
 import './styles.css'
 import { bootstrapAgentBridgeFromPage } from '../agent/bridge'
 import { createBrowserAgentBridge } from '../agent/browserBridgeRuntime'
+import { isAgentPreviewUrl } from '../agent/previewMode'
+import { AgentPreviewShell } from '../ui/AgentPreviewShell'
 
 export function EditorWorkspace({ editorViewMode }: { editorViewMode: EditorViewMode }): React.JSX.Element {
   return (
@@ -38,27 +40,28 @@ export function EditorWorkspace({ editorViewMode }: { editorViewMode: EditorView
   )
 }
 
-export function CentralWorkspace({ editorViewMode }: { editorViewMode: EditorViewMode }): React.JSX.Element {
+export function CentralWorkspace({ editorViewMode, readOnly = false }: { editorViewMode: EditorViewMode; readOnly?: boolean }): React.JSX.Element {
   if (editorViewMode === '2d') {
-    return <div className="canvas-area editor-canvas"><CanvasHost /></div>
+    return <div className="canvas-area editor-canvas"><CanvasHost readOnly={readOnly} /></div>
   }
   if (editorViewMode === 'split') {
     return (
       <ResizableSplitPane
-        primary={<div className="canvas-area editor-canvas"><CanvasHost /></div>}
-        secondary={<div className="viewport-wrap editor-viewport editor-viewport--support"><Viewport showFrontMarker /></div>}
+        primary={<div className="canvas-area editor-canvas"><CanvasHost readOnly={readOnly} /></div>}
+        secondary={<div className="viewport-wrap editor-viewport editor-viewport--support"><Viewport showFrontMarker readOnly={readOnly} /></div>}
       />
     )
   }
-  return <div className="viewport-wrap editor-viewport editor-viewport--formal"><Viewport /></div>
+  return <div className="viewport-wrap editor-viewport editor-viewport--formal"><Viewport readOnly={readOnly} /></div>
 }
 
 export function App(): React.JSX.Element {
   const toast = useUiStore((s) => s.toast)
   const editorViewMode = useUiStore((s) => s.editorViewMode)
   const view = useUiStore((s) => s.view)
+  const agentPreview = typeof window !== 'undefined' && isAgentPreviewUrl(window.location.href)
 
-  useEffect(() => installShortcuts(), [])
+  useEffect(() => agentPreview ? undefined : installShortcuts(), [agentPreview])
   useEffect(() => {
     let dispose = (): void => undefined
     let cancelled = false
@@ -76,7 +79,12 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="app">
-      {view === 'areaSetup' ? (
+      {agentPreview ? (
+        <AgentPreviewShell
+          editorViewMode={editorViewMode}
+          workspace={<CentralWorkspace editorViewMode={editorViewMode} readOnly />}
+        />
+      ) : view === 'areaSetup' ? (
         <AreaSetupView />
       ) : (
         <>
@@ -93,7 +101,7 @@ export function App(): React.JSX.Element {
 }
 
 /** 设计模式中央画布：宽度自适应容器。 */
-function CanvasHost(): React.JSX.Element {
+function CanvasHost({ readOnly = false }: { readOnly?: boolean }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const aspect = useLabelStore((s) => s.activeArea?.canvas.aspect ?? 1)
@@ -109,7 +117,7 @@ function CanvasHost(): React.JSX.Element {
   const displayWidth = fitCanvasDisplayWidth({ containerWidth: size.width, containerHeight: size.height, aspect, maxWidth: 900, padding: 24 })
   return (
     <div ref={ref} style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-      {size.width > 0 && size.height > 0 ? <LabelCanvas displayWidth={displayWidth} /> : null}
+      {size.width > 0 && size.height > 0 ? <LabelCanvas displayWidth={displayWidth} readOnly={readOnly} /> : null}
     </div>
   )
 }

@@ -4,6 +4,8 @@ export type AgentErrorCode =
   | 'INVALID_USAGE'
   | 'PATH_NOT_ALLOWED'
   | 'OUTPUT_CONFLICT'
+  | 'REVISION_CONFLICT'
+  | 'INVALID_PATCH_OPERATION'
   | 'INVALID_LABEL_SPEC'
   | 'AMBIGUOUS_MODEL_TARGET'
   | 'MODEL_TARGET_NOT_FOUND'
@@ -89,6 +91,12 @@ export interface ApplyProjectRequest {
   project: unknown
 }
 
+export interface AgentPreviewStatus {
+  revision: string
+  state: 'ready' | 'error'
+  message?: string
+}
+
 export interface AppliedDesign {
   areaIds: string[]
   project: SerializedProject
@@ -151,6 +159,7 @@ export interface LabelEditorAgentBridgeV1 {
   loadModel(input: ModelLoadRequest): Promise<BridgeResult<ModelInspection>>
   applySpec(input: ApplySpecRequest): Promise<BridgeResult<AppliedDesign>>
   applyProject(input: ApplyProjectRequest): Promise<BridgeResult<AppliedDesign>>
+  setAgentPreviewStatus(input: AgentPreviewStatus): Promise<BridgeResult>
   getProject(): Promise<BridgeResult<SerializedProject>>
   validateDesign(): Promise<BridgeResult<DesignValidationReport>>
   waitForReady(input?: ReadinessRequest): Promise<BridgeResult<ReadinessReport>>
@@ -192,5 +201,7 @@ export function exitCodeForError(error: AgentError): number {
   if (error.code === 'REBUILD_FAILED') return 7
   if (error.code === 'UNSUPPORTED_CODEC') return 8
   if (error.code === 'OUTPUT_CONFLICT') return 9
+  if (error.code === 'REVISION_CONFLICT') return 10
+  if (error.code === 'INVALID_PATCH_OPERATION') return 11
   return 1
 }

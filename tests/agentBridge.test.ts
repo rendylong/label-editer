@@ -60,6 +60,20 @@ describe('browser Agent Bridge guard', () => {
     })
   })
 
+  it('exposes a UI-only live preview status operation', async () => {
+    const received: unknown[] = []
+    const bridge = createAgentBridge({
+      setAgentPreviewStatus: async (status) => { received.push(status) },
+    })
+    const status = { revision: `sha256:${'a'.repeat(64)}`, state: 'ready' as const }
+
+    await expect(bridge.setAgentPreviewStatus(status)).resolves.toMatchObject({
+      ok: true,
+      operation: 'set_agent_preview_status',
+    })
+    expect(received).toEqual([status])
+  })
+
   it('trusts the token returned by the same-origin bootstrap response', async () => {
     const bridge = createAgentBridge({ reset: async () => undefined })
     const dispose = await bootstrapAgentBridgeFromPage({

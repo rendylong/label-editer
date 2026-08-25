@@ -8,6 +8,8 @@ const errorExitCodes = new Map([
   ['REBUILD_FAILED', 7],
   ['UNSUPPORTED_CODEC', 8],
   ['OUTPUT_CONFLICT', 9],
+  ['REVISION_CONFLICT', 10],
+  ['INVALID_PATCH_OPERATION', 11],
 ])
 
 export function success(operation, data, { sessionId, warnings = [] } = {}) {

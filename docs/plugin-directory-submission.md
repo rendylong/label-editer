@@ -1,6 +1,14 @@
 # Plugins Directory submission package
 
-This file collects the public listing copy and reviewer test cases for GLB Label Editor. It is a preparation artifact, not evidence that OpenAI has accepted or published the Plugin.
+This file collects the public listing copy and reviewer cases for GLB Label Editor. It is a preparation artifact, not evidence that OpenAI has accepted or published the Plugin.
+
+## Submission type and boundary
+
+- Submission type: **skills-only**.
+- The plugin manifest bundles two skills and no MCP server connection.
+- The production runtime, GLB files, CLI, loopback editor, Playwright Chromium, and generated artifacts remain on the user's Codex machine.
+- Do not claim that ChatGPT Web can access a user's local GLB, run this local CLI, or open the loopback editor.
+- Do not describe a public or hosted design service. No publisher-operated upload API or remote content store is part of this package.
 
 ## Listing
 
@@ -11,72 +19,81 @@ This file collects the public listing copy and reviewer test cases for GLB Label
 - Support: https://github.com/rendylong/label-editer/issues
 - Privacy: https://github.com/rendylong/label-editer/blob/main/PRIVACY.md
 - Terms: https://github.com/rendylong/label-editer/blob/main/TERMS.md
-- Short description: Design first, then produce cosmetic labels on GLBs.
-- Long description: Clarify and approve a cosmetic label system, inspect packaging GLBs, apply front, back, and wrap labels, keep a live browser preview open, validate print data, and export editable projects, PNG/PBR assets, print manifests, and labeled GLB files.
+- Short description: Design first, then locally produce cosmetic labels on GLBs.
+- Long description: Clarify and approve a cosmetic label system, then use a pure-local Codex CLI to inspect packaging GLBs, atomically apply front, back, and wrap labels, automatically keep a read-only Web preview synchronized, validate print data, and export editable projects, PNG/PBR assets, print manifests, and labeled GLB files.
 
 ## Starter prompts
 
-1. Design this cosmetic label with `$cosmetic-label`, then produce it on the GLB with `$cosmetic-label-editor`.
-2. Normalize this approved packaging design into an Editor Handoff, apply front and back labels to the GLB, and export an editable project plus labeled GLB.
-3. Inspect this bottle GLB, identify stable label surfaces, validate the supplied label specification, and keep the browser preview open while producing the final assets.
+1. Design this cosmetic label with `$cosmetic-label`, then produce it locally on the GLB with `$cosmetic-label-editor` while I watch the real-time preview.
+2. Normalize this approved packaging design into an Editor Handoff, apply exact front and back label changes by stable layer id, and export an editable project plus labeled GLB.
+3. Inspect this bottle GLB, identify stable label surfaces, validate the supplied specification, and automatically keep a read-only Web preview open during production.
 
 ## Positive reviewer cases
 
 ### 1. Inspect a packaging model
 
-- Prompt: Inspect `public/sample/面霜瓶.glb` and identify stable label targets without editing the model.
-- Expected behavior: Use `inspect_model`; do not guess repeated node names.
-- Expected result: Model dimensions, codec status, mesh candidates, and exact stable selectors.
-- Fixture: `public/sample/面霜瓶.glb`.
+- Prompt: Inspect a local packaging GLB and identify stable label targets without editing the model.
+- Expected behavior: Resolve the installed local launcher and run `label-cli inspect`; do not guess repeated node names.
+- Expected result: Model dimensions, codec status, mesh candidates, and exact stable selectors in one JSON envelope.
 
-### 2. Validate a front-and-back specification
+### 2. Apply exact revision-safe edits
 
-- Prompt: Validate `tests/fixtures/specs/perfume-front-back-v2.json` against its referenced GLB and report blockers without writing output.
-- Expected behavior: Use `validate_label_spec` after inspection.
-- Expected result: Structured validity, warnings, target resolution, and print-readiness findings.
-- Fixture: The specification and its matching reviewer GLB.
+- Prompt: Change three exact fields on existing front/back layers without replacing unrelated design data.
+- Expected behavior: Run `project`, use its SHA-256 revision as `baseRevision`, and apply one id-addressed `patch --force` transaction to the designated working spec.
+- Expected result: A new revision, three applied operations, no unrelated change, and an atomically published valid Label Spec.
 
-### 3. Produce front and back labels
+### 3. Produce with real-time Web preview
 
-- Prompt: Apply an approved two-area label specification, keep the local editor preview open, and export all standard artifacts.
-- Expected behavior: Inspect, validate, open the visible editor, then call `apply_label_spec` with `open_editor: true`.
+- Prompt: Produce an approved two-area label while keeping a visible local preview synchronized.
+- Expected behavior: Start `live` in a dedicated terminal session. The command itself launches headful Chromium. The Agent does not navigate, click, or use computer use on the page.
+- Expected result: One tokenized loopback preview stays open, valid patch revisions update without navigation, and the user can inspect area and view modes through a read-only shell.
+
+### 4. Recover from an invalid watched file
+
+- Prompt: Continue after an incomplete JSON write appears in the working spec.
+- Expected behavior: Keep the last valid preview, report the watcher error, restore a fully validated value through an atomic revision-guarded write, and continue on the same live session.
+- Expected result: No blank or partially applied design; a later valid revision clears the error.
+
+### 5. Export complete artifacts
+
+- Prompt: Validate and export the final working spec into a new empty output directory.
+- Expected behavior: Run local `validate`, compare against the approved handoff, then run `apply` without `--open`.
 - Expected result: Labeled GLB, editable project, normalized specification, print manifest, preview, per-area PBR PNG channels, and artifact manifest.
-- Fixture: Reviewer-owned GLB plus an approved Label Spec v2.
-
-### 4. Render a review preview
-
-- Prompt: Render a split 2D/3D preview from an approved label project without modifying the source files.
-- Expected behavior: Use `render_label_preview` with the split view.
-- Expected result: A PNG preview at the requested output path and no source-file mutation.
-- Fixture: Reviewer-owned GLB and `.lbl` project.
-
-### 5. Export an editable project
-
-- Prompt: Export a saved label project and source GLB into a new empty output directory.
-- Expected behavior: Use `export_label_assets`; do not overwrite an existing directory unless the user explicitly requests force.
-- Expected result: Complete export bundle with consistent artifact manifest and GLB cross-check.
-- Fixture: Reviewer-owned GLB and `.lbl` project.
 
 ## Negative reviewer cases
 
 ### 1. Missing upstream design handoff
 
-- Scenario: The user asks the editor to invent and apply a new label without first using `$cosmetic-label`.
-- Expected behavior: Stop production and route through the design skill to create a current Editor Handoff.
-- Why: The editor must not silently invent or redesign label copy, hierarchy, typography, or process.
+- Scenario: The user asks the editor to invent and apply a new label before `$cosmetic-label` produces the current Editor Handoff.
+- Expected behavior: Route through the design skill; do not silently invent copy, hierarchy, typography, or process.
 
-### 2. Unauthorized overwrite
+### 2. Stale revision
 
-- Scenario: The requested output directory already contains files and the user has not explicitly requested `force`.
-- Expected behavior: Return an output-conflict error and preserve existing files.
-- Why: Export is intentionally atomic and non-overwriting by default.
+- Scenario: Another process changes the working spec after `project` but before `patch`.
+- Expected behavior: Return `REVISION_CONFLICT`, re-read the current value, and require a newly based transaction. Do not overwrite blindly.
 
-### 3. Unsupported or ambiguous input
+### 3. Unauthorized overwrite
 
-- Scenario: The GLB uses an unsupported codec or the requested target cannot be resolved unambiguously.
-- Expected behavior: Return a structured blocker and do not publish partial assets.
-- Why: Guessing a mesh or silently dropping unsupported data could corrupt the deliverable.
+- Scenario: A delivery directory exists and the user did not request `--force`.
+- Expected behavior: Return `OUTPUT_CONFLICT` and preserve existing files. The only default in-place overwrite is the explicitly designated working spec through revision-guarded `patch --force`.
 
-## Submission blockers
+### 4. Preview/browser loss
 
-The current MCP server uses local `stdio` transport and local filesystem paths. OpenAI's public With MCP submission requires a public production MCP URL. A compliant hosted design must also define secure model upload/download, private storage and deletion, authentication, reviewer fixtures, resource limits, and a remote equivalent for the loopback editor workflow. Do not attest that the current local server meets those requirements.
+- Scenario: Headful Chromium cannot start or the live preview page is lost during production.
+- Expected behavior: Stop production, report `BROWSER_NOT_READY`, and restart from the last valid working spec. Do not silently continue with PNG-only or headless output.
+
+### 5. Request to control the page
+
+- Scenario: A workflow suggests using DOM selectors, browser navigation, or computer use to edit the preview.
+- Expected behavior: Refuse that control path and continue only through the local CLI. Use `open` solely for explicit human takeover.
+
+## Reviewer installation evidence
+
+The one-command installer must prove:
+
+1. plugin installed and enabled;
+2. both skills copied into the plugin root;
+3. no `.mcp.json` or MCP manifest entry exists;
+4. `plugin/bin/label-cli.mjs schema --json` returns `ok: true`;
+5. Playwright Chromium and the built editor runtime are present;
+6. a new Codex session discovers the skills.

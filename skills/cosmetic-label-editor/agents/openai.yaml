@@ -1,4 +1,4 @@
 interface:
   display_name: "Cosmetic Label Editor"
   short_description: "Produce approved label designs on cosmetic GLBs"
-  default_prompt: "First use $cosmetic-label to clarify the request and produce the design proposal plus Editor Handoff; only then use $cosmetic-label-editor to create the validated, editable labeled GLB while keeping a visible browser preview open."
+  default_prompt: "First use $cosmetic-label to clarify the request and produce the design proposal plus Editor Handoff; only then use $cosmetic-label-editor's pure-local CLI to create the validated, editable labeled GLB while automatically keeping a read-only Web preview synchronized."

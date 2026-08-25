@@ -2,6 +2,7 @@ import {
   agentFailure,
   agentSuccess,
   type AgentErrorCode,
+  type AgentPreviewStatus,
   type AppliedDesign,
   type ApplyProjectRequest,
   type ApplySpecRequest,
@@ -60,6 +61,7 @@ export interface AgentBridgeHandlers {
   loadModel: (input: ModelLoadRequest) => Promise<ModelInspection>
   applySpec: (input: ApplySpecRequest) => Promise<AppliedDesign>
   applyProject: (input: ApplyProjectRequest) => Promise<AppliedDesign>
+  setAgentPreviewStatus: (input: AgentPreviewStatus) => Promise<void>
   getProject: () => Promise<SerializedProject>
   validateDesign: () => Promise<DesignValidationReport>
   waitForReady: (input?: ReadinessRequest) => Promise<ReadinessReport>
@@ -77,7 +79,7 @@ function errorCode(value: unknown): AgentErrorCode {
   const supported: AgentErrorCode[] = [
     'INVALID_USAGE', 'PATH_NOT_ALLOWED', 'OUTPUT_CONFLICT', 'INVALID_LABEL_SPEC',
     'AMBIGUOUS_MODEL_TARGET', 'MODEL_TARGET_NOT_FOUND', 'BROWSER_NOT_READY',
-    'REBUILD_FAILED', 'UNSUPPORTED_CODEC', 'INTERNAL_ERROR',
+    'REBUILD_FAILED', 'UNSUPPORTED_CODEC', 'REVISION_CONFLICT', 'INVALID_PATCH_OPERATION', 'INTERNAL_ERROR',
   ]
   return supported.includes(code as AgentErrorCode) ? code as AgentErrorCode : 'INTERNAL_ERROR'
 }
@@ -100,6 +102,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     loadModel: overrides.loadModel ?? (() => Promise.resolve(missingHandler('loadModel'))),
     applySpec: overrides.applySpec ?? (() => Promise.resolve(missingHandler('applySpec'))),
     applyProject: overrides.applyProject ?? (() => Promise.resolve(missingHandler('applyProject'))),
+    setAgentPreviewStatus: overrides.setAgentPreviewStatus ?? (() => Promise.resolve(missingHandler('setAgentPreviewStatus'))),
     getProject: overrides.getProject ?? (() => Promise.resolve(missingHandler('getProject'))),
     validateDesign: overrides.validateDesign ?? (() => Promise.resolve(missingHandler('validateDesign'))),
     waitForReady: overrides.waitForReady ?? (() => Promise.resolve(missingHandler('waitForReady'))),
@@ -111,6 +114,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     loadModel: (input) => invoke('load_model', () => handlers.loadModel(input)),
     applySpec: (input) => invoke('apply_label_spec', () => handlers.applySpec(input)),
     applyProject: (input) => invoke('apply_label_project', () => handlers.applyProject(input)),
+    setAgentPreviewStatus: (input) => invoke('set_agent_preview_status', () => handlers.setAgentPreviewStatus(input)),
     getProject: () => invoke('get_project', handlers.getProject),
     validateDesign: () => invoke('validate_design', handlers.validateDesign),
     waitForReady: (input) => invoke('wait_for_ready', () => handlers.waitForReady(input)),

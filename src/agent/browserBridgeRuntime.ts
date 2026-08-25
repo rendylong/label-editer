@@ -163,6 +163,16 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
 export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): LabelEditorAgentBridgeV1 {
   let normalizedSpec: LabelSpecV2 | undefined
   return createAgentBridge({
+    setAgentPreviewStatus: async (status) => {
+      if (!/^sha256:[a-f0-9]{64}$/.test(status.revision)
+        || (status.state !== 'ready' && status.state !== 'error')
+        || (status.message !== undefined && typeof status.message !== 'string')) {
+        const error = new Error('Invalid Agent preview status') as Error & { code: string }
+        error.code = 'INVALID_USAGE'
+        throw error
+      }
+      useUiStore.getState().setAgentPreviewStatus(status)
+    },
     reset: async () => {
       useLabelStore.getState().clearAll()
       useModelStore.getState().selectPart(null)

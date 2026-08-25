@@ -31,7 +31,7 @@ This skill is the mandatory entry point for every label editing or generation ta
 
 - If the user wants a review checkpoint, stop after the design directions and continue only after one direction is approved.
 - If the user explicitly asks for a fast uninterrupted run, select the strongest direction, mark the handoff `assumed_for_fast_run`, list every assumption, and continue.
-- Never invent mesh names, `stableSelector` values, or UV ranges. Those are model-specific production decisions owned by `$cosmetic-label-editor` after `inspect_model`.
+- Never invent mesh names, `stableSelector` values, or UV ranges. Those are model-specific production decisions owned by `$cosmetic-label-editor` after local CLI model inspection.
 - Normalize a supplied, already-approved design into a fresh Editor Handoff without redesigning it; never use that approval to bypass this skill.
 
 ---
