@@ -86,6 +86,39 @@ function bake(owner: LabelAreaConfig, roughness = channelCanvas(255, 42)): BakeR
   }
 }
 
+function deferred<T = void>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => { resolve = next })
+  return { promise, resolve }
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let index = 0; index < 12; index += 1) await Promise.resolve()
+}
+
+function installOwner(owner = area()): LabelAreaConfig {
+  useLabelStore.setState({
+    ...useLabelStore.getInitialState(),
+    areas: [owner], activeAreaId: owner.id, activeArea: owner,
+    meshIndex: owner.meshIndex, nodeName: owner.nodeName,
+    bakeMap: { [owner.id]: bake(owner) },
+  }, true)
+  return owner
+}
+
+function uploadedDescriptor(id: string): Record<string, unknown> {
+  return {
+    id,
+    fileName: `${id}.png`,
+    mimeType: 'image/png',
+    url: `/artifact/${id}`,
+    byteLength: 1,
+  }
+}
+
 describe('browser Agent QC runtime', () => {
   let disposeCapture: (() => void) | undefined
 
@@ -251,5 +284,119 @@ describe('browser Agent QC runtime', () => {
         details: { issues: [{ severity: 'error', code: 'no-label-areas' }] },
       },
     })
+  })
+
+  it('serializes complete QC operations across deferred capture and upload boundaries', async () => {
+    installOwner()
+    const camera: QcCameraMetadata = {
+      position: [1, 2, 3], direction: [0, 0, 1], target: [0, 0, 0],
+      up: [0, 1, 0], fov: 45,
+    }
+    const captureEntered = deferred()
+    const releaseCapture = deferred()
+    const uploadEntered = deferred()
+    const releaseUpload = deferred()
+    let activeBatches = 0
+    let maxInFlight = 0
+    let modelFrontCaptures = 0
+    disposeCapture = registerAgentPreviewCapture({
+      preview: async () => pngBlob('preview'),
+      qc: async (request) => {
+        if (request.id === 'model-front') {
+          modelFrontCaptures += 1
+          activeBatches += 1
+          maxInFlight = Math.max(maxInFlight, activeBatches)
+          captureEntered.resolve()
+          await releaseCapture.promise
+        }
+        return { blob: pngBlob(request.id), camera }
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+      const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
+      if (id === 'qc-model-front') {
+        uploadEntered.resolve()
+        await releaseUpload.promise
+      }
+      if (id === 'qc-area-front-label-bump') activeBatches -= 1
+      return { ok: true, json: async () => uploadedDescriptor(id) } as Response
+    }))
+    const bridge = createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+
+    const first = bridge.renderQcEvidence()
+    const second = bridge.renderQcEvidence()
+    await captureEntered.promise
+    await flushMicrotasks()
+    releaseCapture.resolve()
+    await uploadEntered.promise
+    await flushMicrotasks()
+    releaseUpload.resolve()
+    const results = await Promise.all([first, second])
+
+    expect(results.every((result) => result.ok)).toBe(true)
+    expect(modelFrontCaptures).toBe(2)
+    expect(maxInFlight).toBe(1)
+    expect(activeBatches).toBe(0)
+  })
+
+  it('fails the current batch when area identity changes during a pending capture', async () => {
+    const owner = installOwner()
+    const camera: QcCameraMetadata = {
+      position: [1, 2, 3], direction: [0, 0, 1], target: [0, 0, 0],
+      up: [0, 1, 0], fov: 45,
+    }
+    const captureEntered = deferred()
+    const releaseCapture = deferred()
+    disposeCapture = registerAgentPreviewCapture({
+      preview: async () => pngBlob('preview'),
+      qc: async (request) => {
+        captureEntered.resolve()
+        await releaseCapture.promise
+        return { blob: pngBlob(request.id), camera }
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => uploadedDescriptor('unexpected'),
+    }) as Response))
+    const pending = createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderQcEvidence()
+    await captureEntered.promise
+
+    useLabelStore.getState().applyAreaOp(owner.id, (current) => ({ ...current, name: 'Edited during QC' }))
+    releaseCapture.resolve()
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      operation: 'render_qc_evidence',
+      error: {
+        code: 'REVISION_CONFLICT',
+        details: {
+          issues: [{ severity: 'error', code: 'qc-stale-state', areaId: owner.id }],
+        },
+      },
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('rejects a malformed successful artifact upload response', async () => {
+    installOwner()
+    const camera: QcCameraMetadata = {
+      position: [1, 2, 3], direction: [0, 0, 1], target: [0, 0, 0],
+      up: [0, 1, 0], fov: 45,
+    }
+    disposeCapture = registerAgentPreviewCapture({
+      preview: async () => pngBlob('preview'),
+      qc: async (request) => ({ blob: pngBlob(request.id), camera }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({}) }) as Response))
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderQcEvidence()).resolves.toMatchObject({
+      ok: false,
+      operation: 'render_qc_evidence',
+      error: { code: 'INTERNAL_ERROR', message: expect.stringMatching(/artifact upload response/i) },
+    })
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

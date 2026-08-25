@@ -36,7 +36,11 @@ async function blobBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer())
 }
 
-type QcValidationIssue = DesignValidationIssue & { channel?: QcChannel }
+type QcValidationIssue = DesignValidationIssue & {
+  channel?: QcChannel
+  component?: 'areas' | 'bakes' | 'model'
+  stage?: string
+}
 
 function structuredInvalidLabelSpec(issues: QcValidationIssue[]): Error {
   const error = new Error(issues.map((issue) => [issue.code, issue.areaId, issue.channel].filter(Boolean).join(':')).join('; ')) as Error & {
@@ -45,6 +49,24 @@ function structuredInvalidLabelSpec(issues: QcValidationIssue[]): Error {
   }
   error.code = 'INVALID_LABEL_SPEC'
   error.details = { issues }
+  return error
+}
+
+function staleQcState(stage: string, component: QcValidationIssue['component'], areaId?: string): Error {
+  const issue: QcValidationIssue = {
+    severity: 'error',
+    code: 'qc-stale-state',
+    message: `Label design state changed during QC capture (${stage})`,
+    ...(areaId ? { areaId } : {}),
+    component,
+    stage,
+  }
+  const error = new Error(issue.message) as Error & {
+    code: string
+    details: { issues: QcValidationIssue[] }
+  }
+  error.code = 'REVISION_CONFLICT'
+  error.details = { issues: [issue] }
   return error
 }
 
@@ -72,6 +94,48 @@ function assertPlannedAreasPresent(plan: QcViewRequest[], areas: LabelAreaConfig
     message: `QC capture area is missing: ${areaId}`,
     areaId,
   })))
+}
+
+interface QcStateSnapshot {
+  areas: readonly LabelAreaConfig[]
+  bakes: ReadonlyMap<string, BakeResult>
+  glbBytes: Uint8Array
+  modelName: string
+}
+
+function snapshotQcState(): QcStateSnapshot {
+  const labels = useLabelStore.getState()
+  const model = useModelStore.getState()
+  if (!model.glbBytes) throw staleQcState('snapshot', 'model')
+  const bakes = new Map<string, BakeResult>()
+  for (const area of labels.areas) {
+    const bake = labels.bakeMap[area.id]
+    if (!bake || bake.areaOwner !== area) throw staleQcState('snapshot', 'bakes', area.id)
+    bakes.set(area.id, bake)
+  }
+  return {
+    areas: [...labels.areas],
+    bakes,
+    glbBytes: model.glbBytes,
+    modelName: model.modelName,
+  }
+}
+
+function assertQcStateUnchanged(snapshot: QcStateSnapshot, stage: string): void {
+  const model = useModelStore.getState()
+  if (model.glbBytes !== snapshot.glbBytes || model.modelName !== snapshot.modelName) {
+    throw staleQcState(stage, 'model')
+  }
+  const labels = useLabelStore.getState()
+  if (labels.areas.length !== snapshot.areas.length) {
+    const changedArea = snapshot.areas.find((area) => !labels.areas.includes(area))
+    throw staleQcState(stage, 'areas', changedArea?.id)
+  }
+  for (let index = 0; index < snapshot.areas.length; index += 1) {
+    const area = snapshot.areas[index]
+    if (labels.areas[index] !== area) throw staleQcState(stage, 'areas', area.id)
+    if (labels.bakeMap[area.id] !== snapshot.bakes.get(area.id)) throw staleQcState(stage, 'bakes', area.id)
+  }
 }
 
 function canvasHasContribution(canvas: HTMLCanvasElement, neutral: number): boolean {
@@ -248,9 +312,24 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
     body: artifact.bytes as BodyInit,
   })
   if (!response.ok) throw new Error(`Artifact upload failed (${response.status}): ${artifact.fileName}`)
-  const descriptor = await response.json() as ArtifactDescriptor
+  let value: unknown
+  try {
+    value = await response.json()
+  } catch {
+    throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
+  }
+  if (!value || typeof value !== 'object') throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
+  const descriptor = value as Partial<ArtifactDescriptor>
+  if (typeof descriptor.id !== 'string' || descriptor.id.length === 0
+    || typeof descriptor.fileName !== 'string' || descriptor.fileName.length === 0
+    || typeof descriptor.mimeType !== 'string' || descriptor.mimeType.length === 0
+    || typeof descriptor.url !== 'string' || descriptor.url.length === 0
+    || !Number.isInteger(descriptor.byteLength) || (descriptor.byteLength ?? -1) < 0) {
+    throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
+  }
   return {
     ...descriptor,
+    url: descriptor.url,
     id: artifact.id,
     fileName: artifact.fileName,
     mimeType: artifact.mimeType,
@@ -264,6 +343,12 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
 
 export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): LabelEditorAgentBridgeV1 {
   let normalizedSpec: LabelSpecV2 | undefined
+  let qcOperationTail: Promise<void> = Promise.resolve()
+  const runQcExclusive = <T>(action: () => Promise<T>): Promise<T> => {
+    const running = qcOperationTail.then(action)
+    qcOperationTail = running.then(() => undefined, () => undefined)
+    return running
+  }
   return createAgentBridge({
     setAgentPreviewStatus: async (status) => {
       if (!/^sha256:[a-f0-9]{64}$/.test(status.revision)
@@ -358,11 +443,13 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
       }
       return uploadArtifact(bootstrap, artifact)
     },
-    renderQcEvidence: async (input) => {
+    renderQcEvidence: (input) => runQcExclusive(async () => {
       await waitForBakes()
       const width = boundedDimension(input?.width ?? 1440)
       const height = boundedDimension(input?.height ?? 1440)
-      const areas = useLabelStore.getState().areas
+      const snapshot = snapshotQcState()
+      const areas = [...snapshot.areas]
+      assertQcStateUnchanged(snapshot, 'after-snapshot')
       const validation = designValidation()
       assertValidationReady(validation)
       const plan = buildQcCapturePlan({
@@ -372,31 +459,35 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         areas,
         customViews: input?.customViews ?? [],
       })
-      assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+      assertQcStateUnchanged(snapshot, 'after-plan')
+      assertPlannedAreasPresent(plan, areas)
       assertCraftChannelContributions(areas, useLabelStore.getState().bakeMap, plan)
       const views: QcViewResult[] = []
       for (const request of plan) {
-        assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+        assertQcStateUnchanged(snapshot, `before-capture:${request.id}`)
         const captured = await captureAgentQcView(request)
-        assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+        assertQcStateUnchanged(snapshot, `after-capture:${request.id}`)
+        const bytes = await blobBytes(captured.blob)
+        assertQcStateUnchanged(snapshot, `after-encoding:${request.id}`)
         const artifact = await uploadArtifact(bootstrap, {
           id: `qc-${request.id}`,
           fileName: `${request.id}.png`,
           mimeType: 'image/png',
-          bytes: await blobBytes(captured.blob),
+          bytes,
           width,
           height,
           areaId: request.areaId,
           channel: request.channel,
         })
+        assertQcStateUnchanged(snapshot, `after-upload:${request.id}`)
         views.push({ artifact, view: request, camera: captured.camera })
       }
       if (views.length !== plan.length) throw new Error(`QC capture produced ${views.length} of ${plan.length} planned views`)
-      assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+      assertQcStateUnchanged(snapshot, 'before-result')
       const finalValidation = designValidation()
       assertValidationReady(finalValidation)
       return { preset: 'qc-standard', views, areas: qcAreaEvidence(areas, views), validation: finalValidation }
-    },
+    }),
     exportArtifacts: async () => {
       await waitForBakes()
       const model = useModelStore.getState()
