@@ -51,6 +51,75 @@ export interface ArtifactDescriptor {
   channel?: 'color' | 'metalness' | 'roughness' | 'bump' | 'preview'
 }
 
+export type QcChannel = 'color' | 'metalness' | 'roughness' | 'bump'
+export type QcVector3 = [number, number, number]
+
+export type QcTarget =
+  | { kind: 'model' }
+  | { kind: 'area'; areaId: string }
+
+export type QcPose =
+  | { kind: 'direction'; direction: QcVector3 }
+  | { kind: 'area-face' }
+  | { kind: 'area-craft' }
+
+export interface QcCustomView {
+  id: string
+  direction: QcVector3
+  target: 'model' | string
+  framing: 'fit-model' | 'fit-area'
+  channel: QcChannel
+}
+
+export interface QcEvidenceRequest {
+  preset?: 'qc-standard'
+  width?: number
+  height?: number
+  customViews?: QcCustomView[]
+}
+
+export interface QcViewRequest {
+  id: string
+  target: QcTarget
+  framing: 'fit-model' | 'fit-area'
+  pose: QcPose
+  channel: QcChannel
+  width: number
+  height: number
+  areaId?: string
+  reason: string
+}
+
+export interface QcCameraMetadata {
+  position: QcVector3
+  direction: QcVector3
+  target: QcVector3
+  up: QcVector3
+  fov: number
+}
+
+export interface QcViewResult {
+  artifact: ArtifactDescriptor
+  view: QcViewRequest
+  camera: QcCameraMetadata
+}
+
+export interface QcAreaEvidence {
+  areaId: string
+  meshIndex: number
+  nodeName: string
+  side?: 'front' | 'back'
+  surfaceMode: 'overlay' | 'replace'
+  viewIds: string[]
+}
+
+export interface QcEvidenceResult {
+  preset: 'qc-standard'
+  views: QcViewResult[]
+  areas: QcAreaEvidence[]
+  validation: DesignValidationReport
+}
+
 export interface ModelLoadRequest {
   name: string
   url: string
@@ -164,6 +233,7 @@ export interface LabelEditorAgentBridgeV1 {
   validateDesign(): Promise<BridgeResult<DesignValidationReport>>
   waitForReady(input?: ReadinessRequest): Promise<BridgeResult<ReadinessReport>>
   renderPreview(input?: PreviewRequest): Promise<BridgeResult<ArtifactDescriptor>>
+  renderQcEvidence(input?: QcEvidenceRequest): Promise<BridgeResult<QcEvidenceResult>>
   exportArtifacts(input: ExportRequest): Promise<BridgeResult<ExportManifest>>
 }
 

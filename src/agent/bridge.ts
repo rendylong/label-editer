@@ -14,6 +14,8 @@ import {
   type ModelInspection,
   type ModelLoadRequest,
   type PreviewRequest,
+  type QcEvidenceRequest,
+  type QcEvidenceResult,
   type ReadinessReport,
   type ReadinessRequest,
   type SerializedProject,
@@ -66,6 +68,7 @@ export interface AgentBridgeHandlers {
   validateDesign: () => Promise<DesignValidationReport>
   waitForReady: (input?: ReadinessRequest) => Promise<ReadinessReport>
   renderPreview: (input?: PreviewRequest) => Promise<ArtifactDescriptor>
+  renderQcEvidence: (input?: QcEvidenceRequest) => Promise<QcEvidenceResult>
   exportArtifacts: (input: ExportRequest) => Promise<ExportManifest>
 }
 
@@ -107,6 +110,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     validateDesign: overrides.validateDesign ?? (() => Promise.resolve(missingHandler('validateDesign'))),
     waitForReady: overrides.waitForReady ?? (() => Promise.resolve(missingHandler('waitForReady'))),
     renderPreview: overrides.renderPreview ?? (() => Promise.resolve(missingHandler('renderPreview'))),
+    renderQcEvidence: overrides.renderQcEvidence ?? (() => Promise.resolve(missingHandler('renderQcEvidence'))),
     exportArtifacts: overrides.exportArtifacts ?? (() => Promise.resolve(missingHandler('exportArtifacts'))),
   }
   return {
@@ -119,6 +123,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     validateDesign: () => invoke('validate_design', handlers.validateDesign),
     waitForReady: (input) => invoke('wait_for_ready', () => handlers.waitForReady(input)),
     renderPreview: (input) => invoke('render_label_preview', () => handlers.renderPreview(input)),
+    renderQcEvidence: (input) => invoke('render_qc_evidence', () => handlers.renderQcEvidence(input)),
     exportArtifacts: (input) => invoke('export_label_assets', () => handlers.exportArtifacts(input)),
   }
 }
