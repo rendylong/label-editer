@@ -524,7 +524,12 @@ export class SceneController {
         const tangentReference = Math.abs(frame.normal.dot(worldUp)) >= 0.98
           ? new THREE.Vector3(0, 0, 1)
           : worldUp
-        const tangent = tangentReference.cross(frame.normal).normalize()
+        const tangent = tangentReference.clone().cross(frame.normal).normalize()
+        const dominantTangentAxis = Math.abs(tangent.x) >= Math.abs(tangent.y)
+          && Math.abs(tangent.x) >= Math.abs(tangent.z)
+          ? 'x'
+          : Math.abs(tangent.y) >= Math.abs(tangent.z) ? 'y' : 'z'
+        if (tangent[dominantTangentAxis] < 0) tangent.negate()
         direction.addScaledVector(tangent, 0.35).addScaledVector(worldUp, 0.2).normalize()
       }
     }

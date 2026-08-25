@@ -36,12 +36,12 @@ interface QcControllerInternals {
   encodePng(canvas: HTMLCanvasElement): Promise<Blob>
 }
 
-function qcControllerHarness(): { controller: SceneController; internals: QcControllerInternals } {
+function qcControllerHarness(areaRotationY = Math.PI / 2): { controller: SceneController; internals: QcControllerInternals } {
   const controller = Object.create(SceneController.prototype) as SceneController
   const model = new THREE.Group()
   const area = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshStandardMaterial())
   area.position.set(2, 0, 0)
-  area.rotation.y = Math.PI / 2
+  area.rotation.y = areaRotationY
   model.add(area)
   const camera = new THREE.PerspectiveCamera(52, 1.5, 0.01, 5000)
   camera.position.set(4, 3, 5)
@@ -234,6 +234,37 @@ describe('QC camera math', () => {
       areaControlVisible: false,
     })
     expect(captureState(internals)).toEqual(before)
+  })
+
+  it('uses the same canonical horizontal side for opposite area-craft normals without changing face cameras', async () => {
+    for (const [areaRotationY, expectedNormalX] of [
+      [Math.PI / 2, 1],
+      [-Math.PI / 2, -1],
+    ] as const) {
+      const { controller, internals } = qcControllerHarness(areaRotationY)
+      const before = captureState(internals)
+      const face = await captureQc(controller, AREA_FACE_REQUEST)
+      const craft = await captureQc(controller, {
+        ...AREA_FACE_REQUEST,
+        id: 'area-front-craft',
+        pose: { kind: 'area-craft' },
+      })
+      const faceOffset = new THREE.Vector3(...face.camera.position)
+        .sub(new THREE.Vector3(...face.camera.target)).normalize()
+      const craftOffset = new THREE.Vector3(...craft.camera.position)
+        .sub(new THREE.Vector3(...craft.camera.target)).normalize()
+
+      expect(faceOffset.x).toBeCloseTo(expectedNormalX, 5)
+      expect(faceOffset.y).toBeCloseTo(0, 5)
+      expect(faceOffset.z).toBeCloseTo(0, 5)
+      expect(craftOffset.x * expectedNormalX).toBeGreaterThan(0)
+      expect(craftOffset.y).toBeGreaterThan(0)
+      expect(craftOffset.z).toBeGreaterThan(0)
+      expect(craft.camera.direction[0]).toBeCloseTo(-craftOffset.x, 5)
+      expect(craft.camera.direction[1]).toBeCloseTo(-craftOffset.y, 5)
+      expect(craft.camera.direction[2]).toBeCloseTo(-craftOffset.z, 5)
+      expect(captureState(internals)).toEqual(before)
+    }
   })
 
   it('does not restore stale visibility onto markers replaced during async PNG encoding', async () => {

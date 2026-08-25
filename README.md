@@ -63,10 +63,11 @@ The design stage does not guess meshes, `stableSelector` values, or UVs. The pro
 | `validate` | Validate the Label Spec, assets, targets, and design/print issues | No |
 | `live` | Automatically open a read-only web preview and keep watching the same working spec | No |
 | `preview` | Generate a PNG for Agent visual inspection | Yes |
+| `qc` | Capture a revision-bound multi-view evidence set for visual review and repair | Yes |
 | `apply` / `export` | Bake, cross-check the GLB, and publish the complete output | Yes |
 | `open` | Explicit human takeover; returns a tokenized local editable URL | No |
 
-The recommended production sequence is `inspect` → create/validate the working spec → `live` → repeat `project` / `patch --force` → `validate` → `apply`. Never guess a target from a similar node name; use the `stableSelector` returned by inspection. `open` is not part of the default Agent workflow.
+The recommended production sequence is `inspect` → create/validate the working spec → `live` → repeat `project` / `patch --force` → `validate` → `qc` / repair / recapture → `apply`. Never guess a target from a similar node name; use the `stableSelector` returned by inspection. `open` is not part of the default Agent workflow.
 
 ## CLI
 
@@ -92,6 +93,13 @@ node scripts/label-cli.mjs validate spec.json --glb model.glb --json
 # Open the visible read-only live web preview and remain in the foreground until signaled
 node scripts/label-cli.mjs live spec.json --glb model.glb --json
 
+# Capture the standard visual-QC evidence set for the current working revision
+label-cli qc working-label-spec.json \
+  --glb package.glb \
+  --output label-qc/round-0 \
+  --preset qc-standard \
+  --json
+
 # Apply the design and publish the complete output directory
 node scripts/label-cli.mjs apply spec.json \
   --glb model.glb --output result --json
@@ -113,6 +121,38 @@ node scripts/label-cli.mjs open spec.json --glb model.glb
 ```
 
 Exit codes: `0` success; `2` invalid arguments; `3` path outside allowed roots; `4` invalid Label Spec/project; `5` missing or ambiguous target; `6` browser unavailable; `7` GLB rebuild failure; `8` unsupported codec; `9` output conflict; `10` revision conflict; `11` invalid patch operation; `1` any other internal error.
+
+## Visual QC evidence and repair
+
+Use `qc` after validation and while the automatically opened `live` preview remains available for user review. `live` keeps one read-only web page synchronized with the working spec. `qc` is a one-shot capture command: it does not close, replace, or open another live-preview page.
+
+The input may be a Label Spec v2 or Label Project v3. `--glb` and `--output` are required. `--preset qc-standard` is the default and currently supported preset. It captures at 1440 × 1440 by default; `--width` and `--height` accept integers from 1 through 4096. For an unusual package, `--camera-config cameras.json` appends up to 32 product-specific views without removing the required standard views. `--json` keeps stdout to one Agent envelope. An existing output directory is protected unless `--force` is explicit; normal QC repair should use a new round directory instead of replacing earlier evidence.
+
+Each immutable round has this layout:
+
+```text
+label-qc/
+├── round-0/
+│   ├── model/
+│   │   ├── model-front.png
+│   │   ├── model-back.png
+│   │   ├── model-left.png
+│   │   ├── model-right.png
+│   │   ├── model-front-right.png
+│   │   └── model-back-left.png
+│   ├── areas/
+│   │   └── <area-id>/
+│   │       ├── area-<area-id>-face.png
+│   │       ├── area-<area-id>-craft.png
+│   │       └── area-<area-id>-<metalness|roughness|bump>.png
+│   └── qc-manifest.json
+├── round-1/
+└── ...
+```
+
+Every round contains six whole-model views and two color close-ups for every label area. Metalness, roughness, and bump images are included only when the area's craft uses those channels. `qc-manifest.json` binds the evidence to the canonical input revision and model fingerprint, and records each area's stable target plus every artifact's relative path, SHA-256, dimensions, channel, framing, and camera metadata. It is evidence metadata, not a visual pass/fail verdict.
+
+Before inspecting images, the Agent compares `qc-manifest.json.input.revision` with a fresh `project` result for the working file. It then reviews every model, area, craft, and included channel image. A blocking defect, incomplete evidence set, or revision mismatch triggers a revision-safe patch, waits for the live preview to report the new ready revision, validates again, and captures the next immutable round. The Agent may make at most three repair rounds after `round-0`; it does not apply/export or confirm delivery while a blocking check remains. Non-blocking warnings remain visible in the final handoff, and rendered craft still requires physical supplier proof.
 
 ## Label Spec v2
 

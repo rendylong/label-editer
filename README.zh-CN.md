@@ -63,10 +63,11 @@ codex plugin add glb-label-editor@label-editer-dev
 | `validate` | 校验 Label Spec、资源、目标与设计/印刷问题 | 否 |
 | `live` | 自动打开只读 Web 预览并持续监听同一 working spec | 否 |
 | `preview` | 生成供 Agent 视觉检查的 PNG | 是 |
+| `qc` | 生成与当前 revision 绑定的多视角视觉检查证据 | 是 |
 | `apply` / `export` | 烘焙、GLB 交叉校验并完整发布产物 | 是 |
 | `open` | 显式人工接管，返回本机令牌化可编辑 URL | 否 |
 
-推荐制作顺序是 `inspect` → 创建/校验 working spec → `live` → `project` / `patch --force` 循环 → `validate` → `apply`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open` 不属于默认 Agent 工作流。
+推荐制作顺序是 `inspect` → 创建/校验 working spec → `live` → `project` / `patch --force` 循环 → `validate` → `qc` / 修复 / 重拍 → `apply`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open` 不属于默认 Agent 工作流。
 
 ## CLI
 
@@ -92,6 +93,13 @@ node scripts/label-cli.mjs validate spec.json --glb model.glb --json
 # 自动打开可见的只读 Web 实时预览，并保持前台运行直到收到信号
 node scripts/label-cli.mjs live spec.json --glb model.glb --json
 
+# 为当前 working revision 生成标准视觉 QC 证据集
+label-cli qc working-label-spec.json \
+  --glb package.glb \
+  --output label-qc/round-0 \
+  --preset qc-standard \
+  --json
+
 # 应用设计并发布完整目录
 node scripts/label-cli.mjs apply spec.json \
   --glb model.glb --output result --json
@@ -113,6 +121,38 @@ node scripts/label-cli.mjs open spec.json --glb model.glb
 ```
 
 退出码：`0` 成功；`2` 参数错误；`3` 路径越界；`4` Label Spec/项目无效；`5` 目标缺失或有歧义；`6` 浏览器不可用；`7` GLB 重建失败；`8` codec 不支持；`9` 输出冲突；`10` revision 冲突；`11` patch 操作无效；`1` 其他内部错误。
+
+## 视觉 QC 证据与修复
+
+完成校验后运行 `qc`，同时保持自动打开的 `live` 预览供用户持续评审。`live` 会让同一个只读 Web 页面始终与 working spec 同步；`qc` 是一次性取证命令，不会关闭、替换或另开一个实时预览页面。
+
+输入可以是 Label Spec v2 或 Label Project v3。`--glb` 与 `--output` 为必填项。`--preset qc-standard` 是默认且当前支持的 preset。默认截图尺寸为 1440 × 1440；`--width` 与 `--height` 接受 1 到 4096 的整数。对于特殊瓶型，可以用 `--camera-config cameras.json` 追加最多 32 个产品专用视角，但不会移除标准必拍视角。`--json` 会让 stdout 只包含一条 Agent envelope。已有输出目录默认受保护，只有显式添加 `--force` 才会替换；常规 QC 修复应新建下一轮目录，保留此前证据。
+
+每一轮证据都是不可变目录，结构如下：
+
+```text
+label-qc/
+├── round-0/
+│   ├── model/
+│   │   ├── model-front.png
+│   │   ├── model-back.png
+│   │   ├── model-left.png
+│   │   ├── model-right.png
+│   │   ├── model-front-right.png
+│   │   └── model-back-left.png
+│   ├── areas/
+│   │   └── <area-id>/
+│   │       ├── area-<area-id>-face.png
+│   │       ├── area-<area-id>-craft.png
+│   │       └── area-<area-id>-<metalness|roughness|bump>.png
+│   └── qc-manifest.json
+├── round-1/
+└── ...
+```
+
+每轮固定包含六张整模视图，以及每个贴标区域的两张彩色近景。只有区域工艺实际使用相应通道时，才会加入 Metalness、Roughness 或 Bump 图。`qc-manifest.json` 将证据绑定到规范化的输入 revision 和模型 fingerprint，并记录每个区域的稳定目标，以及各文件的相对路径、SHA-256、尺寸、通道、取景方式和相机信息。它是证据元数据，不代替视觉通过/失败结论。
+
+查看图片前，Agent 会将 `qc-manifest.json.input.revision` 与 working 文件最新的 `project` 结果比较，然后检查所有整模、区域、工艺近景与已包含的通道图。如果发现阻塞缺陷、证据不完整或 revision 不一致，Agent 会执行 revision-safe patch，等待实时预览报告新 revision 已 ready，再重新校验并写入下一轮不可变目录。`round-0` 之后最多允许三轮自动修复；仍有阻塞项时不得 apply/export 或确认交付。非阻塞 warning 必须保留在最终交接中，渲染工艺仍需要供应商实物打样确认。
 
 ## Label Spec v2
 

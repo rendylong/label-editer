@@ -32,6 +32,10 @@ class TestCanvasContext {
   getImageData(): ImageData {
     return { data: this.pixels, width: this.canvas.width, height: this.canvas.height, colorSpace: 'srgb' } as ImageData
   }
+
+  putImageData(image: ImageData): void {
+    this.pixels = new Uint8ClampedArray(image.data)
+  }
 }
 
 class TestCanvas {
@@ -49,6 +53,8 @@ function colorChannels(value: string): [number, number, number] {
   if (short) return short.slice(1).map((v) => Number.parseInt(v + v, 16)) as [number, number, number]
   const full = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value)
   if (full) return full.slice(1).map((v) => Number.parseInt(v, 16)) as [number, number, number]
+  const rgb = /^rgb\((\d+),(\d+),(\d+)\)$/i.exec(value)
+  if (rgb) return rgb.slice(1).map((v) => Number.parseInt(v, 10)) as [number, number, number]
   throw new Error(`Unsupported test color: ${value}`)
 }
 
@@ -249,6 +255,28 @@ describe('3D 渲染细节保真', () => {
     const metalness = masks.metalness.getContext('2d')!.getImageData(0, 0, 1, 1).data
 
     expect(Array.from(metalness.slice(0, 3))).toEqual([0, 0, 0])
+  })
+
+  it('全局磨砂应为整面粗糙度生成确定性的微表面凹凸，而不是留下中性 bump', () => {
+    const masks = renderMasks(16, 16, () => undefined, [], [{
+      type: 'matte', params: { intensity: 0.32, noise: 0.08 },
+    }])
+    const roughness = masks.roughness.getContext('2d')!.getImageData(0, 0, 16, 16).data
+    const bump = masks.bump.getContext('2d')!.getImageData(0, 0, 16, 16).data
+    const roughnessTones = Array.from({ length: 16 * 16 }, (_, pixel) => roughness[pixel * 4])
+    const bumpTones = Array.from({ length: 16 * 16 }, (_, pixel) => bump[pixel * 4])
+
+    expect(roughnessTones.some((tone) => tone !== 255)).toBe(true)
+    expect(bumpTones.some((tone) => tone !== 128)).toBe(true)
+    expect(bumpTones.some((tone) => tone === 128)).toBe(true)
+  })
+
+  it('无全局磨砂时应保持平面中性 bump', () => {
+    const masks = renderMasks(4, 4, () => undefined, [], [])
+    const bump = masks.bump.getContext('2d')!.getImageData(0, 0, 4, 4).data
+    const bumpTones = Array.from({ length: 4 * 4 }, (_, pixel) => bump[pixel * 4])
+
+    expect(new Set(bumpTones)).toEqual(new Set([128]))
   })
 
   it('PBR 场景应安装图像环境光以显示金属、玻璃与清漆细节', () => {

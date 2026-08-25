@@ -366,6 +366,32 @@ function applyLayerMatteSurface(
   bump.putImageData(bumpImage, 0, 0)
 }
 
+function applyGlobalMatteSurface(
+  width: number,
+  height: number,
+  effect: CraftEffect,
+  roughness: CanvasRenderingContext2D,
+  bump: CanvasRenderingContext2D,
+): void {
+  const roughImage = roughness.getImageData(0, 0, width, height)
+  const bumpImage = bump.getImageData(0, 0, width, height)
+  const intensity = effect.params.intensity ?? 0.3
+  const density = effect.params.noise ?? 0.5
+  for (let pixel = 0; pixel < width * height; pixel++) {
+    const offset = pixel * 4
+    const tones = matteSurfaceTones(pixel, intensity, density)
+    roughImage.data[offset] = tones.roughness
+    roughImage.data[offset + 1] = tones.roughness
+    roughImage.data[offset + 2] = tones.roughness
+    const heightTone = Math.max(0, Math.min(255, bumpImage.data[offset] + tones.bump - 128))
+    bumpImage.data[offset] = heightTone
+    bumpImage.data[offset + 1] = heightTone
+    bumpImage.data[offset + 2] = heightTone
+  }
+  roughness.putImageData(roughImage, 0, 0)
+  bump.putImageData(bumpImage, 0, 0)
+}
+
 /** 图层是否携带某工艺。 */
 export function hasCraft(layer: LabelLayer, type: CraftType): boolean {
   return layer.craft.some((c) => c.type === type)
@@ -525,11 +551,7 @@ export function renderMasks(
   }
   // 全局工艺
   for (const c of globalCraft) {
-    if (c.type === 'matte') {
-      const tone = Math.round(217 + 38 * clamp01(c.params.intensity ?? 0.3))
-      rctx.fillStyle = `rgb(${tone},${tone},${tone})`
-      rctx.fillRect(0, 0, width, height)
-    }
+    if (c.type === 'matte') applyGlobalMatteSurface(width, height, c, rctx, bctx)
     if (c.type === 'uv') {
       const tone = Math.round(8 + 96 * (1 - clamp01(c.params.gloss ?? 0.5)))
       rctx.fillStyle = `rgb(${tone},${tone},${tone})`
