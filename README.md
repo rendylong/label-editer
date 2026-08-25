@@ -7,7 +7,7 @@
 ## 一条命令安装到 Codex
 
 ```bash
-npx --yes --package=github:rendylong/label-editer glb-label-editor-install
+npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads/main.tar.gz glb-label-editor-install
 ```
 
 只要求预先安装 Node.js 22+ 和 Codex CLI。安装器会通过 Node.js 自带的 npm 安装锁定依赖和 Playwright Chromium、构建编辑器，并将可运行插件安装到 `~/.codex/glb-label-editor`。它随后会添加 `label-editer` marketplace，安装并启用 `glb-label-editor@label-editer`。

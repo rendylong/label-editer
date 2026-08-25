@@ -13,7 +13,7 @@
 3. 添加 label-editer marketplace，并启用 glb-label-editor@label-editer。
 
 在权限允许后，执行：
-npx --yes --package=github:rendylong/label-editer glb-label-editor-install
+npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads/main.tar.gz glb-label-editor-install
 
 完成后运行 codex plugin list --json，确认 glb-label-editor@label-editer 的 installed 和 enabled 都为 true。
 再运行 codex mcp list --json 检查 MCP 配置；如果当前会话还看不到 Skill 或 MCP 工具，请明确告诉我新建一个 Codex 会话，不要把旧会话未刷新误判成安装失败。
