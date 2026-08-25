@@ -91,3 +91,36 @@ Results:
 - Publication paths reject encoded text, Windows absolute paths, non-NFKC segments, and normalized case-fold collisions.
 - Validation snapshots now accept only the `DesignValidationReport` and `DesignValidationIssue` contract, rejecting raw bytes and unsupported issue fields.
 - Manifest input kinds are restricted to Label Spec v2 and Label Project v3.
+
+## Fix round 2/5
+
+### RED
+
+Command:
+
+```sh
+pnpm vitest run tests/qcOutput.test.ts
+```
+
+Result before the fix: 3 of 31 tests failed. Model artifacts accepted an area target/`fit-area`, accepted `model` with `fit-area`, and `model/Σ.png` plus `model/ς.png` could coexist because simple lowercasing is not Unicode full case folding.
+
+### GREEN
+
+Commands:
+
+```sh
+pnpm vitest run tests/qcOutput.test.ts
+pnpm exec tsc -b --pretty false
+git diff --check -- scripts/lib/qc-output.mjs tests/qcOutput.test.ts
+```
+
+Results:
+
+- All 31 focused QC-output tests passed.
+- TypeScript build completed with exit code 0.
+- The diff check produced no output.
+
+### Fixes
+
+- Artifacts without `areaId` now require exactly `view.target === 'model'` and `view.framing === 'fit-model'`.
+- Publication path segments are constrained to decoded, NFKC-normalized ASCII `[A-Za-z0-9._-]` segments. This makes path identity deterministic across Node/filesystem Unicode case-folding differences and rejects both Greek sigma variants before publication.

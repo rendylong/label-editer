@@ -9,6 +9,7 @@ const CHANNELS = new Set(['color', 'metalness', 'roughness', 'bump'])
 const POSE_KINDS = new Set(['direction', 'area-face', 'area-craft'])
 const FRAMINGS = new Set(['fit-model', 'fit-area'])
 const UNSAFE_CONTENT = /(?:\b(?:https?|file):\/\/|\bbearer\s+)/i
+const ASCII_PUBLICATION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 export class QcOutputError extends Error {
   constructor(code, message, details) {
@@ -83,7 +84,8 @@ function assertSafeFileName(value) {
 function assertSafeRelativePath(value) {
   assertSafeString(value, 'artifact path')
   if (path.posix.isAbsolute(value) || path.win32.isAbsolute(value) || value.includes('\\') || value.includes('%')
-    || value.split('/').some((segment) => !segment || segment === '..' || segment.normalize('NFKC') !== segment)) {
+    || value.split('/').some((segment) => !segment || segment === '..' || segment.normalize('NFKC') !== segment
+      || !ASCII_PUBLICATION_SEGMENT.test(segment))) {
     throw invalid('Artifact path must be a safe relative path')
   }
 }
@@ -398,6 +400,9 @@ export function validateQcManifest(value) {
     if (!POSE_KINDS.has(artifact.view.kind) || !FRAMINGS.has(artifact.view.framing)) throw invalid(`Invalid QC manifest artifact view: ${artifact.id}`)
     assertSafeString(artifact.view.target, 'QC manifest artifact target')
     if (artifact.areaId !== undefined) assertSafeString(artifact.areaId, 'QC manifest artifact area id')
+    if (artifact.areaId === undefined && (artifact.view.target !== 'model' || artifact.view.framing !== 'fit-model')) {
+      throw invalid(`QC manifest model artifact target or framing is invalid: ${artifact.id}`)
+    }
     manifestCamera(artifact.camera)
   }
   const areaIds = new Set(value.areas.map((area) => area.id))

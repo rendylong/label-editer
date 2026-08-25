@@ -195,6 +195,28 @@ describe('QC output manifest', () => {
   })
 
   it.each([
+    ['an area target and area framing', (manifest: ReturnType<typeof buildQcManifest>) => {
+      const artifact = manifest.artifacts.find((candidate: any) => candidate.areaId === undefined)!
+      artifact.view.target = 'front'
+      artifact.view.framing = 'fit-area'
+    }],
+    ['model target with area framing', (manifest: ReturnType<typeof buildQcManifest>) => {
+      const artifact = manifest.artifacts.find((candidate: any) => candidate.areaId === undefined)!
+      artifact.view.framing = 'fit-area'
+    }],
+  ])('rejects a model artifact with %s', async (_label, alter) => {
+    const input = inputFor(await fixture())
+    const request = view('model-front')
+    const artifact = descriptor('qc-model-front', request.id)
+    input.evidence.views.push({ artifact, view: request, camera: camera() })
+    input.artifacts.push({ ...artifact, bytes: PNG_BYTES })
+    const manifest = buildQcManifest(input)
+    alter(manifest)
+
+    expect(() => validateQcManifest(manifest)).toThrow()
+  })
+
+  it.each([
     ['encoded traversal', '%2e%2e/escape.png'],
     ['encoded separator', 'areas%2ffront/face.png'],
     ['Windows absolute path', 'C:/evidence.png'],
@@ -213,6 +235,22 @@ describe('QC output manifest', () => {
     duplicate.path = 'AREAS/front/area-front-face.png'
     manifest.artifacts.push(duplicate)
     manifest.areas[0].artifactIds.push(duplicate.id)
+
+    expect(() => validateQcManifest(manifest)).toThrow()
+  })
+
+  it('does not allow Greek sigma and final-sigma paths to coexist', async () => {
+    const input = inputFor(await fixture())
+    for (const id of ['model-sigma', 'model-final-sigma']) {
+      const request = view(id)
+      const artifact = descriptor(`qc-${id}`, request.id)
+      input.evidence.views.push({ artifact, view: request, camera: camera() })
+      input.artifacts.push({ ...artifact, bytes: PNG_BYTES })
+    }
+    const manifest = buildQcManifest(input)
+    const modelArtifacts = manifest.artifacts.filter((artifact: any) => artifact.areaId === undefined)
+    modelArtifacts[0].path = 'model/Σ.png'
+    modelArtifacts[1].path = 'model/ς.png'
 
     expect(() => validateQcManifest(manifest)).toThrow()
   })
