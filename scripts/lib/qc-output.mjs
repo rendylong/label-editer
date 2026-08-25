@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { sanitizeArtifactName } from './files.mjs'
-import { revisionOf } from './project-control.mjs'
+import { inspectProject } from './project-control.mjs'
 
 const DIGEST_PATTERN = /^sha256:([a-f0-9]{64})$/
 const HEX_PATTERN = /^[a-f0-9]{64}$/
@@ -74,16 +74,23 @@ function assertPngBytes(value, byteLength) {
 
 function assertSafeFileName(value) {
   assertSafeString(value, 'artifact filename')
-  if (path.isAbsolute(value) || value.includes('\\') || value.split('/').includes('..')) {
+  if (path.isAbsolute(value) || path.win32.isAbsolute(value) || value.includes('\\')
+    || value.includes('%') || value.split('/').some((segment) => segment === '..' || segment.normalize('NFKC') !== segment)) {
     throw invalid('Artifact filename must be a safe relative path')
   }
 }
 
 function assertSafeRelativePath(value) {
   assertSafeString(value, 'artifact path')
-  if (path.posix.isAbsolute(value) || value.includes('\\') || value.split('/').some((segment) => !segment || segment === '..')) {
+  if (path.posix.isAbsolute(value) || path.win32.isAbsolute(value) || value.includes('\\') || value.includes('%')
+    || value.split('/').some((segment) => !segment || segment === '..' || segment.normalize('NFKC') !== segment)) {
     throw invalid('Artifact path must be a safe relative path')
   }
+}
+
+function publicationPathKey(value) {
+  assertSafeRelativePath(value)
+  return value.normalize('NFKC').toLowerCase()
 }
 
 function assertUnique(items, key, label) {
@@ -181,18 +188,44 @@ function assertNoUnsafeContent(value, label = 'manifest') {
 }
 
 function validationSnapshot(value) {
-  if (!isRecord(value) || typeof value.ready !== 'boolean' || !Array.isArray(value.issues)) throw invalid('Invalid QC validation result')
-  const snapshot = structuredClone(value)
-  assertNoUnsafeContent(snapshot, 'validation')
-  return snapshot
+  assertExactKeys(value, ['ready', 'issues'], 'QC validation result')
+  if (typeof value.ready !== 'boolean' || !Array.isArray(value.issues)) throw invalid('Invalid QC validation result')
+  const issues = value.issues.map((issue) => {
+    if (!isRecord(issue)) throw invalid('Invalid QC validation issue')
+    const allowed = ['severity', 'code', 'message', 'path', 'areaId', 'layerId']
+    if (Object.keys(issue).some((key) => !allowed.includes(key))) throw invalid('QC validation issue has unsupported fields')
+    if (issue.severity !== 'error' && issue.severity !== 'warning') throw invalid('Invalid QC validation issue severity')
+    assertSafeString(issue.code, 'QC validation issue code')
+    assertSafeString(issue.message, 'QC validation issue message')
+    for (const key of ['path', 'areaId', 'layerId']) {
+      if (issue[key] !== undefined) assertSafeString(issue[key], `QC validation issue ${key}`)
+    }
+    return {
+      severity: issue.severity,
+      code: issue.code,
+      message: issue.message,
+      ...(issue.path === undefined ? {} : { path: issue.path }),
+      ...(issue.areaId === undefined ? {} : { areaId: issue.areaId }),
+      ...(issue.layerId === undefined ? {} : { layerId: issue.layerId }),
+    }
+  })
+  return { ready: value.ready, issues }
 }
 
-function projectRevision(project) {
+function canonicalProject(project) {
   if (!isRecord(project) || !isRecord(project.value)) throw invalid('QC project inspection is missing its source value')
-  assertSafeString(project.kind, 'project kind')
-  assertDigest(project.revision, 'project revision')
-  if (revisionOf(project.value) !== project.revision) throw invalid('QC project revision is not canonical')
-  return project.revision
+  let canonical
+  try {
+    canonical = inspectProject(project.value)
+  } catch (error) {
+    throw invalid(`Invalid QC project source: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  for (const key of ['kind', 'revision', 'areaCount', 'areas']) {
+    if (JSON.stringify(project[key]) !== JSON.stringify(canonical[key])) {
+      throw invalid(`QC project ${key} does not match its canonical source`)
+    }
+  }
+  return canonical
 }
 
 function modelSnapshot(inspection) {
@@ -239,7 +272,8 @@ export function parseQcCameraConfig(value) {
 export function buildQcManifest({ createdAt, project, inspection, evidence, artifacts }) {
   assertSafeString(createdAt, 'QC manifest timestamp')
   if (Number.isNaN(Date.parse(createdAt))) throw invalid('Invalid QC manifest timestamp')
-  const revision = projectRevision(project)
+  const canonicalProjectSummary = canonicalProject(project)
+  const revision = canonicalProjectSummary.revision
   const model = modelSnapshot(inspection)
   if (!isRecord(evidence) || evidence.preset !== 'qc-standard' || !Array.isArray(evidence.views) || !Array.isArray(evidence.areas)) {
     throw invalid('Invalid QC evidence result')
@@ -280,10 +314,10 @@ export function buildQcManifest({ createdAt, project, inspection, evidence, arti
       ...(descriptor.areaId === undefined ? {} : { areaId: descriptor.areaId }),
     }
   })
-  assertUnique(manifestArtifacts.map((artifact) => ({ id: artifact.path })), 'id', 'QC artifact path')
+  assertUnique(manifestArtifacts.map((artifact) => ({ id: publicationPathKey(artifact.path) })), 'id', 'QC artifact path')
   if (storedById.size !== manifestArtifacts.length) throw invalid('Unexpected stored QC artifact')
 
-  const projectAreas = Array.isArray(project.areas) ? project.areas : []
+  const projectAreas = canonicalProjectSummary.areas
   assertUnique(projectAreas, 'id', 'project area')
   assertUnique(evidence.areas, 'areaId', 'QC evidence area')
   if (projectAreas.length !== evidence.areas.length) throw invalid('QC evidence does not cover every project area')
@@ -322,7 +356,7 @@ export function buildQcManifest({ createdAt, project, inspection, evidence, arti
     version: 1,
     createdAt,
     preset: evidence.preset,
-    input: { kind: project.kind, revision, sha256: digest },
+    input: { kind: canonicalProjectSummary.kind, revision, sha256: digest },
     model: { fileName: model.fileName, fingerprint: model.fingerprint, dimensions: model.dimensions },
     validation: validationSnapshot(evidence.validation),
     areas: manifestAreas,
@@ -337,7 +371,7 @@ export function validateQcManifest(value) {
   assertSafeString(value.createdAt, 'QC manifest timestamp')
   if (Number.isNaN(Date.parse(value.createdAt))) throw invalid('Invalid QC manifest timestamp')
   assertExactKeys(value.input, ['kind', 'revision', 'sha256'], 'QC manifest input')
-  assertSafeString(value.input.kind, 'QC manifest input kind')
+  if (value.input.kind !== 'label-spec-v2' && value.input.kind !== 'label-project-v3') throw invalid('Unsupported QC manifest input kind')
   assertDigest(value.input.revision, 'QC manifest input revision')
   if (typeof value.input.sha256 !== 'string' || !HEX_PATTERN.test(value.input.sha256)
     || value.input.revision !== `sha256:${value.input.sha256}`) throw invalid('QC manifest input revision is stale or malformed')
@@ -350,7 +384,7 @@ export function validateQcManifest(value) {
   if (!Array.isArray(value.areas) || !Array.isArray(value.artifacts)) throw invalid('QC manifest areas and artifacts must be arrays')
   assertUnique(value.areas, 'id', 'QC manifest area')
   assertUnique(value.artifacts, 'id', 'QC manifest artifact')
-  assertUnique(value.artifacts.map((artifact) => ({ id: artifact.path })), 'id', 'QC manifest artifact path')
+  assertUnique(value.artifacts.map((artifact) => ({ id: publicationPathKey(artifact.path) })), 'id', 'QC manifest artifact path')
   const artifactIds = new Set(value.artifacts.map((artifact) => artifact.id))
   for (const artifact of value.artifacts) {
     assertExactKeys(artifact, ['id', 'path', 'sha256', 'mimeType', 'byteLength', 'width', 'height', 'view', 'channel', 'camera', ...(artifact.areaId === undefined ? [] : ['areaId'])], 'QC manifest artifact')
@@ -366,6 +400,12 @@ export function validateQcManifest(value) {
     if (artifact.areaId !== undefined) assertSafeString(artifact.areaId, 'QC manifest artifact area id')
     manifestCamera(artifact.camera)
   }
+  const areaIds = new Set(value.areas.map((area) => area.id))
+  for (const artifact of value.artifacts) {
+    if (artifact.areaId !== undefined && !areaIds.has(artifact.areaId)) {
+      throw invalid(`QC manifest artifact references missing area: ${artifact.id}`)
+    }
+  }
   for (const area of value.areas) {
     assertExactKeys(area, ['id', 'meshIndex', 'stableSelector', 'nodeName', 'side', 'surfaceMode', 'artifactIds'], 'QC manifest area')
     assertSafeString(area.id, 'QC manifest area id')
@@ -378,6 +418,13 @@ export function validateQcManifest(value) {
     assertUnique(area.artifactIds.map((id) => ({ id })), 'id', 'QC manifest area artifact')
     if (area.artifactIds.some((id) => !artifactIds.has(id))) throw invalid(`QC manifest area references missing artifact: ${area.id}`)
     const areaArtifacts = value.artifacts.filter((artifact) => artifact.areaId === area.id)
+    const areaArtifactIds = new Set(areaArtifacts.map((artifact) => artifact.id))
+    if (area.artifactIds.length !== areaArtifactIds.size || area.artifactIds.some((id) => !areaArtifactIds.has(id))) {
+      throw invalid(`QC manifest area artifact ids are disconnected: ${area.id}`)
+    }
+    if (areaArtifacts.some((artifact) => artifact.view.target !== area.id || artifact.view.framing !== 'fit-area')) {
+      throw invalid(`QC manifest area artifact target or framing is invalid: ${area.id}`)
+    }
     const hasFace = areaArtifacts.some((artifact) => artifact.view.kind === 'area-face' && artifact.channel === 'color')
     const hasCraft = areaArtifacts.some((artifact) => artifact.view.kind === 'area-craft' && artifact.channel === 'color')
     if (!hasFace || !hasCraft) throw invalid(`QC manifest area is missing face or craft color evidence: ${area.id}`)

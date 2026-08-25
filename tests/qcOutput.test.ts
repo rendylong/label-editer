@@ -128,6 +128,17 @@ describe('QC output manifest', () => {
   })
 
   it.each([
+    ['kind', (input: ReturnType<typeof inputFor>) => { input.project.kind = 'label-project-v3' }],
+    ['area summary', (input: ReturnType<typeof inputFor>) => { input.project.areas[0].id = 'tampered' }],
+    ['revision', (input: ReturnType<typeof inputFor>) => { input.project.revision = DIGEST('c') }],
+  ])('rejects a tampered project %s summary instead of trusting it', async (_label, alter) => {
+    const input = inputFor(await fixture())
+    alter(input)
+
+    expect(() => buildQcManifest(input)).toThrow()
+  })
+
+  it.each([
     ['duplicate artifact ids', (input: ReturnType<typeof inputFor>) => { input.artifacts[1].id = input.artifacts[0].id }],
     ['unexpected uploaded artifact', (input: ReturnType<typeof inputFor>) => { input.artifacts.push({ ...descriptor('qc-unexpected', 'unexpected'), bytes: PNG_BYTES }) }],
     ['missing area-face image', (input: ReturnType<typeof inputFor>) => {
@@ -166,6 +177,62 @@ describe('QC output manifest', () => {
     const stale = buildQcManifest(inputFor(await fixture()))
     stale.input.revision = DIGEST('c')
     expect(() => validateQcManifest(stale)).toThrow()
+  })
+
+  it.each([
+    ['disconnected area artifact ids', (manifest: ReturnType<typeof buildQcManifest>) => { manifest.areas[0].artifactIds.pop() }],
+    ['artifact area id with no manifest area', (manifest: ReturnType<typeof buildQcManifest>) => {
+      manifest.artifacts[0].areaId = 'missing'
+      manifest.artifacts[0].view.target = 'missing'
+    }],
+    ['area artifact targeted at the model', (manifest: ReturnType<typeof buildQcManifest>) => { manifest.artifacts[0].view.target = 'model' }],
+    ['area artifact using model framing', (manifest: ReturnType<typeof buildQcManifest>) => { manifest.artifacts[0].view.framing = 'fit-model' }],
+  ])('rejects %s in independent validation', async (_label, alter) => {
+    const manifest = buildQcManifest(inputFor(await fixture()))
+    alter(manifest)
+
+    expect(() => validateQcManifest(manifest)).toThrow()
+  })
+
+  it.each([
+    ['encoded traversal', '%2e%2e/escape.png'],
+    ['encoded separator', 'areas%2ffront/face.png'],
+    ['Windows absolute path', 'C:/evidence.png'],
+    ['full-width segment that collides with ASCII', 'ａｒｅａｓ/front/area-front-face.png'],
+  ])('rejects unsafe publication path: %s', async (_label, unsafePath) => {
+    const manifest = buildQcManifest(inputFor(await fixture()))
+    manifest.artifacts[0].path = unsafePath
+
+    expect(() => validateQcManifest(manifest)).toThrow()
+  })
+
+  it('rejects case-folded publication path collisions', async () => {
+    const manifest = buildQcManifest(inputFor(await fixture()))
+    const duplicate = structuredClone(manifest.artifacts[0])
+    duplicate.id = 'qc-case-folded'
+    duplicate.path = 'AREAS/front/area-front-face.png'
+    manifest.artifacts.push(duplicate)
+    manifest.areas[0].artifactIds.push(duplicate.id)
+
+    expect(() => validateQcManifest(manifest)).toThrow()
+  })
+
+  it.each([
+    ['nested bytes', { severity: 'error', code: 'X', message: 'bad', bytes: new Uint8Array([1]) }],
+    ['URL extra key', { severity: 'error', code: 'X', message: 'bad', url: 'https://example.test/evidence' }],
+    ['token extra key', { severity: 'error', code: 'X', message: 'bad', token: 'secret' }],
+  ])('rejects non-contract validation issue content: %s', async (_label, issue) => {
+    const input = inputFor(await fixture())
+    input.evidence.validation.issues = [issue] as never
+
+    expect(() => buildQcManifest(input)).toThrow()
+  })
+
+  it('rejects unsupported manifest input kinds', async () => {
+    const manifest = buildQcManifest(inputFor(await fixture()))
+    manifest.input.kind = 'unknown-project'
+
+    expect(() => validateQcManifest(manifest)).toThrow()
   })
 
   it('creates safe area and model paths from capture view ids', () => {

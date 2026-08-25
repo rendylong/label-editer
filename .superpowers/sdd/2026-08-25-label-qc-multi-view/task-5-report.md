@@ -55,3 +55,39 @@ Result: exit code 0. Existing GLB fixture tests emitted non-failing warnings for
 ## Concerns
 
 - The manifest module is intentionally pure and has no publication side effects. Atomic directory writing and browser-to-session artifact retrieval remain Task 6 responsibilities.
+
+## Fix round 1/5
+
+### RED
+
+Command:
+
+```sh
+pnpm vitest run tests/qcOutput.test.ts
+```
+
+Result before the fix: 12 of 28 tests failed, covering mutable project summaries, disconnected area artifact ids, area target/framing drift, encoded/Windows/Unicode paths, case-fold collisions, nested byte content in validation issues, and unsupported input kinds.
+
+### GREEN
+
+Commands:
+
+```sh
+pnpm vitest run tests/qcOutput.test.ts tests/projectControl.test.ts
+pnpm exec tsc -b --pretty false
+git diff --check -- scripts/lib/qc-output.mjs tests/qcOutput.test.ts
+```
+
+Results:
+
+- 50 focused tests passed (28 QC-output and 22 project-control).
+- TypeScript build completed with exit code 0.
+- The diff check produced no output.
+
+### Fixes
+
+- The builder now derives kind, area summary, and revision only from a fresh `inspectProject(project.value)` result and rejects inconsistent supplied summaries.
+- Manifest validation now requires exact bidirectional area/artifact membership, rejects dangling artifact area ids, and enforces area target plus `fit-area` framing.
+- Publication paths reject encoded text, Windows absolute paths, non-NFKC segments, and normalized case-fold collisions.
+- Validation snapshots now accept only the `DesignValidationReport` and `DesignValidationIssue` contract, rejecting raw bytes and unsupported issue fields.
+- Manifest input kinds are restricted to Label Spec v2 and Label Project v3.
