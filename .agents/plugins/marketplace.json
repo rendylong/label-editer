@@ -1,0 +1,21 @@
+{
+  "name": "label-editer-dev",
+  "interface": {
+    "displayName": "GLB Label Editor (Development)"
+  },
+  "plugins": [
+    {
+      "name": "glb-label-editor",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "description": "Local development source for the GLB Label Editor Codex plugin.",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Design"
+    }
+  ]
+}

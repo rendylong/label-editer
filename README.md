@@ -4,7 +4,24 @@
 
 插件由三层共用同一套运行时：两个 Codex Skill 分别负责贴标设计和 GLB 制作，MCP 提供六个粗粒度工具，`label-cli` 提供可脚本化的 JSON 接口。Agent 不需要依赖 DOM 选择器操作前端。
 
-## 准备运行环境
+## 一条命令安装到 Codex
+
+```bash
+npx --yes --package=github:rendylong/label-editer glb-label-editor-install
+```
+
+只要求预先安装 Node.js 22+ 和 Codex CLI。安装器会通过 Node.js 自带的 npm 安装锁定依赖和 Playwright Chromium、构建编辑器，并将可运行插件安装到 `~/.codex/glb-label-editor`。它随后会添加 `label-editer` marketplace，安装并启用 `glb-label-editor@label-editer`。
+
+安装或更新插件后，请新建 Codex 会话，使 Skill 和 MCP 工具重新加载。可以用下面的命令确认插件状态：
+
+```bash
+codex plugin list --json
+codex mcp list --json
+```
+
+希望让 Agent 代为安装时，直接复制 [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md) 中的 Prompt。安装器不会执行 `curl | sh`，且只管理 `~/.codex/glb-label-editor`。
+
+## 本地开发
 
 ```bash
 pnpm install
@@ -12,13 +29,11 @@ pnpm exec playwright install chromium
 pnpm build
 ```
 
-要求 Node.js 22+、pnpm 和可运行 Chromium/WebGL 的本机环境。插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)，MCP 配置位于 [`.mcp.json`](.mcp.json)。插件安装时会同时安装 [`cosmetic-label`](skills/cosmetic-label/SKILL.md) 和 [`cosmetic-label-editor`](skills/cosmetic-label-editor/SKILL.md)。
-
-安装到 Codex 时，将本目录作为 `glb-label-editor` 插件源加入个人或团队 marketplace，再执行：
+仓库自带的开发 marketplace 名为 `label-editer-dev`：
 
 ```bash
-codex plugin marketplace add /path/to/your/marketplace
-codex plugin add glb-label-editor@<marketplace-name>
+codex plugin marketplace add /absolute/path/to/label-editer
+codex plugin add glb-label-editor@label-editer-dev
 ```
 
 本地开发时也可以只注册 MCP：
@@ -27,7 +42,7 @@ codex plugin add glb-label-editor@<marketplace-name>
 codex mcp add glb-label-editor -- node /absolute/path/to/glb-label-editor/scripts/mcp-server.mjs
 ```
 
-安装或更新插件后，请新建 Codex 会话，使 Skill 和 MCP 工具重新加载。
+插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)，MCP 配置位于 [`.mcp.json`](.mcp.json)。插件安装时会同时安装 [`cosmetic-label`](skills/cosmetic-label/SKILL.md) 和 [`cosmetic-label-editor`](skills/cosmetic-label-editor/SKILL.md)。
 
 ## 两阶段工作流
 

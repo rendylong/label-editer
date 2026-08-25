@@ -8,15 +8,31 @@
     "node": ">=22"
   },
   "bin": {
-    "label-cli": "./scripts/label-cli.mjs"
+    "label-cli": "./scripts/label-cli.mjs",
+    "glb-label-editor-install": "./scripts/install-plugin.mjs"
   },
+  "files": [
+    ".codex-plugin/",
+    ".mcp.json",
+    "INSTALL_WITH_AGENT.md",
+    "README.md",
+    "index.html",
+    "npm-shrinkwrap.json",
+    "public/",
+    "scripts/",
+    "skills/",
+    "src/",
+    "tsconfig.json",
+    "vite.config.ts"
+  ],
   "scripts": {
     "dev": "vite",
     "generate:label-validator": "node scripts/generate-label-validator.mjs",
-    "prebuild": "pnpm generate:label-validator",
+    "prebuild": "node scripts/generate-label-validator.mjs",
     "build": "tsc -b && vite build",
+    "install:browser": "playwright install chromium",
     "preview": "vite preview",
-    "pretest": "pnpm generate:label-validator",
+    "pretest": "node scripts/generate-label-validator.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:plugin-e2e": "vitest run tests/pluginE2E.test.ts --testTimeout=120000",
