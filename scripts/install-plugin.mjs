@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, cp, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -12,7 +12,6 @@ const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 
 const runtimeEntries = [
   '.codex-plugin',
-  '.mcp.json',
   'INSTALL_WITH_AGENT.md',
   'PRIVACY.md',
   'README.md',
@@ -110,7 +109,7 @@ function validateInstallRoot(installRoot) {
 }
 
 async function copyRuntime(sourceRoot, runtimeRoot) {
-  for (const required of ['.codex-plugin/plugin.json', 'package.json', 'npm-shrinkwrap.json', 'scripts/mcp-server.mjs', 'skills']) {
+  for (const required of ['.codex-plugin/plugin.json', 'package.json', 'npm-shrinkwrap.json', 'scripts/label-cli.mjs', 'skills']) {
     if (!existsSync(path.join(sourceRoot, required))) {
       throw new Error(`Plugin source is missing ${required}: ${sourceRoot}`)
     }
@@ -141,19 +140,37 @@ async function prepareRuntime(runtimeRoot, progress) {
 async function writePluginWrapper(stageRoot, finalInstallRoot) {
   const pluginRoot = path.join(stageRoot, 'plugin')
   const finalRuntimeRoot = path.join(finalInstallRoot, 'runtime')
+  const finalRuntimeCli = path.join(finalRuntimeRoot, 'scripts/label-cli.mjs')
   await mkdir(pluginRoot, { recursive: true })
   await cp(path.join(stageRoot, 'runtime/.codex-plugin'), path.join(pluginRoot, '.codex-plugin'), { recursive: true })
   await cp(path.join(stageRoot, 'runtime/assets'), path.join(pluginRoot, 'assets'), { recursive: true })
   await cp(path.join(stageRoot, 'runtime/skills'), path.join(pluginRoot, 'skills'), { recursive: true })
-  await writeFile(path.join(pluginRoot, '.mcp.json'), `${JSON.stringify({
-    mcpServers: {
-      'glb-label-editor': {
-        command: process.execPath,
-        args: [path.join(finalRuntimeRoot, 'scripts/mcp-server.mjs')],
-        cwd: finalRuntimeRoot,
-      },
-    },
-  }, null, 2)}\n`)
+  const launcherDir = path.join(pluginRoot, 'bin')
+  const launcherPath = path.join(launcherDir, 'label-cli.mjs')
+  await mkdir(launcherDir, { recursive: true })
+  await writeFile(launcherPath, `#!/usr/bin/env node
+import { spawn } from 'node:child_process'
+
+const child = spawn(process.execPath, [${JSON.stringify(finalRuntimeCli)}, ...process.argv.slice(2)], {
+  stdio: 'inherit',
+})
+const forward = (signal) => { if (!child.killed) child.kill(signal) }
+const onSigint = () => forward('SIGINT')
+const onSigterm = () => forward('SIGTERM')
+process.once('SIGINT', onSigint)
+process.once('SIGTERM', onSigterm)
+child.once('error', (error) => {
+  process.stderr.write(\`Unable to start local label CLI: \${error.message}\\n\`)
+  process.exitCode = 1
+})
+child.once('exit', (code, signal) => {
+  process.removeListener('SIGINT', onSigint)
+  process.removeListener('SIGTERM', onSigterm)
+  if (signal) process.kill(process.pid, signal)
+  else process.exitCode = code ?? 1
+})
+`)
+  await chmod(launcherPath, 0o755)
 
   const marketplaceDir = path.join(stageRoot, '.agents/plugins')
   await mkdir(marketplaceDir, { recursive: true })
@@ -168,6 +185,17 @@ async function writePluginWrapper(stageRoot, finalInstallRoot) {
       category: 'Design',
     }],
   }, null, 2)}\n`)
+}
+
+function verifyInstalledLauncher(installRoot, progress) {
+  progress('Verifying the pure-local CLI launcher…')
+  const launcherPath = path.join(installRoot, 'plugin/bin/label-cli.mjs')
+  const envelope = runJson(process.execPath, [launcherPath, 'schema', '--json'], {
+    cwd: path.join(installRoot, 'runtime'),
+  })
+  if (!envelope?.ok || envelope.operation !== 'schema') {
+    throw new Error('Installed label CLI did not return a valid schema envelope')
+  }
 }
 
 function normalizePath(value) {
@@ -225,6 +253,7 @@ async function install(options) {
     await rename(stageRoot, installRoot)
 
     try {
+      verifyInstalledLauncher(installRoot, progress)
       registerWithCodex(installRoot, progress)
     } catch (error) {
       await rm(installRoot, { recursive: true, force: true })
@@ -256,7 +285,7 @@ async function main() {
     const result = await install(options)
     if (options.json) process.stdout.write(`${JSON.stringify(result)}\n`)
     else {
-      process.stdout.write('\nGLB Label Editor is installed. Start a new Codex session to load its skills and MCP tools.\n')
+      process.stdout.write('\nGLB Label Editor is installed. Start a new Codex session to load its skills and pure-local CLI workflow.\n')
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)

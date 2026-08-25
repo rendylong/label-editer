@@ -22,7 +22,7 @@ export function resolveHiddenNodeNames(parts: PartNode[], hiddenIds: Set<string>
   return names
 }
 
-export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolean } = {}): React.JSX.Element {
+export function Viewport({ showFrontMarker = false, readOnly = false }: { showFrontMarker?: boolean; readOnly?: boolean } = {}): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const ctrlRef = useRef<SceneController | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -158,7 +158,9 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
     <div ref={hostRef} style={{ position: 'absolute', inset: 0 }}>
       {status === 'idle' && (
         <div className="viewport-overlay">
-          <div className="welcome">
+          {readOnly ? (
+            <div className="welcome" role="status">正在准备 Agent 3D 实时预览…</div>
+          ) : <div className="welcome">
             <div className="welcome-title">GLB 贴标编辑器</div>
             <div className="welcome-sub">为美妆瓶身设计标签：文字 · 图片 · 工艺（烫金/击凸/磨砂/UV/镭射）· 实时 3D 预览</div>
             <div className="welcome-actions">
@@ -179,16 +181,18 @@ export function Viewport({ showFrontMarker = false }: { showFrontMarker?: boolea
                 加载示例（面霜瓶.glb）
               </button>
             </div>
-          </div>
+          </div>}
         </div>
       )}
       {status === 'loading' && <div className="viewport-overlay">正在加载 3D 模型…</div>}
       {status === 'error' && (
         <div className="viewport-overlay error">
           <div>模型加载失败：{msg}</div>
-          <button className="btn secondary" onClick={() => ctrlRef.current?.requestRender()}>
-            重试
-          </button>
+          {!readOnly && (
+            <button className="btn secondary" onClick={() => ctrlRef.current?.requestRender()}>
+              重试
+            </button>
+          )}
         </div>
       )}
       {status === 'ready' && <div className="viewport-hint">拖拽旋转 · 滚轮缩放 · 右键平移</div>}

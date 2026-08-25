@@ -16,7 +16,8 @@
 npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads/main.tar.gz glb-label-editor-install
 
 完成后运行 codex plugin list --json，确认 glb-label-editor@label-editer 的 installed 和 enabled 都为 true。
-再运行 codex mcp list --json 检查 MCP 配置；如果当前会话还看不到 Skill 或 MCP 工具，请明确告诉我新建一个 Codex 会话，不要把旧会话未刷新误判成安装失败。
+再运行 ~/.codex/glb-label-editor/plugin/bin/label-cli.mjs schema --json，确认纯本地 CLI 返回 ok: true，且安装目录没有生成 .mcp.json。
+如果当前会话还看不到 Skill，请明确告诉我新建一个 Codex 会话，不要把旧会话未刷新误判成安装失败。
 如果任何命令失败，请保留原始错误并停止，不要改用 curl | sh，也不要静默忽略依赖、构建或 Chromium 安装失败。
 ```
 

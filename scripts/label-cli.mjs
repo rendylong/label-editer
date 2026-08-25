@@ -3,7 +3,7 @@
 import { pathToFileURL } from 'node:url'
 import { exitCodeForEnvelope, failure } from './lib/envelope.mjs'
 
-const valueOptions = new Set(['glb', 'output', 'view'])
+const valueOptions = new Set(['glb', 'output', 'view', 'operations'])
 const booleanOptions = new Set(['json', 'force', 'open'])
 
 function usageError(message) {
@@ -42,12 +42,22 @@ function assertShape(parsed) {
     if (positional.length !== 0) throw usageError('schema accepts no positional arguments')
     return
   }
-  if (!['inspect', 'validate', 'apply', 'preview', 'export', 'open'].includes(command)) {
+  if (!['inspect', 'project', 'patch', 'validate', 'apply', 'preview', 'live', 'export', 'open'].includes(command)) {
     throw usageError(`Unknown command: ${command}`)
   }
   if (positional.length !== 1) throw usageError(`${command} requires exactly one input path`)
   if (command === 'inspect') return
+  if (command === 'project') return
+  if (command === 'patch') {
+    if (!options.operations) throw usageError('patch requires --operations <operations.json>')
+    if (!options.output) throw usageError('patch requires --output <patched-spec.json>')
+    return
+  }
   if (command === 'validate') return
+  if (command === 'live') {
+    if (!options.glb) throw usageError('live requires --glb <model.glb>')
+    return
+  }
   if (!options.glb) throw usageError(`${command} requires --glb <model.glb>`)
   if (command === 'open') return
   if (!options.output) throw usageError(`${command} requires --output <path>`)
@@ -61,7 +71,15 @@ async function invoke(parsed, operations) {
   const options = parsed.options
   if (parsed.command === 'schema') return operations.schema({})
   if (parsed.command === 'inspect') return operations.inspect({ glbPath: input })
+  if (parsed.command === 'project') return operations.project({ inputPath: input })
+  if (parsed.command === 'patch') return operations.patch({
+    inputPath: input,
+    operationsPath: options.operations,
+    outputPath: options.output,
+    force: options.force === true,
+  })
   if (parsed.command === 'validate') return operations.validate({ specPath: input, glbPath: options.glb })
+  if (parsed.command === 'live') return operations.live({ specPath: input, glbPath: options.glb })
   if (parsed.command === 'apply') return operations.apply({ specPath: input, glbPath: options.glb, outputDir: options.output, force: options.force === true, openEditor: options.open === true })
   if (parsed.command === 'preview') return operations.preview({ inputPath: input, glbPath: options.glb, outputPath: options.output, view: options.view ?? '3d' })
   if (parsed.command === 'export') return operations.export({ projectPath: input, glbPath: options.glb, outputDir: options.output, force: options.force === true })
@@ -79,12 +97,31 @@ export async function runCli(argv, dependencies = {}) {
     assertShape(parsed)
     let operations = dependencies.operations
     if (!operations) {
-      const [{ createPluginRuntime }, { createOperations }] = await Promise.all([
-        import('./plugin-runtime.mjs'),
-        import('./lib/operations.mjs'),
-      ])
-      runtime = await createPluginRuntime(dependencies.runtimeOptions)
-      operations = createOperations(runtime, { progress: stderr })
+      const { createOperations } = await import('./lib/operations.mjs')
+      if (['schema', 'project', 'patch'].includes(parsed.command)) {
+        operations = createOperations(undefined, {
+          progress: stderr,
+          allowedRoots: dependencies.runtimeOptions?.allowedRoots,
+        })
+      } else {
+        const { createPluginRuntime } = await import('./plugin-runtime.mjs')
+        const runtimeOptions = parsed.command === 'live'
+          ? {
+              ...dependencies.runtimeOptions,
+              headless: false,
+              browserQuery: { ...dependencies.runtimeOptions?.browserQuery, 'agent-preview': '1' },
+            }
+          : dependencies.runtimeOptions
+        runtime = await createPluginRuntime(runtimeOptions)
+        operations = createOperations(runtime, {
+          progress: stderr,
+          onFatal: dependencies.onFatal ?? (async (error) => {
+            stderr(`live fatal: ${error instanceof Error ? error.message : String(error)}`)
+            process.exitCode = 6
+            await runtime.close()
+          }),
+        })
+      }
     }
     envelope = await invoke(parsed, operations)
   } catch (error) {

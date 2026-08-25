@@ -1,8 +1,11 @@
 # GLB Label Editor Codex Plugin Design
 
 **Date:** 2026-08-24
-**Status:** Proposed for user review
+**Status:** Superseded on 2026-08-25
+**Superseded by:** `2026-08-25-local-agent-control-api-design.md`
 **Plugin id:** `glb-label-editor`
+
+> Historical note: the MCP control plane and browser-opening workflow in this document are no longer active. The approved successor uses a skills-only plugin, pure-local CLI, revision-safe patch transactions, and a CLI-owned automatically opened read-only Web preview.
 
 ## 1. Outcome
 

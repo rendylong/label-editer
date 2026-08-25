@@ -10,11 +10,10 @@
   "repository": "https://github.com/rendylong/label-editer",
   "keywords": ["glb", "label-design", "cosmetics", "packaging", "3d"],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "GLB Label Editor",
     "shortDescription": "Design first, then produce cosmetic labels on GLBs",
-    "longDescription": "Always use Cosmetic Label to clarify and approve the label system first, then use Cosmetic Label Editor to inspect packaging GLBs, apply front, back, and wrap labels, keep a live browser preview open, validate print data, and export PNG/PBR assets plus labeled GLB files.",
+    "longDescription": "Always use Cosmetic Label to clarify and approve the label system first, then use Cosmetic Label Editor's pure-local CLI to inspect packaging GLBs, atomically edit front, back, and wrap labels, automatically keep a read-only Web preview synchronized, validate print data, and export PNG/PBR assets plus labeled GLB files.",
     "developerName": "Realibox",
     "category": "Design",
     "capabilities": ["Read", "Write", "Interactive"],

@@ -10,6 +10,7 @@ describe('plugin skill bundle', () => {
       await readFile(path.join(repoRoot, '.codex-plugin/plugin.json'), 'utf8'),
     )
     expect(manifest.skills).toBe('./skills/')
+    expect(manifest).not.toHaveProperty('mcpServers')
 
     const entries = await readdir(path.join(repoRoot, 'skills'), { withFileTypes: true })
     const bundledSkills = entries
@@ -43,17 +44,38 @@ describe('plugin skill bundle', () => {
     expect(editorSkill).toContain('Editor Handoff')
   })
 
-  it('requires a visible browser preview throughout label production', async () => {
+  it('requires the pure-local CLI and automatically opened live Web preview throughout production', async () => {
     const editorSkill = await readFile(
       path.join(repoRoot, 'skills/cosmetic-label-editor/SKILL.md'),
       'utf8',
     )
 
-    expect(editorSkill).toContain('## Mandatory live browser preview')
-    expect(editorSkill).toContain('MUST call `open_label_editor`')
-    expect(editorSkill).toContain('Do not merely return the URL')
-    expect(editorSkill).toContain('Do not wait until final delivery')
-    expect(editorSkill).toContain('`open_editor: true`')
+    expect(editorSkill).toContain('## Mandatory live Web preview')
+    expect(editorSkill).toContain('bin/label-cli.mjs')
+    expect(editorSkill).toContain('`label-cli live <working-spec.json> --glb <model.glb> --json`')
+    expect(editorSkill).toContain('automatically opens')
+    expect(editorSkill).toContain('Do not use MCP')
+    expect(editorSkill).toContain('Do not use computer use')
+    expect(editorSkill).toContain('Do not navigate or click the preview')
+    expect(editorSkill).toContain('production blocker')
+  })
+
+  it('documents revision-safe patching and last-good preview recovery', async () => {
+    const editorSkill = await readFile(
+      path.join(repoRoot, 'skills/cosmetic-label-editor/SKILL.md'),
+      'utf8',
+    )
+
+    expect(editorSkill).toContain('`project`')
+    expect(editorSkill).toContain('`patch --force`')
+    expect(editorSkill).toContain('`baseRevision`')
+    expect(editorSkill).toContain('`REVISION_CONFLICT`')
+    expect(editorSkill).toContain('last valid preview')
+    expect(editorSkill).toContain('same working spec')
+    expect(editorSkill).toContain('explicit human takeover')
+    for (const oldTool of ['inspect_model', 'validate_label_spec', 'apply_label_spec', 'render_label_preview', 'export_label_assets', 'open_label_editor']) {
+      expect(editorSkill).not.toContain(oldTool)
+    }
   })
 
   it('provides explicit default prompts for both skills', async () => {

@@ -9,8 +9,15 @@ export async function createPluginRuntime(options = {}) {
   const pluginRoot = path.resolve(options.pluginRoot ?? path.join(import.meta.dirname, '..'))
   const allowedRoots = options.allowedRoots?.length ? options.allowedRoots : [process.cwd()]
   const server = await createSessionServer({ editorRoot: options.editorRoot ?? path.join(pluginRoot, 'dist') })
-  const browser = await createBrowserSessionManager({ server, headless: options.headless !== false, launchOptions: options.launchOptions })
+  const browser = await createBrowserSessionManager({
+    server,
+    headless: options.headless !== false,
+    launchOptions: options.launchOptions,
+    pageQuery: options.browserQuery,
+  })
   const sessions = new Map()
+  const cleanups = new Set()
+  let closed = false
 
   async function createSession({ glbPath, glbBytes, modelName } = {}) {
     const rawBytes = glbBytes ?? (glbPath ? await readFile(await resolveAllowedPath(allowedRoots, glbPath)) : undefined)
@@ -64,6 +71,14 @@ export async function createPluginRuntime(options = {}) {
     browserErrors(sessionId) {
       return browser.errors(sessionId)
     },
+    onSessionUnavailable(sessionId, listener) {
+      getSession(sessionId)
+      return browser.onUnavailable(sessionId, listener)
+    },
+    addCleanup(cleanup) {
+      cleanups.add(cleanup)
+      return () => cleanups.delete(cleanup)
+    },
     async publishArtifacts(sessionId, outputDir, artifacts, force = false) {
       getSession(sessionId)
       const output = await resolveAllowedOutputPath(allowedRoots, outputDir)
@@ -82,6 +97,11 @@ export async function createPluginRuntime(options = {}) {
       await browser.dispose(sessionId)
     },
     async close() {
+      if (closed) return
+      closed = true
+      const pending = [...cleanups]
+      cleanups.clear()
+      await Promise.allSettled(pending.map((cleanup) => cleanup()))
       sessions.clear()
       await browser.close()
       await server.close()

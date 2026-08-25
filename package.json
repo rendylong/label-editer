@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Codex and MCP plugin for inspecting, designing, previewing, and exporting cosmetic labels on GLB packaging",
+  "description": "Pure-local Codex plugin for inspecting, designing, live-previewing, and exporting cosmetic labels on GLB packaging",
   "engines": {
     "node": ">=22"
   },
@@ -13,7 +13,6 @@
   },
   "files": [
     ".codex-plugin/",
-    ".mcp.json",
     "INSTALL_WITH_AGENT.md",
     "PRIVACY.md",
     "README.md",
@@ -47,7 +46,6 @@
     "@gltf-transform/core": "^4.4.2",
     "@gltf-transform/extensions": "^4.4.2",
     "@gltf-transform/functions": "^4.4.2",
-    "@modelcontextprotocol/sdk": "1.30.0",
     "ajv": "8.20.0",
     "draco3dgltf": "1.5.7",
     "konva": "^10.3.1",

@@ -1,8 +1,8 @@
 # GLB Label Editor Codex Plugin
 
-面向美妆包装 GLB 的 Agent 贴标插件。Codex 或其他 MCP Agent 可以检查模型、选择稳定贴标目标、应用正标/背标/环绕标设计、渲染工艺预览，并原子导出可编辑项目、PBR 通道与已贴标 GLB。需要人工调整时，可打开带会话令牌的本地可视化编辑器继续操作。
+面向美妆包装 GLB 的纯本地 Agent 贴标插件。Codex 通过机器可读 CLI 检查模型、按稳定 ID 修改正标/背标/环绕标、自动打开并同步只读 Web 实时预览，最后原子导出可编辑项目、PBR 通道与已贴标 GLB。需要人工调整时，才显式打开带会话令牌的本地可视化编辑器接管。
 
-插件由三层共用同一套运行时：两个 Codex Skill 分别负责贴标设计和 GLB 制作，MCP 提供六个粗粒度工具，`label-cli` 提供可脚本化的 JSON 接口。Agent 不需要依赖 DOM 选择器操作前端。
+插件由两个 Codex Skill、`label-cli` 和本地 React/Konva/Three 渲染运行时组成。CLI 是唯一 Agent 控制面；插件不包含 MCP server，Agent 也不通过 DOM、computer use 或浏览器点击修改设计。`live` 命令会自行启动本地 Playwright Chromium，用户可以实时观察，Agent 只继续修改 working spec。
 
 ## 一条命令安装到 Codex
 
@@ -12,12 +12,13 @@ npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads
 
 只要求预先安装 Node.js 22+ 和 Codex CLI。安装器会通过 Node.js 自带的 npm 安装锁定依赖和 Playwright Chromium、构建编辑器，并将可运行插件安装到 `~/.codex/glb-label-editor`。它随后会添加 `label-editer` marketplace，安装并启用 `glb-label-editor@label-editer`。
 
-安装或更新插件后，请新建 Codex 会话，使 Skill 和 MCP 工具重新加载。可以用下面的命令确认插件状态：
+安装或更新插件后，请新建 Codex 会话，使 Skill 重新加载。可以用下面的命令确认插件状态：
 
 ```bash
 codex plugin list --json
-codex mcp list --json
 ```
+
+安装后的本地 CLI 启动器位于 `~/.codex/glb-label-editor/plugin/bin/label-cli.mjs`。安装器会实际执行一次 `schema --json` 验证启动器，而不会生成 MCP 配置。
 
 希望让 Agent 代为安装时，直接复制 [`INSTALL_WITH_AGENT.md`](INSTALL_WITH_AGENT.md) 中的 Prompt。安装器不会执行 `curl | sh`，且只管理 `~/.codex/glb-label-editor`。
 
@@ -36,13 +37,7 @@ codex plugin marketplace add /absolute/path/to/label-editer
 codex plugin add glb-label-editor@label-editer-dev
 ```
 
-本地开发时也可以只注册 MCP：
-
-```bash
-codex mcp add glb-label-editor -- node /absolute/path/to/glb-label-editor/scripts/mcp-server.mjs
-```
-
-插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)，MCP 配置位于 [`.mcp.json`](.mcp.json)。插件安装时会同时安装 [`cosmetic-label`](skills/cosmetic-label/SKILL.md) 和 [`cosmetic-label-editor`](skills/cosmetic-label-editor/SKILL.md)。
+插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)。插件安装时会同时安装 [`cosmetic-label`](skills/cosmetic-label/SKILL.md) 和 [`cosmetic-label-editor`](skills/cosmetic-label-editor/SKILL.md)，并生成指向受管理 runtime 的本地 CLI 启动器。
 
 ## 两阶段工作流
 
@@ -54,18 +49,20 @@ codex mcp add glb-label-editor -- node /absolute/path/to/glb-label-editor/script
 
 设计阶段不猜 mesh、`stableSelector` 或 UV；制作阶段不擅自重做品牌、文案、字体、颜色、工艺和内容层级。Editor Handoff 合约位于 [`skills/cosmetic-label/references/editor_handoff.md`](skills/cosmetic-label/references/editor_handoff.md)。
 
-## Agent 工具
+## Agent 控制面
 
-| MCP 工具 | 用途 | 是否写文件 |
+| CLI 命令 | 用途 | 是否写文件 |
 | --- | --- | --- |
-| `inspect_model` | 检查 GLB、列出稳定 mesh selector、候选贴标面、尺寸与 codec 状态 | 否 |
-| `validate_label_spec` | 校验 Label Spec、资源、目标与设计/印刷问题 | 否 |
-| `apply_label_spec` | 一次完成应用、烘焙、预览、GLB 交叉校验和完整产物发布 | 是 |
-| `render_label_preview` | 从 Label Spec 或 `.lbl` 项目生成预览 PNG | 是 |
-| `export_label_assets` | 从已保存 `.lbl` 项目再次导出完整交付物 | 是 |
-| `open_label_editor` | 返回同一会话的本机令牌化 URL，供人工审阅和接管 | 否 |
+| `inspect` | 检查 GLB、列出稳定 mesh selector、候选贴标面、尺寸与 codec 状态 | 否 |
+| `project` | 读取 Label Spec v2 / Label Project v3，返回稳定 ID、完整值和 SHA-256 revision | 否 |
+| `patch` | 按 area/layer ID 原子应用一组 revision-guarded 操作 | 是 |
+| `validate` | 校验 Label Spec、资源、目标与设计/印刷问题 | 否 |
+| `live` | 自动打开只读 Web 预览并持续监听同一 working spec | 否 |
+| `preview` | 生成供 Agent 视觉检查的 PNG | 是 |
+| `apply` / `export` | 烘焙、GLB 交叉校验并完整发布产物 | 是 |
+| `open` | 显式人工接管，返回本机令牌化可编辑 URL | 否 |
 
-进入 `$cosmetic-label-editor` 后，推荐工具顺序是 `inspect_model` → `validate_label_spec` → `apply_label_spec`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open_label_editor` 只用于人机接力，不是自动化所必需的步骤。
+推荐制作顺序是 `inspect` → 创建/校验 working spec → `live` → `project` / `patch --force` 循环 → `validate` → `apply`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open` 不属于默认 Agent 工作流。
 
 ## CLI
 
@@ -78,14 +75,24 @@ node scripts/label-cli.mjs schema --json
 # 检查模型和候选贴标区域
 node scripts/label-cli.mjs inspect model.glb --json
 
+# 检查 working spec，获取稳定 id 和 revision
+node scripts/label-cli.mjs project spec.json --json
+
+# 用 project 返回的 revision 构造 operations.json，然后原子更新同一 working spec
+node scripts/label-cli.mjs patch spec.json \
+  --operations operations.json --output spec.json --force --json
+
 # 仅校验规格；增加 --glb 可同时验证模型目标
 node scripts/label-cli.mjs validate spec.json --glb model.glb --json
+
+# 自动打开可见的只读 Web 实时预览，并保持前台运行直到收到信号
+node scripts/label-cli.mjs live spec.json --glb model.glb --json
 
 # 应用设计并发布完整目录
 node scripts/label-cli.mjs apply spec.json \
   --glb model.glb --output result --json
 
-# 已明确允许覆盖时使用 --force；--open 同时返回人工审阅 URL
+# 已明确允许覆盖交付目录时使用 --force；--open 只用于显式人工接管
 node scripts/label-cli.mjs apply spec.json \
   --glb model.glb --output result --force --open --json
 
@@ -101,7 +108,7 @@ node scripts/label-cli.mjs export result/project.lbl.json \
 node scripts/label-cli.mjs open spec.json --glb model.glb
 ```
 
-退出码：`0` 成功；`2` 参数错误；`3` 路径越界；`4` Label Spec/项目无效；`5` 目标缺失或有歧义；`6` 浏览器不可用；`7` GLB 重建失败；`8` codec 不支持；`9` 输出冲突；`1` 其他内部错误。
+退出码：`0` 成功；`2` 参数错误；`3` 路径越界；`4` Label Spec/项目无效；`5` 目标缺失或有歧义；`6` 浏览器不可用；`7` GLB 重建失败；`8` codec 不支持；`9` 输出冲突；`10` revision 冲突；`11` patch 操作无效；`1` 其他内部错误。
 
 ## Label Spec v2
 
@@ -165,8 +172,9 @@ result/
 - 默认只允许读取/写入当前工作目录；调用方可显式增加 workspace roots。
 - 远程图片和字体 URL 默认禁用；资源必须是允许根目录内的本地文件。
 - 浏览器仅绑定随机端口的 `127.0.0.1`，每个会话使用随机 32 字节令牌；模型、bootstrap 和产物路由都校验令牌。
+- `live` 自动启动插件自带 Chromium 的 headful 窗口；页面为只读制作预览，Agent 不需要也不得控制该页面。
 - 页面 CSP 禁止 `unsafe-eval`，只允许本源脚本；仅对运行时自有的内存 GLB 开放 `blob:` 连接。
-- 目录和单文件产物都采用同目录临时文件/目录后 rename 的原子发布方式；除非明确使用 `force`，不会覆盖已有结果。
+- 目录和单文件产物都采用同目录临时文件/目录后 rename 的原子发布方式；`patch` 同时锁定输入与目标文件并在锁内重读 revision，避免并发写入丢失；除非明确使用 `force`，不会覆盖已有结果。
 - 返回的人工接管 URL 是短期本地能力凭证，不应发送给不受信任的第三方。
 
 ## Codec 与交付边界

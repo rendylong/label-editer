@@ -6,7 +6,7 @@ This policy describes how the GLB Label Editor plugin (the "Plugin") handles dat
 
 ## Data the Plugin processes
 
-The Plugin processes files and content that you choose to provide, including GLB models, label specifications, label copy, images, fonts, editable label projects, previews, and exported assets. It may also read and write files at paths you explicitly provide to its tools or command-line interface.
+The Plugin processes files and content that you choose to provide, including GLB models, label specifications, label copy, images, fonts, editable label projects, previews, and exported assets. It may also read and write files at paths you explicitly provide to its local command-line interface.
 
 ## Local processing
 

@@ -10,10 +10,13 @@ import { runCli } from '../scripts/label-cli.mjs'
 import { createPluginRuntime } from '../scripts/plugin-runtime.mjs'
 // @ts-expect-error Operations are directly executable ESM.
 import { createOperations } from '../scripts/lib/operations.mjs'
+// @ts-expect-error Project control is directly executable ESM.
+import { revisionOf } from '../scripts/lib/project-control.mjs'
 
 const defaultModel = '/Users/apple/realibox/cosmetic-bottles-glb/02_perfume_glass_with_cap.glb'
 const modelPath = process.env.GLB_LABEL_E2E_MODEL ?? defaultModel
 const runRealE2E = existsSync(modelPath)
+const runLiveE2E = runRealE2E && process.env.GLB_LABEL_LIVE_E2E === '1'
 
 function hash(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -29,10 +32,41 @@ describe('GLB label plugin E2E', () => {
   it.runIf(runRealE2E)('applies a front/back design and atomically publishes verified artifacts', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'glb-label-e2e-'))
     const output = path.join(root, 'result')
+    const workingSpec = path.join(root, 'working-spec.json')
+    const patchDocument = path.join(root, 'copy-patch.json')
     const stdout: string[] = []
     const inputHash = hash(await readFile(modelPath))
+    const originalSpec = JSON.parse(await readFile('tests/fixtures/specs/perfume-front-back-v2.json', 'utf8'))
+    await writeFile(workingSpec, JSON.stringify(originalSpec, null, 2))
+    const projectStdout: string[] = []
+    expect(await runCli(['project', workingSpec, '--json'], {
+      runtimeOptions: { allowedRoots: [root] },
+      stdout: (value: string) => projectStdout.push(value),
+      stderr: () => undefined,
+    })).toBe(0)
+    const inspected = JSON.parse(projectStdout[0])
+    expect(inspected.data.revision).toBe(revisionOf(originalSpec))
+    await writeFile(patchDocument, JSON.stringify({
+      version: 1,
+      baseRevision: inspected.data.revision,
+      operations: [{ op: 'update-layer', areaId: 'front', layerId: 'brand', changes: { text: 'LOCAL AGENT API' } }],
+    }))
+    const patchStdout: string[] = []
+    expect(await runCli([
+      'patch', workingSpec, '--operations', patchDocument, '--output', workingSpec, '--force', '--json',
+    ], {
+      runtimeOptions: { allowedRoots: [root] },
+      stdout: (value: string) => patchStdout.push(value),
+      stderr: () => undefined,
+    })).toBe(0)
+    expect(JSON.parse(patchStdout[0])).toMatchObject({
+      ok: true,
+      operation: 'patch_label_spec',
+      data: { appliedOperationCount: 1 },
+    })
+    expect(JSON.parse(await readFile(workingSpec, 'utf8')).areas[0].layers[0].text).toBe('LOCAL AGENT API')
     const argv = [
-      'apply', 'tests/fixtures/specs/perfume-front-back-v2.json',
+      'apply', workingSpec,
       '--glb', modelPath, '--output', output, '--json',
     ]
     const dependencies = {
@@ -62,6 +96,8 @@ describe('GLB label plugin E2E', () => {
     const embedded = glbJson(await readFile(path.join(output, 'labeled.glb')))
       .extras?.glbLabelEditorProject
     expect(embedded).toMatchObject({ version: 3, areas: [{ id: 'front' }, { id: 'back' }] })
+    const normalized = JSON.parse(await readFile(path.join(output, 'label-spec.normalized.json'), 'utf8'))
+    expect(normalized.areas[0].layers[0].text).toBe('LOCAL AGENT API')
 
     const conflictOutput: string[] = []
     const conflictCode = await runCli(argv, { ...dependencies, stdout: (value: string) => conflictOutput.push(value) })
@@ -85,18 +121,18 @@ describe('GLB label plugin E2E', () => {
     expect(existsSync(invalidOutput)).toBe(false)
 
     const projectOutput = path.join(root, 'project-export')
-    const projectStdout: string[] = []
+    const exportStdout: string[] = []
     const projectCode = await runCli([
       'export', path.join(output, 'project.lbl.json'), '--glb', modelPath,
       '--output', projectOutput, '--json',
-    ], { ...dependencies, stdout: (value: string) => projectStdout.push(value) })
-    expect(projectCode, projectStdout[0]).toBe(0)
+    ], { ...dependencies, stdout: (value: string) => exportStdout.push(value) })
+    expect(projectCode, exportStdout[0]).toBe(0)
     expect((await stat(path.join(projectOutput, 'labeled.glb'))).size).toBeGreaterThan(0)
 
     const previewOutput = path.join(root, 'agent-preview.png')
     const previewStdout: string[] = []
     const previewCode = await runCli([
-      'preview', 'tests/fixtures/specs/perfume-front-back-v2.json', '--glb', modelPath,
+      'preview', workingSpec, '--glb', modelPath,
       '--output', previewOutput, '--view', '3d', '--json',
     ], { ...dependencies, stdout: (value: string) => previewStdout.push(value) })
     expect(previewCode, previewStdout[0]).toBe(0)
@@ -106,7 +142,7 @@ describe('GLB label plugin E2E', () => {
     const runtime = await createPluginRuntime(dependencies.runtimeOptions)
     try {
       const opened = await createOperations(runtime).open({
-        inputPath: 'tests/fixtures/specs/perfume-front-back-v2.json',
+        inputPath: workingSpec,
         glbPath: modelPath,
       })
       expect(opened.ok).toBe(true)
@@ -120,4 +156,51 @@ describe('GLB label plugin E2E', () => {
       await runtime.close()
     }
   }, 120_000)
+
+  it.runIf(runLiveE2E)('automatically opens one headful read-only preview and applies an in-place patch revision', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'glb-label-live-e2e-'))
+    const workingSpec = path.join(root, 'working-spec.json')
+    const operationsPath = path.join(root, 'operations.json')
+    const spec = JSON.parse(await readFile('tests/fixtures/specs/perfume-front-back-v2.json', 'utf8'))
+    await writeFile(workingSpec, JSON.stringify(spec, null, 2))
+    const progress: string[] = []
+    const runtime = await createPluginRuntime({
+      allowedRoots: [process.cwd(), path.dirname(modelPath), root],
+      headless: false,
+      browserQuery: { 'agent-preview': '1' },
+    })
+    try {
+      const operations = createOperations(runtime, { progress: (message: string) => progress.push(message) })
+      const live = await operations.live({ specPath: workingSpec, glbPath: modelPath })
+      expect(live.ok).toBe(true)
+      if (!live.ok) throw new Error(live.error.message)
+      const previewUrl = new URL(live.data.previewUrl)
+      expect(previewUrl.searchParams.get('agent-preview')).toBe('1')
+      expect(previewUrl.searchParams.get('token')).toBeTruthy()
+      expect(live.data.keepAlive).toBe(true)
+
+      await writeFile(operationsPath, JSON.stringify({
+        version: 1,
+        baseRevision: live.data.revision,
+        operations: [{ op: 'update-layer', areaId: 'front', layerId: 'brand', changes: { text: 'LIVE LOCAL API' } }],
+      }))
+      const patched = await createOperations(undefined, { allowedRoots: [root] }).patch({
+        inputPath: workingSpec,
+        operationsPath,
+        outputPath: workingSpec,
+        force: true,
+      })
+      expect(patched.ok).toBe(true)
+      if (!patched.ok) throw new Error(patched.error.message)
+
+      const deadline = Date.now() + 20_000
+      while (!progress.some((message) => message.includes(patched.data.revision)) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      expect(progress).toContain(`live revision ${patched.data.revision}`)
+      expect(runtime.browserErrors(live.sessionId)).toEqual([])
+    } finally {
+      await runtime.close()
+    }
+  }, 60_000)
 })

@@ -1,9 +1,11 @@
 import Ajv2020 from 'ajv/dist/2020.js'
 import { randomBytes } from 'node:crypto'
-import { readFile, rm, stat } from 'node:fs/promises'
+import { open, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { failure, success } from './envelope.mjs'
-import { resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
+import { publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
+import { inspectProject, patchLabelSpec } from './project-control.mjs'
+import { startLivePreview } from './live-preview.mjs'
 
 const schemaPath = path.resolve(import.meta.dirname, '../../src/agent/label-spec-v2.schema.json')
 
@@ -11,10 +13,18 @@ async function readSchema() {
   return JSON.parse(await readFile(schemaPath, 'utf8'))
 }
 
-async function readJsonInput(runtime, { inline, inputPath }) {
+async function readJsonInput(allowedRoots, { inline, inputPath, parseErrorCode = 'INVALID_LABEL_SPEC' }) {
   if (inline !== undefined) return { value: structuredClone(inline), baseDir: process.cwd() }
-  const resolved = await resolveAllowedPath(runtime.allowedRoots, inputPath)
-  return { value: JSON.parse(await readFile(resolved, 'utf8')), baseDir: path.dirname(resolved) }
+  const resolved = await resolveAllowedPath(allowedRoots, inputPath)
+  try {
+    return { value: JSON.parse(await readFile(resolved, 'utf8')), baseDir: path.dirname(resolved), resolved }
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      error.code = parseErrorCode
+      error.message = `Invalid JSON in ${resolved}: ${error.message}`
+    }
+    throw error
+  }
 }
 
 function schemaIssues(validate) {
@@ -72,18 +82,27 @@ function unwrapBridge(envelope) {
   throw error
 }
 
-async function addSpecAssets(runtime, session, spec, baseDir) {
+async function addSpecAssets(runtime, session, spec, baseDir, { live = false } = {}) {
   const urls = {}
   if (!spec?.assets || typeof spec.assets !== 'object') return urls
   for (const [key, descriptor] of Object.entries(spec.assets)) {
     if (!descriptor || typeof descriptor !== 'object' || typeof descriptor.path !== 'string') continue
-    const resolved = await resolveAllowedPath(runtime.allowedRoots, path.resolve(baseDir, descriptor.path))
-    urls[key] = runtime.addAsset(session.id, {
-      id: `asset-${sanitizeArtifactName(key)}`,
-      bytes: await readFile(resolved),
-      mimeType: descriptor.mimeType ?? 'application/octet-stream',
-      fileName: path.basename(resolved),
-    })
+    try {
+      const resolved = await resolveAllowedPath(runtime.allowedRoots, path.resolve(baseDir, descriptor.path))
+      urls[key] = runtime.addAsset(session.id, {
+        id: `asset-${sanitizeArtifactName(key)}`,
+        bytes: await readFile(resolved),
+        mimeType: descriptor.mimeType ?? 'application/octet-stream',
+        fileName: path.basename(resolved),
+      })
+    } catch (error) {
+      if (!live) throw error
+      const failure = new Error(`Label Spec asset ${key} is unavailable: ${error instanceof Error ? error.message : String(error)}`)
+      failure.code = 'INVALID_LABEL_SPEC'
+      failure.liveRecoverable = true
+      failure.cause = error
+      throw failure
+    }
   }
   return urls
 }
@@ -120,7 +139,57 @@ function publicArtifact(artifact, relativePath) {
   }
 }
 
-export function createOperations(runtime, { progress = () => undefined } = {}) {
+function patchLockPath(targetPath) {
+  return path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.patch.lock`)
+}
+
+async function acquirePatchLock(targetPath) {
+  const lockPath = patchLockPath(targetPath)
+  let handle
+  try {
+    handle = await open(lockPath, 'wx', 0o600)
+    await handle.writeFile(`${JSON.stringify({ pid: process.pid, targetPath })}\n`)
+  } catch (error) {
+    await handle?.close().catch(() => undefined)
+    if (handle) await rm(lockPath, { force: true }).catch(() => undefined)
+    if (error?.code === 'EEXIST') {
+      const conflict = new Error(`Another patch transaction is active for ${targetPath}`)
+      conflict.code = 'REVISION_CONFLICT'
+      conflict.suggestion = `Wait for the active transaction or remove the stale lock after verifying no writer is running: ${lockPath}`
+      throw conflict
+    }
+    throw error
+  }
+  let released = false
+  return async () => {
+    if (released) return
+    released = true
+    try {
+      await handle.close()
+    } finally {
+      await rm(lockPath, { force: true })
+    }
+  }
+}
+
+async function acquirePatchLocks(paths) {
+  const targets = [...new Set(paths.map((target) => path.resolve(target)))].sort()
+  const releases = []
+  try {
+    for (const target of targets) releases.push(await acquirePatchLock(target))
+  } catch (error) {
+    await Promise.allSettled(releases.reverse().map((release) => release()))
+    throw error
+  }
+  return async () => {
+    const results = await Promise.allSettled(releases.reverse().map((release) => release()))
+    const rejected = results.find((result) => result.status === 'rejected')
+    if (rejected?.status === 'rejected') throw rejected.reason
+  }
+}
+
+export function createOperations(runtime, { progress = () => undefined, allowedRoots, onFatal = () => undefined } = {}) {
+  const rootPolicy = runtime?.allowedRoots ?? (allowedRoots?.length ? allowedRoots : [process.cwd()])
   return {
     async schema() {
       try {
@@ -145,10 +214,92 @@ export function createOperations(runtime, { progress = () => undefined } = {}) {
       }
     },
 
+    async project({ inputPath }) {
+      try {
+        const input = await readJsonInput(rootPolicy, { inputPath })
+        return success('inspect_label_project', inspectProject(input.value))
+      } catch (error) {
+        return failure('inspect_label_project', error)
+      }
+    },
+
+    async patch({ inputPath, operationsPath, outputPath, force = false }) {
+      let releaseLock
+      try {
+        const [resolvedInput, operationsInput, resolvedOutput] = await Promise.all([
+          resolveAllowedPath(rootPolicy, inputPath),
+          readJsonInput(rootPolicy, { inputPath: operationsPath, parseErrorCode: 'INVALID_PATCH_OPERATION' }),
+          resolveAllowedOutputPath(rootPolicy, outputPath),
+        ])
+        releaseLock = await acquirePatchLocks([resolvedInput, resolvedOutput])
+        const input = await readJsonInput(rootPolicy, { inputPath: resolvedInput })
+        const patched = patchLabelSpec(input.value, operationsInput.value)
+        const bytes = new TextEncoder().encode(`${JSON.stringify(patched.value, null, 2)}\n`)
+        await publishFileAtomically(resolvedOutput, bytes, { force })
+        return success('patch_label_spec', { ...patched, outputPath: resolvedOutput })
+      } catch (error) {
+        return failure('patch_label_spec', error)
+      } finally {
+        await releaseLock?.().catch((error) => progress(`patch cleanup warning: ${error instanceof Error ? error.message : String(error)}`))
+      }
+    },
+
+    async live({ specPath, glbPath }) {
+      let controller
+      try {
+        if (!runtime) {
+          const error = new Error('Live preview requires the browser runtime')
+          error.code = 'BROWSER_NOT_READY'
+          throw error
+        }
+        const [resolvedSpecPath, resolvedGlbPath] = await Promise.all([
+          resolveAllowedPath(rootPolicy, specPath),
+          resolveAllowedPath(rootPolicy, glbPath),
+        ])
+        const specBaseDir = path.dirname(resolvedSpecPath)
+        controller = await startLivePreview({
+          specPath: resolvedSpecPath,
+          glbPath: resolvedGlbPath,
+          onEvent: (event) => {
+            if (event.type === 'revision') progress(`live revision ${event.revision}`)
+            else progress(`live ${event.type}: ${event.error}`)
+          },
+          onFatal,
+          launch: async () => {
+            const session = await runtime.createSession({ glbPath: resolvedGlbPath })
+            await loadSessionModel(runtime, session)
+            return {
+              sessionId: session.id,
+              previewUrl: await runtime.openEditor(session),
+              applySpec: async (spec) => {
+                const assetUrls = await addSpecAssets(runtime, session, spec, specBaseDir, { live: true })
+                unwrapBridge(await runtime.callBridge(session, 'applySpec', { spec, assetUrls }))
+              },
+              setStatus: async (status) => {
+                unwrapBridge(await runtime.callBridge(session, 'setAgentPreviewStatus', status))
+              },
+              onUnavailable: (listener) => runtime.onSessionUnavailable(session.id, listener),
+              close: () => runtime.disposeSession(session.id),
+            }
+          },
+        })
+        runtime.addCleanup(controller.close)
+        return success('live_preview', {
+          sessionId: controller.sessionId,
+          previewUrl: controller.previewUrl,
+          revision: controller.revision,
+          keepAlive: true,
+        }, { sessionId: controller.sessionId })
+      } catch (error) {
+        await controller?.close().catch(() => undefined)
+        return failure('live_preview', error, { sessionId: controller?.sessionId })
+      }
+    },
+
     async validate({ specPath, spec, glbPath }) {
       let session
       try {
-        const input = await readJsonInput(runtime, { inline: spec, inputPath: specPath })
+        const input = await readJsonInput(rootPolicy, { inline: spec, inputPath: specPath })
         const validation = await validateSpecValue(input.value)
         if (!validation.valid) {
           const error = new Error('Label Spec schema validation failed')
@@ -181,7 +332,7 @@ export function createOperations(runtime, { progress = () => undefined } = {}) {
       let session
       try {
         progress('Validating Label Spec')
-        const input = await readJsonInput(runtime, { inline: spec, inputPath: specPath })
+        const input = await readJsonInput(rootPolicy, { inline: spec, inputPath: specPath })
         const isProject = isLabelProjectValue(input.value)
         const validation = isProject
           ? { valid: true, issues: [], warnings: [] }
@@ -280,7 +431,7 @@ export function createOperations(runtime, { progress = () => undefined } = {}) {
     async open({ inputPath, glbPath }) {
       let session
       try {
-        const input = await readJsonInput(runtime, { inputPath })
+        const input = await readJsonInput(rootPolicy, { inputPath })
         session = await runtime.createSession({ glbPath })
         await loadSessionModel(runtime, session)
         if (isLabelProjectValue(input.value)) {
