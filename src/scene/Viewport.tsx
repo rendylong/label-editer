@@ -54,7 +54,10 @@ export function Viewport({ showFrontMarker = false, readOnly = false }: { showFr
       },
     })
     ctrlRef.current = ctrl
-    const unregisterPreview = registerAgentPreviewCapture(({ width, height }) => ctrl.capturePng(width, height))
+    const unregisterPreview = registerAgentPreviewCapture({
+      preview: ({ width, height }) => ctrl.capturePng(width, height),
+      qc: (request) => ctrl.captureQcPng(request),
+    })
     return () => {
       unregisterPreview()
       ctrl.dispose()

@@ -17,6 +17,10 @@ import type { RemapParams, LabelAreaRange } from '../label/types'
 import { surfaceToUV, uvToSurface, areaBoxPoints, areaControlPoints, type UV } from '../glb/areaMath'
 import { offsetOverlayPositions } from '../glb/overlayGeometry'
 import { LatestAsyncResourceOwner } from './LatestAsyncResourceOwner'
+import type { QcCameraMetadata, QcViewRequest } from '../agent/contracts'
+import { cameraForFrame, surfaceFrameForGeometry, type QcTargetFrame } from './qcCamera'
+
+type PngEncoder = (canvas: HTMLCanvasElement) => Promise<Blob>
 
 export interface LoadedSceneResource {
   scene: THREE.Group
@@ -32,6 +36,8 @@ interface SceneControllerOptions {
   onMeshFound?: (mesh: THREE.Mesh, nodeName: string) => void
   /** Deterministic ownership seam; production uses the local GLTF/DRACO loader. */
   loadGltf?: SceneModelLoader
+  /** PNG boundary seam used by deterministic capture tests. */
+  encodePng?: PngEncoder
 }
 
 interface LabelTextureSet {
@@ -183,6 +189,22 @@ export function configureLabelCanvasTexture(texture: THREE.Texture, color: boole
   texture.wrapT = THREE.ClampToEdgeWrapping
   if (color) texture.colorSpace = THREE.SRGBColorSpace
   texture.needsUpdate = true
+}
+
+function encodeCanvasPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error('3D preview PNG encoding failed'))
+    }, 'image/png')
+  })
+}
+
+function captureDimensions(width: number, height: number): { width: number; height: number } {
+  return {
+    width: Math.max(1, Math.min(4096, Math.round(width))),
+    height: Math.max(1, Math.min(4096, Math.round(height))),
+  }
 }
 
 /** 为 PBR 材质安装图像环境光；不改变场景背景，只恢复金属、玻璃与清漆的反射细节。 */
@@ -350,12 +372,15 @@ export class SceneController {
   private failed = false
   private modelLoads = new LatestAsyncResourceOwner()
   private loadGltf: SceneModelLoader
+  private encodePng: PngEncoder = encodeCanvasPng
+  private channelView: 'color' | 'metalness' | 'roughness' | 'bump' | null = null
 
   constructor(opts: SceneControllerOptions) {
     this.container = opts.container
     this.onStatus = opts.onStatus
     this.onMeshFound = opts.onMeshFound
     this.loadGltf = opts.loadGltf ?? ((bytes) => loadGltfBytes(bytes, this.draco))
+    this.encodePng = opts.encodePng ?? encodeCanvasPng
 
     let renderer: THREE.WebGLRenderer
     try {
@@ -433,25 +458,23 @@ export class SceneController {
   /** Render a deterministic PNG without depending on toolbar or DOM selectors. */
   async capturePng(width: number, height: number): Promise<Blob> {
     if (this.disposed || this.failed) throw new Error('3D preview is not ready')
-    const targetWidth = Math.max(1, Math.min(4096, Math.round(width)))
-    const targetHeight = Math.max(1, Math.min(4096, Math.round(height)))
+    return this.renderPng(width, height)
+  }
+
+  private async renderPng(width: number, height: number): Promise<Blob> {
+    const size = captureDimensions(width, height)
     const previousSize = this.renderer.getSize(new THREE.Vector2())
     const previousPixelRatio = this.renderer.getPixelRatio()
     const previousAspect = this.camera.aspect
     try {
       this.renderer.setPixelRatio(1)
-      this.renderer.setSize(targetWidth, targetHeight, false)
-      this.composer.setSize(targetWidth, targetHeight)
-      this.outline.setSize(targetWidth, targetHeight)
-      this.camera.aspect = targetWidth / targetHeight
+      this.renderer.setSize(size.width, size.height, false)
+      this.composer.setSize(size.width, size.height)
+      this.outline.setSize(size.width, size.height)
+      this.camera.aspect = size.width / size.height
       this.camera.updateProjectionMatrix()
       this.composer.render()
-      return await new Promise<Blob>((resolve, reject) => {
-        this.renderer.domElement.toBlob((blob) => {
-          if (blob) resolve(blob)
-          else reject(new Error('3D preview PNG encoding failed'))
-        }, 'image/png')
-      })
+      return await this.encodePng(this.renderer.domElement)
     } finally {
       this.renderer.setPixelRatio(previousPixelRatio)
       this.renderer.setSize(previousSize.x, previousSize.y, false)
@@ -459,6 +482,108 @@ export class SceneController {
       this.outline.setSize(previousSize.x, previousSize.y)
       this.camera.aspect = previousAspect
       this.camera.updateProjectionMatrix()
+      this.requestRender()
+    }
+  }
+
+  async captureQcPng(request: QcViewRequest): Promise<{ blob: Blob; camera: QcCameraMetadata }> {
+    if (this.disposed || this.failed) throw new Error('3D preview is not ready')
+    const target = request.target.kind === 'model'
+      ? this.model
+      : this.labelMeshes.get(request.target.areaId)
+    if (!target) {
+      if (request.target.kind === 'area') throw new Error(`QC area is not ready: ${request.target.areaId}`)
+      throw new Error('QC model is not ready')
+    }
+    target.updateWorldMatrix(true, true)
+
+    let frame: QcTargetFrame
+    if (request.target.kind === 'area') {
+      const mesh = target as THREE.Mesh
+      if (!(mesh.geometry instanceof THREE.BufferGeometry)) {
+        throw new Error(`QC area has no capture geometry: ${request.target.areaId}`)
+      }
+      frame = surfaceFrameForGeometry(mesh.geometry, mesh.matrixWorld)
+    } else {
+      const bounds = new THREE.Box3().setFromObject(target)
+      if (bounds.isEmpty()) throw new Error('QC model has no capture geometry')
+      frame = {
+        center: bounds.getCenter(new THREE.Vector3()),
+        size: bounds.getSize(new THREE.Vector3()),
+      }
+    }
+
+    let direction: THREE.Vector3
+    if (request.pose.kind === 'direction') {
+      direction = new THREE.Vector3(...request.pose.direction)
+    } else {
+      if (!frame.normal) throw new Error(`QC pose ${request.pose.kind} requires an area target`)
+      direction = frame.normal.clone()
+      if (request.pose.kind === 'area-craft') {
+        const worldUp = new THREE.Vector3(0, 1, 0)
+        const tangentReference = Math.abs(frame.normal.dot(worldUp)) >= 0.98
+          ? new THREE.Vector3(0, 0, 1)
+          : worldUp
+        const tangent = tangentReference.cross(frame.normal).normalize()
+        direction.addScaledVector(tangent, 0.35).addScaledVector(worldUp, 0.2).normalize()
+      }
+    }
+
+    const captureSize = captureDimensions(request.width, request.height)
+    const qcCamera = cameraForFrame(frame, direction, {
+      fov: this.camera.fov,
+      aspect: captureSize.width / captureSize.height,
+      margin: 1.15,
+    })
+    const previous = {
+      position: this.camera.position.clone(),
+      quaternion: this.camera.quaternion.clone(),
+      up: this.camera.up.clone(),
+      fov: this.camera.fov,
+      aspect: this.camera.aspect,
+      target: this.controls.target.clone(),
+      channel: this.channelView,
+      outlineSelection: [...this.outline.selectedObjects],
+      frontMarkerVisible: this.frontMarker?.visible,
+      areaControlVisible: this.areaControlGroup?.visible,
+    }
+
+    try {
+      this.outline.selectedObjects = []
+      if (this.frontMarker) this.frontMarker.visible = false
+      if (this.areaControlGroup) this.areaControlGroup.visible = false
+      this.setChannelView(request.channel)
+      this.camera.position.copy(qcCamera.position)
+      this.camera.up.copy(qcCamera.up)
+      this.controls.target.copy(qcCamera.target)
+      this.camera.lookAt(qcCamera.target)
+      this.camera.updateProjectionMatrix()
+
+      const camera: QcCameraMetadata = {
+        position: qcCamera.position.toArray(),
+        direction: qcCamera.direction.toArray(),
+        target: qcCamera.target.toArray(),
+        up: qcCamera.up.toArray(),
+        fov: this.camera.fov,
+      }
+      const blob = await this.renderPng(captureSize.width, captureSize.height)
+      return { blob, camera }
+    } finally {
+      this.camera.position.copy(previous.position)
+      this.camera.quaternion.copy(previous.quaternion)
+      this.camera.up.copy(previous.up)
+      this.camera.fov = previous.fov
+      this.camera.aspect = previous.aspect
+      this.camera.updateProjectionMatrix()
+      this.controls.target.copy(previous.target)
+      this.setChannelView(previous.channel)
+      this.outline.selectedObjects = previous.outlineSelection
+      if (this.frontMarker && previous.frontMarkerVisible !== undefined) {
+        this.frontMarker.visible = previous.frontMarkerVisible
+      }
+      if (this.areaControlGroup && previous.areaControlVisible !== undefined) {
+        this.areaControlGroup.visible = previous.areaControlVisible
+      }
       this.requestRender()
     }
   }
@@ -657,6 +782,7 @@ export class SceneController {
   /** 通道视图：切换激活区域材质的贴图显示。 */
   setChannelView(view: 'color' | 'metalness' | 'roughness' | 'bump' | null): void {
     if (this.failed) return
+    this.channelView = view
     applyChannelViewToLabels(this.labelMeshes, this.labelTextures, view)
     this.requestRender()
   }

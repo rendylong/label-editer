@@ -2,7 +2,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { bootstrapAgentBridgeFromPage, createAgentBridge, installAgentBridge } from '../src/agent/bridge'
-import { captureAgentPreview, registerAgentPreviewCapture } from '../src/agent/previewCapture'
+import { captureAgentPreview, captureAgentQcView, registerAgentPreviewCapture } from '../src/agent/previewCapture'
+import type { QcCameraMetadata, QcViewRequest } from '../src/agent/contracts'
 
 const token = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
@@ -98,11 +99,44 @@ describe('browser Agent Bridge guard', () => {
   })
 
   it('keeps the newest preview capture owner when an old viewport unmounts', async () => {
-    const oldDispose = registerAgentPreviewCapture(async () => new Blob(['old']))
-    const newDispose = registerAgentPreviewCapture(async () => new Blob(['newest']))
+    const oldDispose = registerAgentPreviewCapture({
+      preview: async () => new Blob(['old']),
+      qc: async () => { throw new Error('unused') },
+    })
+    const newDispose = registerAgentPreviewCapture({
+      preview: async () => new Blob(['newest']),
+      qc: async () => { throw new Error('unused') },
+    })
     oldDispose()
     expect((await captureAgentPreview({ width: 800, height: 800 })).size).toBe(6)
     newDispose()
     await expect(captureAgentPreview({ width: 800, height: 800 })).rejects.toThrow(/not ready/i)
+  })
+
+  it('forwards the complete QC request to the newest viewport owner', async () => {
+    const cameraMetadata: QcCameraMetadata = {
+      position: [0, 0, 3], direction: [0, 0, 1], target: [0, 0, 0],
+      up: [0, 1, 0], fov: 45,
+    }
+    const qcViewRequest: QcViewRequest = {
+      id: 'model-front', target: { kind: 'model' }, framing: 'fit-model',
+      pose: { kind: 'direction', direction: [0, 0, 1] }, channel: 'color',
+      width: 1440, height: 1440, reason: 'Primary front-label check',
+    }
+    const received: unknown[] = []
+    const dispose = registerAgentPreviewCapture({
+      preview: async () => new Blob(['preview']),
+      qc: async (request) => {
+        received.push(request)
+        return { blob: new Blob(['png']), camera: cameraMetadata }
+      },
+    })
+
+    const result = await captureAgentQcView(qcViewRequest)
+
+    expect(received).toEqual([qcViewRequest])
+    expect(result.camera).toEqual(cameraMetadata)
+    dispose()
+    await expect(captureAgentQcView(qcViewRequest)).rejects.toThrow(/not ready/i)
   })
 })

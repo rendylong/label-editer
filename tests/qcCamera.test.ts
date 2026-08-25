@@ -1,6 +1,119 @@
 import * as THREE from 'three'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type { QcViewRequest } from '../src/agent/contracts'
+import { SceneController } from '../src/scene/SceneController'
 import { cameraForFrame, surfaceFrameForGeometry } from '../src/scene/qcCamera'
+
+type QcCapture = (request: QcViewRequest) => Promise<{
+  blob: Blob
+  camera: {
+    position: [number, number, number]
+    direction: [number, number, number]
+    target: [number, number, number]
+    up: [number, number, number]
+    fov: number
+  }
+}>
+
+interface QcControllerInternals {
+  camera: THREE.PerspectiveCamera
+  controls: { target: THREE.Vector3 }
+  renderer: {
+    getSize(target: THREE.Vector2): THREE.Vector2
+    setSize(width: number, height: number, updateStyle?: boolean): void
+    getPixelRatio(): number
+    setPixelRatio(value: number): void
+    domElement: HTMLCanvasElement
+  }
+  composer: { setSize(width: number, height: number): void; render(): void }
+  outline: { selectedObjects: THREE.Object3D[]; setSize(width: number, height: number): void }
+  model: THREE.Group
+  labelMeshes: Map<string, THREE.Mesh>
+  labelTextures: Map<string, never>
+  channelView: 'color' | 'metalness' | 'roughness' | 'bump' | null
+  frontMarker: THREE.Object3D
+  areaControlGroup: THREE.Group
+  encodePng(canvas: HTMLCanvasElement): Promise<Blob>
+}
+
+function qcControllerHarness(): { controller: SceneController; internals: QcControllerInternals } {
+  const controller = Object.create(SceneController.prototype) as SceneController
+  const model = new THREE.Group()
+  const area = new THREE.Mesh(new THREE.PlaneGeometry(2, 1), new THREE.MeshStandardMaterial())
+  area.position.set(2, 0, 0)
+  area.rotation.y = Math.PI / 2
+  model.add(area)
+  const camera = new THREE.PerspectiveCamera(52, 1.5, 0.01, 5000)
+  camera.position.set(4, 3, 5)
+  camera.up.set(0, 0.9, 0.1).normalize()
+  camera.rotation.set(0.2, -0.3, 0.1)
+  let width = 900
+  let height = 700
+  let pixelRatio = 2
+  const outlineSelection = [new THREE.Object3D(), new THREE.Object3D()]
+  const internals: QcControllerInternals = {
+    camera,
+    controls: { target: new THREE.Vector3(1, 2, 3) },
+    renderer: {
+      getSize: (target) => target.set(width, height),
+      setSize: (nextWidth, nextHeight) => { width = nextWidth; height = nextHeight },
+      getPixelRatio: () => pixelRatio,
+      setPixelRatio: (value) => { pixelRatio = value },
+      domElement: {} as HTMLCanvasElement,
+    },
+    composer: { setSize: vi.fn(), render: vi.fn() },
+    outline: { selectedObjects: outlineSelection, setSize: vi.fn() },
+    model,
+    labelMeshes: new Map([['front.area', area]]),
+    labelTextures: new Map<string, never>(),
+    channelView: 'roughness',
+    frontMarker: new THREE.Object3D(),
+    areaControlGroup: new THREE.Group(),
+    encodePng: async () => new Blob(['png'], { type: 'image/png' }),
+  }
+  Object.assign(controller as object, {
+    ...internals,
+    failed: false,
+    disposed: false,
+    requestRender: vi.fn(),
+  })
+  return { controller, internals: controller as unknown as QcControllerInternals }
+}
+
+function captureQc(controller: SceneController, request: QcViewRequest) {
+  const capture = (controller as unknown as { captureQcPng?: QcCapture }).captureQcPng
+  expect(capture).toBeTypeOf('function')
+  return capture!.call(controller, request)
+}
+
+function captureState(internals: QcControllerInternals) {
+  return {
+    cameraPosition: internals.camera.position.toArray(),
+    cameraQuaternion: internals.camera.quaternion.toArray(),
+    cameraUp: internals.camera.up.toArray(),
+    cameraFov: internals.camera.fov,
+    cameraAspect: internals.camera.aspect,
+    controlsTarget: internals.controls.target.toArray(),
+    channel: internals.channelView,
+    rendererSize: internals.renderer.getSize(new THREE.Vector2()).toArray(),
+    pixelRatio: internals.renderer.getPixelRatio(),
+    outlineSelection: [...internals.outline.selectedObjects],
+    frontMarkerVisible: internals.frontMarker.visible,
+    areaControlVisible: internals.areaControlGroup.visible,
+  }
+}
+
+const AREA_FACE_REQUEST: QcViewRequest = {
+  id: 'area-front-face',
+  target: { kind: 'area', areaId: 'front.area' },
+  framing: 'fit-area',
+  pose: { kind: 'area-face' },
+  channel: 'color',
+  width: 640,
+  height: 320,
+  areaId: 'front.area',
+  reason: 'Area face color close-up',
+}
 
 function expectAllCornersInsideFrustum(
   frame: { center: THREE.Vector3; size: THREE.Vector3 },
@@ -88,5 +201,64 @@ describe('QC camera math', () => {
     const frame = { center: new THREE.Vector3(), size: new THREE.Vector3(1, 1, 1) }
     expect(() => cameraForFrame(frame, direction, { fov: 45, aspect: 1, margin: 1.15 }))
       .toThrow('INVALID_USAGE')
+  })
+
+  it('captures an area-face camera and restores every mutated scene state after success', async () => {
+    const { controller, internals } = qcControllerHarness()
+    const before = captureState(internals)
+    let during: ReturnType<typeof captureState> | undefined
+    internals.encodePng = async () => {
+      during = captureState(internals)
+      return new Blob(['png'], { type: 'image/png' })
+    }
+
+    const result = await captureQc(controller, AREA_FACE_REQUEST)
+
+    expect(result.blob.type).toBe('image/png')
+    expect(result.camera.target).toEqual([2, 0, 0])
+    expect(result.camera.direction[0]).toBeCloseTo(1, 5)
+    expect(result.camera.direction[1]).toBeCloseTo(0, 5)
+    expect(result.camera.direction[2]).toBeCloseTo(0, 5)
+    expect(result.camera.position).toEqual(during?.cameraPosition)
+    expect(result.camera.target).toEqual(during?.controlsTarget)
+    expect(result.camera.up).toEqual(during?.cameraUp)
+    expect(result.camera.fov).toBe(during?.cameraFov)
+    expect(during).toMatchObject({
+      channel: 'color',
+      rendererSize: [640, 320],
+      pixelRatio: 1,
+      outlineSelection: [],
+      frontMarkerVisible: false,
+      areaControlVisible: false,
+    })
+    expect(captureState(internals)).toEqual(before)
+  })
+
+  it('restores every mutated scene state when PNG encoding rejects', async () => {
+    const { controller, internals } = qcControllerHarness()
+    const before = captureState(internals)
+    internals.encodePng = async () => { throw new Error('forced PNG rejection') }
+
+    await expect(captureQc(controller, {
+      ...AREA_FACE_REQUEST,
+      id: 'area-front-craft',
+      pose: { kind: 'area-craft' },
+      channel: 'bump',
+    })).rejects.toThrow('forced PNG rejection')
+
+    expect(captureState(internals)).toEqual(before)
+  })
+
+  it('rejects an unknown area with its exact id before encoding', async () => {
+    const { controller, internals } = qcControllerHarness()
+    const encodePng = vi.fn(internals.encodePng)
+    internals.encodePng = encodePng
+
+    await expect(captureQc(controller, {
+      ...AREA_FACE_REQUEST,
+      target: { kind: 'area', areaId: 'missing.area-42' },
+      areaId: 'missing.area-42',
+    })).rejects.toThrow('missing.area-42')
+    expect(encodePng).not.toHaveBeenCalled()
   })
 })
