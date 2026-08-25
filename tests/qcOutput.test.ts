@@ -278,14 +278,44 @@ describe('QC output manifest', () => {
     expect(qcArtifactRelativePath({ view: view('area-front-face', 'front') })).toBe('areas/front/area-front-face.png')
   })
 
-  it('parses only versioned bounded camera configuration documents', () => {
-    const views = [{ id: 'pump-top', direction: [0.4, 1, 0.4], target: 'model', framing: 'fit-model', channel: 'color' }]
-    expect(parseQcCameraConfig({ version: 1, views })).toEqual(views)
+  it('parses only exact, compatible custom camera views', () => {
+    const views = [
+      { id: 'pump-top', direction: [0.4, 1, 0.4], target: 'model', framing: 'fit-model', channel: 'color' },
+      { id: 'front-detail', direction: [0, 0, 1], target: 'front', framing: 'fit-area', channel: 'roughness' },
+    ]
+    expect(parseQcCameraConfig({ version: 1, views }, { areaIds: ['front'] })).toEqual(views)
     for (const value of [
       {}, { version: 1 }, { version: 1, views, ignored: true }, { version: 1, views: 'no' },
       { version: 1, views: Array.from({ length: 33 }, () => views[0]) },
     ]) {
       expect(() => parseQcCameraConfig(value)).toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
     }
+  })
+
+  it.each([
+    ['non-object view', [null]],
+    ['extra kind', [{ id: 'extra', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color', kind: 'direction' }]],
+    ['unsupported up', [{ id: 'up', direction: [1, 0, 0], up: [0, 1, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['missing channel', [{ id: 'missing', direction: [1, 0, 0], target: 'model', framing: 'fit-model' }]],
+    ['unsafe id', [{ id: '../escape', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['overlong id', [{ id: 'x'.repeat(81), direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['duplicate id', [
+      { id: 'same', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' },
+      { id: 'same', direction: [0, 1, 0], target: 'model', framing: 'fit-model', channel: 'color' },
+    ]],
+    ['reserved model id', [{ id: 'model-front', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['reserved area id', [{ id: 'area-front-face', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['non-finite direction', [{ id: 'nan', direction: [Number.NaN, 0, 1], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['zero direction', [{ id: 'zero', direction: [0, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['short direction', [{ id: 'short', direction: [1, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['non-string target', [{ id: 'target', direction: [1, 0, 0], target: 7, framing: 'fit-area', channel: 'color' }]],
+    ['unsafe area target', [{ id: 'target', direction: [1, 0, 0], target: '../front', framing: 'fit-area', channel: 'color' }]],
+    ['missing area target', [{ id: 'target', direction: [1, 0, 0], target: 'absent', framing: 'fit-area', channel: 'color' }]],
+    ['area framing on model', [{ id: 'framing', direction: [1, 0, 0], target: 'model', framing: 'fit-area', channel: 'color' }]],
+    ['model framing on area', [{ id: 'framing', direction: [1, 0, 0], target: 'front', framing: 'fit-model', channel: 'color' }]],
+    ['unsupported channel', [{ id: 'channel', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'normal' }]],
+  ])('rejects an invalid custom camera before capture: %s', (_label, views) => {
+    expect(() => parseQcCameraConfig({ version: 1, views }, { areaIds: ['front'] }))
+      .toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
   })
 })

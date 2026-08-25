@@ -10,6 +10,12 @@ const POSE_KINDS = new Set(['direction', 'area-face', 'area-craft'])
 const FRAMINGS = new Set(['fit-model', 'fit-area'])
 const UNSAFE_CONTENT = /(?:\b(?:https?|file):\/\/|\bbearer\s+)/i
 const ASCII_PUBLICATION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const QC_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
+const STANDARD_MODEL_VIEW_IDS = [
+  'model-front', 'model-back', 'model-left', 'model-right',
+  'model-front-right', 'model-back-left',
+]
+const STANDARD_AREA_VIEW_SUFFIXES = ['face', 'craft', 'metalness', 'roughness', 'bump']
 
 export class QcOutputError extends Error {
   constructor(code, message, details) {
@@ -93,6 +99,23 @@ function assertSafeRelativePath(value) {
 function publicationPathKey(value) {
   assertSafeRelativePath(value)
   return value.normalize('NFKC').toLowerCase()
+}
+
+function stableAreaHash(areaId) {
+  let hash = 2166136261
+  for (let index = 0; index < areaId.length; index += 1) {
+    hash ^= areaId.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+function standardAreaViewId(areaId, suffix) {
+  const plain = `area-${areaId}-${suffix}`
+  if (plain.length <= 80) return plain
+  const hash = stableAreaHash(areaId)
+  const prefixLength = 80 - `area--${hash}-${suffix}`.length
+  return `area-${areaId.slice(0, Math.max(1, prefixLength))}-${hash}-${suffix}`
 }
 
 function assertUnique(items, key, label) {
@@ -263,12 +286,48 @@ export function qcArtifactRelativePath(view) {
   return relativePath
 }
 
-export function parseQcCameraConfig(value) {
+export function parseQcCameraConfig(value, { areaIds = [] } = {}) {
   assertExactKeys(value, ['version', 'views'], 'QC camera config')
   if (value.version !== 1 || !Array.isArray(value.views) || value.views.length > 32) {
     throw invalid('QC camera config must have version 1 and at most 32 views')
   }
-  return value.views
+  if (!Array.isArray(areaIds)) throw invalid('QC camera area ids must be an array')
+  const knownAreaIds = new Set()
+  for (const areaId of areaIds) {
+    if (typeof areaId !== 'string' || !QC_ID_PATTERN.test(areaId) || knownAreaIds.has(areaId)) {
+      throw invalid(`Invalid or duplicate QC area id: ${String(areaId)}`)
+    }
+    knownAreaIds.add(areaId)
+  }
+  const ids = new Set(STANDARD_MODEL_VIEW_IDS)
+  for (const areaId of knownAreaIds) {
+    for (const suffix of STANDARD_AREA_VIEW_SUFFIXES) ids.add(standardAreaViewId(areaId, suffix))
+  }
+  return value.views.map((view, index) => {
+    const label = `QC custom view ${index}`
+    assertExactKeys(view, ['id', 'direction', 'target', 'framing', 'channel'], label)
+    if (typeof view.id !== 'string' || !QC_ID_PATTERN.test(view.id)) throw invalid(`Invalid ${label} id`)
+    if (ids.has(view.id)) throw invalid(`Duplicate or reserved QC view id: ${view.id}`)
+    ids.add(view.id)
+    const direction = assertVector(view.direction, `${label} direction`)
+    if (direction.every((part) => part === 0)) throw invalid(`Invalid ${label} direction: zero vector`)
+    if (typeof view.target !== 'string' || (view.target !== 'model' && !QC_ID_PATTERN.test(view.target))) {
+      throw invalid(`Invalid ${label} target`)
+    }
+    const isModel = view.target === 'model'
+    if (!isModel && !knownAreaIds.has(view.target)) throw invalid(`${label} targets missing area: ${view.target}`)
+    if ((isModel && view.framing !== 'fit-model') || (!isModel && view.framing !== 'fit-area')) {
+      throw invalid(`${label} framing does not match target`)
+    }
+    if (!CHANNELS.has(view.channel)) throw invalid(`Invalid ${label} channel`)
+    return {
+      id: view.id,
+      direction,
+      target: view.target,
+      framing: view.framing,
+      channel: view.channel,
+    }
+  })
 }
 
 export function buildQcManifest({ createdAt, project, inspection, evidence, artifacts }) {

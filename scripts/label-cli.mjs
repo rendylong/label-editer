@@ -75,6 +75,10 @@ function assertShape(parsed) {
   if (command === 'qc' && options.preset !== undefined && options.preset !== 'qc-standard') {
     throw usageError('--preset must be qc-standard')
   }
+  if (command === 'qc') {
+    options.width = parseDimension(options.width, 'width')
+    options.height = parseDimension(options.height, 'height')
+  }
   if (command === 'preview' && options.view && !['2d', 'split', '3d'].includes(options.view)) {
     throw usageError('--view must be 2d, split, or 3d')
   }
@@ -102,8 +106,8 @@ async function invoke(parsed, operations) {
     outputDir: options.output,
     preset: options.preset ?? 'qc-standard',
     cameraConfigPath: options['camera-config'],
-    width: parseDimension(options.width, 'width'),
-    height: parseDimension(options.height, 'height'),
+    width: options.width,
+    height: options.height,
     force: options.force === true,
   })
   if (parsed.command === 'export') return operations.export({ projectPath: input, glbPath: options.glb, outputDir: options.output, force: options.force === true })

@@ -24,6 +24,30 @@ async function fixture(): Promise<Record<string, any>> {
   return JSON.parse(await readFile(path.resolve(import.meta.dirname, 'fixtures/specs/perfume-front-back-v2.json'), 'utf8'))
 }
 
+function projectV3(): Record<string, any> {
+  return {
+    version: 3,
+    modelFileName: 'bottle.glb',
+    areas: [{
+      id: 'a1', name: 'Front', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay', side: 'front',
+      remap: {
+        mode: 'cylindrical', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0,
+        planarBox: { min: [-1, -1, -1], max: [1, 1, 1] },
+      },
+      range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+      canvas: { width: 2048, height: 1024, aspect: 2 },
+      paper: { enabled: false, color: '#ffffff', opacity: 0 },
+      layers: [{
+        id: 'l1', kind: 'text', text: 'Label', fontFamily: 'system-sans', fontSize: 64,
+        fontWeight: 400, letterSpacing: 0, lineHeight: 1.2, color: '#000000', align: 'center',
+        italic: false, x: 512, y: 256, rotation: 0, opacity: 1, visible: true, locked: false,
+        zIndex: 0, craft: [],
+      }],
+      globalCraft: { craft: [] }, fonts: [], referenceVisible: false,
+    }],
+  }
+}
+
 const PNG_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 const PNG_SHA256 = createHash('sha256').update(PNG_BYTES).digest('hex')
 
@@ -62,14 +86,13 @@ function qcRuntime(options: {
   publishToDisk?: boolean
   storedArtifactSet?: 'exact' | 'missing' | 'extra'
   browserErrors?: string[]
+  areaIds?: string[]
 } = {}) {
-  const views = [
-    qcView('model-front'),
-    qcView('area-front-face', 'front'),
-    qcView('area-front-craft', 'front'),
-    qcView('area-back-face', 'back'),
-    qcView('area-back-craft', 'back'),
-  ]
+  const areaIds = options.areaIds ?? ['front', 'back']
+  const views = [qcView('model-front'), ...areaIds.flatMap((areaId) => [
+    qcView(`area-${areaId}-face`, areaId),
+    qcView(`area-${areaId}-craft`, areaId),
+  ])]
   const descriptors = views.map(qcDescriptor)
   const bridgeCalls: Array<{ method: string, input: unknown }> = []
   const publications: Array<{ sessionId: string, outputDir: string, artifacts: any[], force: boolean }> = []
@@ -94,7 +117,7 @@ function qcRuntime(options: {
           warnings: [],
         }
       }
-      if (method === 'applySpec') return { ok: true, data: { areaIds: ['front', 'back'] }, warnings: [] }
+      if (method === 'applySpec' || method === 'applyProject') return { ok: true, data: { areaIds }, warnings: [] }
       if (method === 'waitForReady') return { ok: true, data: { ready: true }, warnings: [] }
       if (method === 'renderQcEvidence') {
         if (options.captureError) {
@@ -112,10 +135,10 @@ function qcRuntime(options: {
                 up: [0, 1, 0], fov: 45,
               },
             })),
-            areas: [
-              { areaId: 'front', meshIndex: 7, nodeName: 'Bottle', side: 'front', surfaceMode: 'overlay', viewIds: ['area-front-face', 'area-front-craft'] },
-              { areaId: 'back', meshIndex: 7, nodeName: 'Bottle', side: 'back', surfaceMode: 'overlay', viewIds: ['area-back-face', 'area-back-craft'] },
-            ],
+            areas: areaIds.map((areaId) => ({
+              areaId, meshIndex: 7, nodeName: 'Bottle', side: areaId === 'back' ? 'back' : 'front',
+              surfaceMode: 'overlay', viewIds: [`area-${areaId}-face`, `area-${areaId}-craft`],
+            })),
             validation: { ready: true, issues: [] },
           },
           warnings: [],
@@ -285,6 +308,60 @@ describe('label-cli protocol', () => {
     expect(result).toMatchObject({ ok: false, operation: 'render_label_qc', error: { code: 'INVALID_USAGE' } })
     expect(harness.sessionCount).toBe(0)
     expect(harness.publications).toEqual([])
+  })
+
+  it.each([
+    ['zero direction', [{ id: 'zero', direction: [0, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['duplicate ids', [
+      { id: 'same', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' },
+      { id: 'same', direction: [0, 1, 0], target: 'model', framing: 'fit-model', channel: 'color' },
+    ]],
+    ['missing area', [{ id: 'missing', direction: [1, 0, 0], target: 'absent', framing: 'fit-area', channel: 'color' }]],
+    ['extra up', [{ id: 'up', direction: [1, 0, 0], up: [0, 1, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+  ])('maps well-formed but invalid camera JSON to INVALID_USAGE before a browser session: %s', async (_label, views) => {
+    const directory = await temporaryDirectory()
+    const inputPath = path.join(directory, 'spec.json')
+    const cameraConfigPath = path.join(directory, 'cameras.json')
+    const glbPath = path.join(directory, 'model.glb')
+    const outputDir = path.join(directory, 'qc-output')
+    await writeFile(inputPath, JSON.stringify(await fixture()))
+    await writeFile(cameraConfigPath, JSON.stringify({ version: 1, views }))
+    await writeFile(glbPath, 'glb')
+    const harness = qcRuntime()
+    harness.runtime.allowedRoots = [directory]
+
+    const result = await createOperations(harness.runtime).qc({ inputPath, glbPath, outputDir, cameraConfigPath })
+
+    expect(result).toMatchObject({ ok: false, operation: 'render_label_qc', error: { code: 'INVALID_USAGE' } })
+    expect(harness.sessionCount).toBe(0)
+    expect(harness.publications).toEqual([])
+    expect(await readdir(directory)).toEqual(['cameras.json', 'model.glb', 'spec.json'])
+  })
+
+  it('routes a Label Project v3 through applyProject and binds its exact revision', async () => {
+    const directory = await temporaryDirectory()
+    const project = projectV3()
+    const inputPath = path.join(directory, 'project.lbl.json')
+    const glbPath = path.join(directory, 'model.glb')
+    const outputDir = path.join(directory, 'qc-output')
+    await writeFile(inputPath, JSON.stringify(project))
+    await writeFile(glbPath, 'glb')
+    const harness = qcRuntime({ areaIds: ['a1'] })
+    harness.runtime.allowedRoots = [directory]
+
+    const result = await createOperations(harness.runtime).qc({ inputPath, glbPath, outputDir })
+
+    expect(result.ok).toBe(true)
+    expect(harness.bridgeCalls.map((call) => call.method)).toEqual([
+      'loadModel', 'applyProject', 'waitForReady', 'renderQcEvidence',
+    ])
+    expect(harness.bridgeCalls[1].input).toEqual({ project })
+    expect(harness.publications).toHaveLength(1)
+    const manifestArtifact = harness.publications[0].artifacts.at(-1)
+    const manifest = JSON.parse(Buffer.from(manifestArtifact.bytes).toString('utf8'))
+    expect(manifest.input).toMatchObject({ kind: 'label-project-v3', revision: revisionOf(project) })
+    if (!result.ok) throw new Error(result.error.message)
+    expect(result.data.revision).toBe(revisionOf(project))
   })
 
   it('leaves no output or staging directory when the browser QC batch fails', async () => {

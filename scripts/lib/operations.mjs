@@ -466,7 +466,7 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
           ? parseQcCameraConfig((await readJsonInput(rootPolicy, {
               inputPath: cameraConfigPath,
               parseErrorCode: 'INVALID_USAGE',
-            })).value)
+            })).value, { areaIds: project.areas.map((area) => area.id) })
           : []
         const resolvedOutput = await assertOutputAvailable(runtime, outputDir, force)
 
