@@ -78,6 +78,66 @@ describe('plugin skill bundle', () => {
     }
   })
 
+  it('requires revision-bound multi-view QC and bounded repair', async () => {
+    const skill = await readFile(
+      path.join(repoRoot, 'skills/cosmetic-label-editor/SKILL.md'),
+      'utf8',
+    )
+    const rubric = await readFile(
+      path.join(repoRoot, 'skills/cosmetic-label-editor/references/quality-control.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain('## Mandatory quality control')
+    expect(skill).toContain('references/quality-control.md')
+    expect(skill).toContain('label-cli qc')
+    expect(skill).toContain('qc-standard')
+    expect(skill).toContain('qc-manifest.json')
+    expect(skill).toContain('manifest revision')
+    expect(skill).toContain('round-0')
+    expect(skill).toContain('maximum of three repair rounds')
+    expect(skill).toContain('Do not confirm delivery')
+    expect(skill).toContain('GLB cross-check')
+
+    for (const heading of [
+      'Target and labeled surface',
+      'Placement, coverage, and seams',
+      'Orientation',
+      'Text readiness',
+      'Artwork and brand assets',
+      'Craft and material rendering',
+      'Cross-view and output consistency',
+    ]) {
+      expect(rubric).toContain(`## ${heading}`)
+    }
+
+    for (const requirement of [
+      'Evidence integrity and revision',
+      'pass | warning | fail',
+      'every required artifact id',
+      'every label area',
+      '2D composition, 3D render, and channel output',
+      'visual simulation',
+      'does not certify',
+    ]) {
+      expect(rubric).toContain(requirement)
+    }
+  })
+
+  it('forbids validation-only acceptance and stale or destructive QC evidence', async () => {
+    const skill = await readFile(
+      path.join(repoRoot, 'skills/cosmetic-label-editor/SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain('deterministic validation does not replace visual inspection')
+    expect(skill).toContain('Never overwrite an earlier QC round')
+    expect(skill).toContain('Warnings remain visible')
+    expect(skill).not.toContain('schema validation alone proves quality')
+    expect(skill).not.toContain('silently ignore warnings')
+    expect(skill).not.toContain('overwrite earlier QC rounds when convenient')
+  })
+
   it('provides explicit default prompts for both skills', async () => {
     const designMetadata = await readFile(
       path.join(repoRoot, 'skills/cosmetic-label/agents/openai.yaml'),

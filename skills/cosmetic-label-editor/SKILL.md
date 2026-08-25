@@ -57,10 +57,22 @@ The visible read-only page permits the user to orbit and zoom the model, switch 
 8. Apply the transaction in place with `label-cli patch <working-spec.json> --operations <operations.json> --output <working-spec.json> --force --json`. This is the required `patch --force` path for the same working spec watched by `live`.
 9. Confirm that the patch envelope's new revision appears in `live` stderr before starting another transaction. Page status is for the user, not an Agent inspection channel. If patch returns `REVISION_CONFLICT`, run `project` again, review the current value, rebuild the operations document with the new `baseRevision`, and retry. Never overwrite the conflict blindly.
 10. When Agent visual reasoning is needed, run `label-cli preview <working-spec.json> --glb <model.glb> --output <preview.png> --view 3d --json` and inspect the generated PNG. This does not replace the user-facing live Web preview.
-11. Re-run `validate`, compare the final design with the upstream mockup, and disclose material translation differences.
-12. Publish with `label-cli apply <working-spec.json> --glb <model.glb> --output <new-output-dir> --json`. Require the labeled GLB, editable project, normalized spec, print manifest, preview, per-area Color/Metalness/Roughness/Bump PNGs, and artifact manifest.
+11. Re-run `validate`, compare the final design with the upstream mockup, disclose material translation differences, and complete the mandatory quality-control gate below.
+12. Only after QC passes, publish with the requested `label-cli apply <working-spec.json> --glb <model.glb> --output <new-output-dir> --json` or export path. Require the labeled GLB, editable project, normalized spec, print manifest, preview, per-area Color/Metalness/Roughness/Bump PNGs, and artifact manifest.
 
 `project` and `patch` are pure Node operations. They do not start Playwright or a local HTTP server. `inspect`, model-aware `validate`, `preview`, `apply`, and `export` may use the plugin-owned browser renderer internally, but the Agent still controls them only through the CLI.
+
+## Mandatory quality control
+
+Read `references/quality-control.md` before production QC and use its complete evidence and `pass`/`warning`/`fail` rubric. QC is mandatory even when `validate` reports ready: deterministic validation does not replace visual inspection.
+
+1. Keep the mandatory live preview running. After validation, capture round 0 with `label-cli qc working-label-spec.json --glb package.glb --output label-qc/round-0 --preset qc-standard --json`.
+2. Run `label-cli project working-label-spec.json --json` again. Before inspecting images, compare the current project revision with `qc-manifest.json.input.revision`; a missing artifact, evidence gap, or stale manifest revision is a blocking `fail`.
+3. Inspect every model view, every area's face and craft view, and every included metalness, roughness, or bump channel. Write evidence-backed `pass`, `warning`, or `fail` checks that reference artifact ids. Warnings remain visible in the final handoff.
+4. On a visual `fail`, use the current project revision as `baseRevision`, patch the same working Spec through `patch --force`, and wait for `live` stderr to report the new ready revision. Validate again, then run `qc` into the next round directory. Never overwrite an earlier QC round.
+5. Round 0 is required. Allow a maximum of three repair rounds after it: `round-1`, `round-2`, and `round-3`. Recheck every changed area plus every view affected by a target, mapping, material, craft, or shared-asset change.
+6. If round 3 still fails, or a safe repair cannot be inferred, stop changing the Spec and report the remaining blockers. Do not apply/export. Do not confirm delivery while any `fail`, evidence gap, or stale revision remains.
+7. After visual QC passes, run the requested apply/export. Require its artifact validation, output-manifest consistency, and GLB cross-check to pass before final confirmation; preserve all QC warnings in that confirmation.
 
 ## Explicit human takeover
 
