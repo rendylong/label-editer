@@ -22,6 +22,23 @@ const CRAFT_CHANNELS: Record<CraftType, QcChannel[]> = {
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
 const CRAFT_CHANNEL_ORDER: QcChannel[] = ['metalness', 'roughness', 'bump']
 
+function stableAreaHash(areaId: string): string {
+  let hash = 2166136261
+  for (let index = 0; index < areaId.length; index += 1) {
+    hash ^= areaId.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+function areaViewId(areaId: string, suffix: string): string {
+  const plain = `area-${areaId}-${suffix}`
+  if (plain.length <= 80) return plain
+  const hash = stableAreaHash(areaId)
+  const prefixLength = 80 - `area--${hash}-${suffix}`.length
+  return `area-${areaId.slice(0, Math.max(1, prefixLength))}-${hash}-${suffix}`
+}
+
 function assertValidId(id: string, label: string): void {
   if (!ID_PATTERN.test(id)) throw new Error(`Invalid ${label} id: ${id}`)
 }
@@ -53,7 +70,8 @@ export function buildQcCapturePlan(input: {
   customViews: QcCustomView[]
 }): QcViewRequest[] {
   if (input.preset !== 'qc-standard') throw new Error(`Unsupported QC preset: ${input.preset}`)
-  if (!Number.isFinite(input.width) || input.width <= 0 || !Number.isFinite(input.height) || input.height <= 0) {
+  if (!Number.isInteger(input.width) || input.width < 1 || input.width > 4096
+    || !Number.isInteger(input.height) || input.height < 1 || input.height > 4096) {
     throw new Error('QC capture dimensions must be finite and positive')
   }
   const areaIds = new Set<string>()
@@ -77,13 +95,13 @@ export function buildQcCapturePlan(input: {
   for (const area of input.areas) {
     const target = { kind: 'area' as const, areaId: area.id }
     for (const [id, pose, reason] of [
-      [`area-${area.id}-face`, { kind: 'area-face' as const }, 'Area face color close-up'],
-      [`area-${area.id}-craft`, { kind: 'area-craft' as const }, 'Area craft color close-up'],
+      [areaViewId(area.id, 'face'), { kind: 'area-face' as const }, 'Area face color close-up'],
+      [areaViewId(area.id, 'craft'), { kind: 'area-craft' as const }, 'Area craft color close-up'],
     ] as const) {
       add({ id, target, framing: 'fit-area', pose, channel: 'color', width: input.width, height: input.height, areaId: area.id, reason })
     }
     for (const channel of craftChannelsForArea(area)) {
-      add({ id: `area-${area.id}-${channel}`, target, framing: 'fit-area', pose: { kind: 'area-craft' }, channel, width: input.width, height: input.height, areaId: area.id, reason: `Area ${channel} craft channel` })
+      add({ id: areaViewId(area.id, channel), target, framing: 'fit-area', pose: { kind: 'area-craft' }, channel, width: input.width, height: input.height, areaId: area.id, reason: `Area ${channel} craft channel` })
     }
   }
   for (const custom of input.customViews) {

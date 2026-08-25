@@ -21,6 +21,30 @@ function area(id: string, crafts: CraftType[] = []): LabelAreaConfig {
 }
 
 describe('QC capture plan', () => {
+  it.each([1, 4096])('accepts boundary dimension %s', (dimension) => {
+    expect(() => buildQcCapturePlan({ preset: 'qc-standard', width: dimension, height: dimension, areas: [], customViews: [] })).not.toThrow()
+  })
+
+  it.each([0, 4097, 1440.5])('rejects invalid dimension %s', (dimension) => {
+    expect(() => buildQcCapturePlan({ preset: 'qc-standard', width: dimension, height: 1440, areas: [], customViews: [] })).toThrow()
+  })
+
+  it('preserves a valid 80-character area id while bounding derived color view ids', () => {
+    const longId = 'a'.repeat(80)
+    const plan = buildQcCapturePlan({ preset: 'qc-standard', width: 1440, height: 1440, areas: [area(longId)], customViews: [] })
+    const views = plan.filter((view) => view.areaId === longId)
+    expect(views.map((view) => view.id)).toHaveLength(2)
+    expect(views.every((view) => view.id.length <= 80)).toBe(true)
+  })
+
+  it('preserves a valid 80-character area id while bounding derived craft view ids', () => {
+    const longId = 'a'.repeat(80)
+    const plan = buildQcCapturePlan({ preset: 'qc-standard', width: 1440, height: 1440, areas: [area(longId, ['foil'])], customViews: [] })
+    const views = plan.filter((view) => view.areaId === longId)
+    expect(views.map((view) => view.id)).toHaveLength(4)
+    expect(views.every((view) => view.id.length <= 80)).toBe(true)
+  })
+
   it('keeps six model views and two color close-ups for every area', () => {
     const plan = buildQcCapturePlan({
       preset: 'qc-standard', width: 1440, height: 1440,
