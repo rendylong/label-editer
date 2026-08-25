@@ -15,6 +15,7 @@ async function writeExecutable(filePath: string, body: string): Promise<void> {
 async function createPluginSource(root: string): Promise<void> {
   for (const directory of [
     '.codex-plugin',
+    'assets',
     'public',
     'scripts',
     'skills/cosmetic-label',
@@ -29,6 +30,10 @@ async function createPluginSource(root: string): Promise<void> {
     version: '0.2.0',
     skills: './skills/',
     mcpServers: './.mcp.json',
+    interface: {
+      composerIcon: './assets/icon.png',
+      logo: './assets/icon.png',
+    },
   }))
   await writeFile(path.join(root, '.mcp.json'), '{}')
   await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'glb-label-editor' }))
@@ -40,6 +45,10 @@ async function createPluginSource(root: string): Promise<void> {
   await writeFile(path.join(root, 'index.html'), '<main>editor</main>')
   await writeFile(path.join(root, 'tsconfig.json'), '{}')
   await writeFile(path.join(root, 'vite.config.ts'), 'export default {}')
+  await writeFile(path.join(root, 'PRIVACY.md'), '# Privacy')
+  await writeFile(path.join(root, 'SUPPORT.md'), '# Support')
+  await writeFile(path.join(root, 'TERMS.md'), '# Terms')
+  await writeFile(path.join(root, 'assets/icon.png'), 'icon')
   await writeFile(path.join(root, 'public/asset.txt'), 'asset')
   await writeFile(path.join(root, 'scripts/mcp-server.mjs'), 'console.log("mcp")')
   await writeFile(path.join(root, 'skills/cosmetic-label/SKILL.md'), '# design')
@@ -61,6 +70,11 @@ describe('GLB label editor installer', () => {
     )
     expect(files.has('npm-shrinkwrap.json')).toBe(true)
     expect(files.has('INSTALL_WITH_AGENT.md')).toBe(true)
+    expect(files.has('PRIVACY.md')).toBe(true)
+    expect(files.has('SUPPORT.md')).toBe(true)
+    expect(files.has('TERMS.md')).toBe(true)
+    expect(files.has('assets/icon.png')).toBe(true)
+    expect(files.has('docs/plugin-directory-submission.md')).toBe(true)
     expect(files.get('scripts/install-plugin.mjs')).toBe(0o755)
 
     const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
@@ -129,6 +143,16 @@ esac
       .resolves.toContain('built')
     await expect(readFile(path.join(installRoot, 'runtime/scripts/mcp-server.mjs'), 'utf8'))
       .resolves.toContain('mcp')
+    await expect(readFile(path.join(installRoot, 'plugin/assets/icon.png'), 'utf8'))
+      .resolves.toBe('icon')
+
+    const installedManifest = JSON.parse(
+      await readFile(path.join(installRoot, 'plugin/.codex-plugin/plugin.json'), 'utf8'),
+    )
+    expect(installedManifest.interface).toMatchObject({
+      composerIcon: './assets/icon.png',
+      logo: './assets/icon.png',
+    })
 
     const mcpConfig = JSON.parse(
       await readFile(path.join(installRoot, 'plugin/.mcp.json'), 'utf8'),

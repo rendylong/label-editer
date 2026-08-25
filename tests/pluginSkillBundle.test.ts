@@ -70,4 +70,27 @@ describe('plugin skill bundle', () => {
     expect(editorMetadata).toContain('$cosmetic-label-editor')
     expect(editorMetadata).toContain('$cosmetic-label')
   })
+
+  it('ships complete public-directory listing metadata and assets', async () => {
+    const manifest = JSON.parse(
+      await readFile(path.join(repoRoot, '.codex-plugin/plugin.json'), 'utf8'),
+    )
+
+    expect(manifest.homepage).toBe('https://github.com/rendylong/label-editer')
+    expect(manifest.repository).toBe('https://github.com/rendylong/label-editer')
+    expect(manifest.keywords).toEqual(expect.arrayContaining(['glb', 'label-design', 'cosmetics']))
+    expect(manifest.interface).toMatchObject({
+      websiteURL: 'https://github.com/rendylong/label-editer',
+      privacyPolicyURL: 'https://github.com/rendylong/label-editer/blob/main/PRIVACY.md',
+      termsOfServiceURL: 'https://github.com/rendylong/label-editer/blob/main/TERMS.md',
+      composerIcon: './assets/icon.png',
+      logo: './assets/icon.png',
+    })
+
+    const icon = await readFile(path.join(repoRoot, 'assets/icon.png'))
+    expect(icon.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
+    await expect(readFile(path.join(repoRoot, 'PRIVACY.md'), 'utf8')).resolves.toContain('# Privacy Policy')
+    await expect(readFile(path.join(repoRoot, 'SUPPORT.md'), 'utf8')).resolves.toContain('# Support')
+    await expect(readFile(path.join(repoRoot, 'TERMS.md'), 'utf8')).resolves.toContain('# Terms of Service')
+  })
 })

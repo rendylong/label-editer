@@ -2,7 +2,13 @@
   "name": "glb-label-editor",
   "version": "0.2.0",
   "description": "Two-stage cosmetic label design and GLB production, preview, validation, and export",
-  "author": { "name": "Realibox" },
+  "author": {
+    "name": "Realibox",
+    "url": "https://github.com/rendylong/label-editer"
+  },
+  "homepage": "https://github.com/rendylong/label-editer",
+  "repository": "https://github.com/rendylong/label-editer",
+  "keywords": ["glb", "label-design", "cosmetics", "packaging", "3d"],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
@@ -11,12 +17,17 @@
     "longDescription": "Always use Cosmetic Label to clarify and approve the label system first, then use Cosmetic Label Editor to inspect packaging GLBs, apply front, back, and wrap labels, keep a live browser preview open, validate print data, and export PNG/PBR assets plus labeled GLB files.",
     "developerName": "Realibox",
     "category": "Design",
-    "capabilities": ["Interactive", "Write"],
+    "capabilities": ["Read", "Write", "Interactive"],
+    "websiteURL": "https://github.com/rendylong/label-editer",
+    "privacyPolicyURL": "https://github.com/rendylong/label-editer/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/rendylong/label-editer/blob/main/TERMS.md",
     "defaultPrompt": [
       "Design this cosmetic label with $cosmetic-label, then produce it on the GLB with $cosmetic-label-editor.",
       "First use $cosmetic-label to clarify and normalize this approved design into an Editor Handoff, then export a labeled GLB with $cosmetic-label-editor.",
       "First use $cosmetic-label to clarify this label edit, then use $cosmetic-label-editor and keep the browser preview open."
     ],
-    "brandColor": "#356AE6"
+    "brandColor": "#356AE6",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png"
   }
 }

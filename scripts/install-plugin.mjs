@@ -14,7 +14,12 @@ const runtimeEntries = [
   '.codex-plugin',
   '.mcp.json',
   'INSTALL_WITH_AGENT.md',
+  'PRIVACY.md',
   'README.md',
+  'SUPPORT.md',
+  'TERMS.md',
+  'assets',
+  'docs',
   'index.html',
   'npm-shrinkwrap.json',
   'package.json',
@@ -138,6 +143,7 @@ async function writePluginWrapper(stageRoot, finalInstallRoot) {
   const finalRuntimeRoot = path.join(finalInstallRoot, 'runtime')
   await mkdir(pluginRoot, { recursive: true })
   await cp(path.join(stageRoot, 'runtime/.codex-plugin'), path.join(pluginRoot, '.codex-plugin'), { recursive: true })
+  await cp(path.join(stageRoot, 'runtime/assets'), path.join(pluginRoot, 'assets'), { recursive: true })
   await cp(path.join(stageRoot, 'runtime/skills'), path.join(pluginRoot, 'skills'), { recursive: true })
   await writeFile(path.join(pluginRoot, '.mcp.json'), `${JSON.stringify({
     mcpServers: {
