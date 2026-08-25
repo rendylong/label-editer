@@ -91,10 +91,16 @@ async function invoke<T>(operation: string, action: () => Promise<T>) {
   try {
     return agentSuccess(operation, await action())
   } catch (error) {
+    const details = error && typeof error === 'object' && 'details' in error
+      && (error as { details?: unknown }).details
+      && typeof (error as { details: unknown }).details === 'object'
+      ? (error as { details: Record<string, unknown> }).details
+      : undefined
     return agentFailure(
       operation,
       errorCode(error),
       error instanceof Error ? error.message : String(error),
+      details ? { details } : {},
     )
   }
 }

@@ -61,6 +61,19 @@ describe('browser Agent Bridge guard', () => {
     })
   })
 
+  it('exposes QC evidence as a guarded bridge operation', async () => {
+    const bridge = createAgentBridge({
+      renderQcEvidence: async () => ({
+        preset: 'qc-standard', views: [], areas: [], validation: { ready: true, issues: [] },
+      }),
+    })
+    await expect(bridge.renderQcEvidence({ width: 1440, height: 1440 })).resolves.toMatchObject({
+      ok: true,
+      operation: 'render_qc_evidence',
+      data: { preset: 'qc-standard', views: [] },
+    })
+  })
+
   it('exposes a UI-only live preview status operation', async () => {
     const received: unknown[] = []
     const bridge = createAgentBridge({

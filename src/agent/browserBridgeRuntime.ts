@@ -9,12 +9,24 @@ import { validatePrintReadiness } from '../label/printReadiness'
 import { useLabelStore, useModelStore, useUiStore } from '../state/stores'
 import { createExportBundle, type BrowserArtifact } from './artifactExport'
 import { createAgentBridge, type AgentBridgeBootstrap } from './bridge'
-import { captureAgentPreview } from './previewCapture'
+import { captureAgentPreview, captureAgentQcView } from './previewCapture'
 import { inspectModel } from './modelInspection'
 import { validateLabelSpec, type LabelSpecAreaV2, type LabelSpecV2 } from './labelSpecSchema'
+import { buildQcCapturePlan } from './qcCapturePlan'
 import { resolveTarget } from './targetResolver'
 import { applyPreparedAreaTransaction } from './transactionalApply'
-import type { ArtifactDescriptor, DesignValidationIssue, ExportManifest, LabelEditorAgentBridgeV1 } from './contracts'
+import type {
+  ArtifactDescriptor,
+  DesignValidationIssue,
+  DesignValidationReport,
+  ExportManifest,
+  LabelEditorAgentBridgeV1,
+  QcAreaEvidence,
+  QcChannel,
+  QcViewRequest,
+  QcViewResult,
+} from './contracts'
+import type { BakeResult } from '../state/stores'
 
 function sleepFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()))
@@ -22,6 +34,96 @@ function sleepFrame(): Promise<void> {
 
 async function blobBytes(blob: Blob): Promise<Uint8Array> {
   return new Uint8Array(await blob.arrayBuffer())
+}
+
+type QcValidationIssue = DesignValidationIssue & { channel?: QcChannel }
+
+function structuredInvalidLabelSpec(issues: QcValidationIssue[]): Error {
+  const error = new Error(issues.map((issue) => [issue.code, issue.areaId, issue.channel].filter(Boolean).join(':')).join('; ')) as Error & {
+    code: string
+    details: { issues: QcValidationIssue[] }
+  }
+  error.code = 'INVALID_LABEL_SPEC'
+  error.details = { issues }
+  return error
+}
+
+function boundedDimension(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > 4096) {
+    const error = new Error('QC capture dimensions must be integers from 1 through 4096') as Error & { code: string }
+    error.code = 'INVALID_USAGE'
+    throw error
+  }
+  return value
+}
+
+function assertValidationReady(validation: DesignValidationReport): void {
+  const errors = validation.issues.filter((issue) => issue.severity === 'error')
+  if (errors.length > 0) throw structuredInvalidLabelSpec(errors)
+}
+
+function assertPlannedAreasPresent(plan: QcViewRequest[], areas: LabelAreaConfig[]): void {
+  const present = new Set(areas.map((area) => area.id))
+  const missing = [...new Set(plan.flatMap((request) => request.areaId && !present.has(request.areaId) ? [request.areaId] : []))]
+  if (missing.length === 0) return
+  throw structuredInvalidLabelSpec(missing.map((areaId) => ({
+    severity: 'error',
+    code: 'qc-missing-area',
+    message: `QC capture area is missing: ${areaId}`,
+    areaId,
+  })))
+}
+
+function canvasHasContribution(canvas: HTMLCanvasElement, neutral: number): boolean {
+  if (canvas.width < 1 || canvas.height < 1) return false
+  const context = canvas.getContext('2d')
+  if (!context) return false
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    if (pixels[offset] !== neutral || pixels[offset + 1] !== neutral || pixels[offset + 2] !== neutral) return true
+  }
+  return false
+}
+
+function assertCraftChannelContributions(
+  areas: LabelAreaConfig[],
+  bakeMap: Record<string, BakeResult>,
+  plan: QcViewRequest[],
+): void {
+  const areaIds = new Set(areas.map((area) => area.id))
+  const checked = new Set<string>()
+  const neutrals: Record<Exclude<QcChannel, 'color'>, number> = {
+    metalness: 0,
+    roughness: 255,
+    bump: 128,
+  }
+  for (const request of plan) {
+    if (!request.areaId || request.channel === 'color') continue
+    const key = `${request.areaId}:${request.channel}`
+    if (checked.has(key)) continue
+    checked.add(key)
+    const bake = areaIds.has(request.areaId) ? bakeMap[request.areaId] : undefined
+    const canvas = bake?.[request.channel]
+    if (canvas && canvasHasContribution(canvas, neutrals[request.channel])) continue
+    throw structuredInvalidLabelSpec([{
+      severity: 'error',
+      code: 'qc-empty-craft-channel',
+      message: `QC craft channel has no baked contribution: ${request.areaId}/${request.channel}`,
+      areaId: request.areaId,
+      channel: request.channel,
+    }])
+  }
+}
+
+function qcAreaEvidence(areas: LabelAreaConfig[], views: QcViewResult[]): QcAreaEvidence[] {
+  return areas.map((area) => ({
+    areaId: area.id,
+    meshIndex: area.meshIndex,
+    nodeName: area.nodeName,
+    ...(area.side ? { side: area.side } : {}),
+    surfaceMode: area.surfaceMode ?? 'overlay',
+    viewIds: views.filter((result) => result.view.areaId === area.id).map((result) => result.artifact.id),
+  }))
 }
 
 async function buildAreasFromSpec(spec: LabelSpecV2, assetUrls: Record<string, string>): Promise<LabelAreaConfig[]> {
@@ -255,6 +357,45 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         width, height, channel: 'preview',
       }
       return uploadArtifact(bootstrap, artifact)
+    },
+    renderQcEvidence: async (input) => {
+      await waitForBakes()
+      const width = boundedDimension(input?.width ?? 1440)
+      const height = boundedDimension(input?.height ?? 1440)
+      const areas = useLabelStore.getState().areas
+      const validation = designValidation()
+      assertValidationReady(validation)
+      const plan = buildQcCapturePlan({
+        preset: input?.preset ?? 'qc-standard',
+        width,
+        height,
+        areas,
+        customViews: input?.customViews ?? [],
+      })
+      assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+      assertCraftChannelContributions(areas, useLabelStore.getState().bakeMap, plan)
+      const views: QcViewResult[] = []
+      for (const request of plan) {
+        assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+        const captured = await captureAgentQcView(request)
+        assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+        const artifact = await uploadArtifact(bootstrap, {
+          id: `qc-${request.id}`,
+          fileName: `${request.id}.png`,
+          mimeType: 'image/png',
+          bytes: await blobBytes(captured.blob),
+          width,
+          height,
+          areaId: request.areaId,
+          channel: request.channel,
+        })
+        views.push({ artifact, view: request, camera: captured.camera })
+      }
+      if (views.length !== plan.length) throw new Error(`QC capture produced ${views.length} of ${plan.length} planned views`)
+      assertPlannedAreasPresent(plan, useLabelStore.getState().areas)
+      const finalValidation = designValidation()
+      assertValidationReady(finalValidation)
+      return { preset: 'qc-standard', views, areas: qcAreaEvidence(areas, views), validation: finalValidation }
     },
     exportArtifacts: async () => {
       await waitForBakes()
