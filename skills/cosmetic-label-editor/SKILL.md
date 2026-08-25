@@ -1,11 +1,11 @@
 ---
 name: cosmetic-label-editor
-description: Use when producing, validating, previewing, or exporting an approved cosmetic label design on a packaging GLB after cosmetic-label has completed the design and Editor Handoff, including front/back labels, full wraps, direct-print overlays, separate label meshes, neck bands, multilingual typography, craft/PBR effects, print checks, editable projects, PNG channels, labeled GLB export, or visual review.
+description: Use when producing, validating, live-previewing, or exporting an approved cosmetic label design on a packaging GLB after cosmetic-label has completed the design and Editor Handoff, including front/back labels, full wraps, direct-print overlays, separate label meshes, neck bands, multilingual typography, craft/PBR effects, print checks, editable projects, PNG channels, labeled GLB export, or visual review.
 ---
 
 # Cosmetic Label Editor
 
-Use the plugin tools as a declarative workflow. Do not automate the editor with DOM selectors.
+Control GLB Label Editor through its pure-local, machine-readable CLI. Label Spec v2 is the Agent-authored source of truth. The Web page is a user observation surface, not an Agent control surface.
 
 ## Mandatory upstream design gate
 
@@ -13,32 +13,58 @@ The end-to-end order is:
 
 `cosmetic-label -> cosmetic-label-editor`
 
-**REQUIRED SUB-SKILL:** You MUST use `$cosmetic-label` before every label editing or generation task. It must clarify the current request, produce or normalize the design proposal, and create the current **Editor Handoff** with its label spec sheet and mockup before this skill begins.
+**REQUIRED SUB-SKILL:** Use `$cosmetic-label` before every label editing or generation task. It must clarify the current request, preserve or normalize any approved direction, and create the current **Editor Handoff** with its label spec sheet and mockup before GLB production begins.
 
-Do not call `inspect_model`, `validate_label_spec`, `open_label_editor`, `apply_label_spec`, `render_label_preview`, or `export_label_assets` until that upstream work is complete. This gate also applies to approved user-supplied designs, existing editable projects, apparently minor edits, urgent delivery, and requests to skip clarification. Pass those inputs through `$cosmetic-label` to clarify the delta, preserve or normalize the approved direction, surface assumptions, and issue a fresh Editor Handoff; never accept them as a direct bypass.
+- This gate also applies to approved supplied designs, existing editable projects, minor edits, urgent delivery, and requests to skip clarification. For an exact edit, upstream clarification should describe the delta without redesigning the rest.
+- Do not silently change layout, copy, type, color, process, or hierarchy.
+- `approved` handoffs may proceed. `assumed_for_fast_run` handoffs may proceed only after surfacing assumptions. A non-empty `blockers` list stops production.
+- Resolve mesh selectors, UV ranges, surface mode, and model geometry from the inspected GLB in this skill.
 
-- Do not silently redesign the approved direction. Report any translation that changes layout, copy, type, color, process, or hierarchy.
-- `approved` handoffs may proceed. `assumed_for_fast_run` handoffs may proceed only after surfacing the assumptions. A non-empty `blockers` list stops production.
-- Mesh selectors, UV ranges, surface mode, and model geometry are intentionally not required upstream; resolve them from the inspected GLB here.
+## Resolve the local CLI
 
-## Mandatory live browser preview
+Resolve the launcher before production:
 
-Keep a visible browser preview open throughout every label-production run, including approved, urgent, uninterrupted, or no-takeover requests.
+1. In an installed plugin, use the executable at `bin/label-cli.mjs` relative to the plugin root. From this skill directory that is `../../bin/label-cli.mjs`.
+2. In a repository checkout, fall back to `scripts/label-cli.mjs` at the repository root.
+3. Invoke it with Node.js and always add `--json` when the command supports it.
+4. Treat `label-cli` in the commands below as the resolved absolute launcher path.
 
-- As soon as the first valid Label Spec exists, you MUST call `open_label_editor` with that spec and GLB, then open its tokenized URL in the user's available browser or browser-navigation tool. Do not merely return the URL. Do not wait until final delivery.
-- Keep the preview tab open while work continues. After each material change to layout, copy, typography, color, process, hierarchy, area, or asset, call `open_label_editor` with the updated spec and navigate the existing preview tab to the new URL.
-- Call the final `apply_label_spec` with `open_editor: true`, then navigate the preview tab to its returned `editorUrl` so the visible session matches the delivered artifacts.
-- A headless renderer, generated preview PNG, or URL shown only as text does not satisfy this requirement. If a visible browser cannot be opened or refreshed, report it as a blocker instead of continuing silently.
+Do not use MCP. Do not use computer use. Do not use DOM selectors. Do not navigate or click the preview. Do not call a browser plugin to open it.
 
-## Workflow
+## Mandatory live Web preview
 
-1. Verify that the current task has already used `$cosmetic-label` and received its current Editor Handoff, spec sheet, and mockup. If not, stop and invoke `$cosmetic-label` before any editor or MCP action. Then confirm status, exact copy, assets, assumptions, and blockers; return design-level omissions upstream rather than filling them by invention.
-2. Call `inspect_model` before choosing a surface. Use its exact `stableSelector` when names are duplicated.
-3. Translate the handoff into Label Spec v2. Keep layout, typography, process, and content hierarchy explicit. Use `replace` only for a separate label mesh; use `overlay` for bottle-body print, decals, and transparent surfaces.
-4. Call `validate_label_spec` before publishing. Treat ambiguous targets, missing assets/fonts, invalid crafts, and schema errors as blockers. Report print-readiness findings as warnings unless the user requires a production gate.
-5. Compare the validated preview against the upstream mockup and disclose material differences.
-6. Follow the mandatory live-browser-preview contract before continuing production and after every material design change.
-7. Prefer one `apply_label_spec` call with `open_editor: true` for the complete transaction. Require a labeled GLB, editable project, normalized spec, print manifest, preview, per-area Color/Metalness/Roughness/Bump PNGs, artifact manifest, and visible final editor session.
+Every production run must keep one visible, synchronized Web preview open from the first valid working Label Spec through final validation and user review.
+
+- Start `label-cli live <working-spec.json> --glb <model.glb> --json` as a foreground process in a dedicated terminal session that returns a reusable session handle; do not block the rest of the Agent workflow waiting for `live` to exit.
+- `live` automatically opens plugin-owned Playwright Chromium in read-only Agent preview mode. The Agent does not open a URL or control that browser.
+- Keep that terminal session running. Its first stdout value is the single JSON envelope; revision updates and recoverable errors arrive on stderr.
+- Every successful `patch --force` of the same working spec updates the already-open page without navigation or refresh.
+- An incomplete, malformed, or invalid watched file leaves the last valid preview visible. Read the error from stderr. Recover by rebuilding the last complete known value in a separate file, validating it, then using a revision-guarded empty `patch --force` transaction to atomically publish that valid file back to the watched path. Wait for `live` stderr to report the recovered revision.
+- If Chromium cannot start, the initial design cannot apply, or the live page/browser is lost, treat it as a production blocker. Restart `live` from the last valid working spec and confirm its revision before continuing.
+- Do not terminate the live session before final artifacts are produced and the requested review is complete. Close it with `SIGINT` or `SIGTERM` when the preview is no longer needed.
+
+The visible read-only page permits the user to orbit and zoom the model, switch 2D/3D/split view, select an area, and scroll inspection details. It intentionally omits design mutation, import, export, save, undo, redo, and destructive controls.
+
+## Revision-safe production workflow
+
+1. Confirm the Editor Handoff status, exact copy, assets, assumptions, and blockers. Return design-level omissions upstream instead of inventing them.
+2. Run `label-cli inspect <model.glb> --json`. Use the exact `stableSelector` where names are duplicated; never choose a target from a similar node name alone.
+3. Translate the handoff into a valid Label Spec v2 working file. Use `replace` only for a separate label mesh; use `overlay` for bottle-body print, decals, and transparent surfaces. Keep assets as allowed local paths.
+4. Run `label-cli validate <working-spec.json> --glb <model.glb> --json`. Fix schema, asset, target, font, and craft blockers before production. Report print-readiness findings as warnings unless the user requires a production gate.
+5. Start the mandatory live command and verify from its success envelope that it contains `keepAlive: true`, `previewUrl`, and the revision of the working spec. The implementation renders “Agent 实时预览 · 只读” for the user; do not inspect the page through Agent browser control.
+6. Before each change transaction, run `label-cli project <working-spec.json> --json`. Use its exact `revision` as `baseRevision` in an operations document.
+7. Express the complete intended delta as stable, id-addressed operations. Use `add-area`, `update-area`, `remove-area`, `add-layer`, `update-layer`, `remove-layer`, or `move-layer`; never depend on array positions for identity.
+8. Apply the transaction in place with `label-cli patch <working-spec.json> --operations <operations.json> --output <working-spec.json> --force --json`. This is the required `patch --force` path for the same working spec watched by `live`.
+9. Confirm that the patch envelope's new revision appears in `live` stderr before starting another transaction. Page status is for the user, not an Agent inspection channel. If patch returns `REVISION_CONFLICT`, run `project` again, review the current value, rebuild the operations document with the new `baseRevision`, and retry. Never overwrite the conflict blindly.
+10. When Agent visual reasoning is needed, run `label-cli preview <working-spec.json> --glb <model.glb> --output <preview.png> --view 3d --json` and inspect the generated PNG. This does not replace the user-facing live Web preview.
+11. Re-run `validate`, compare the final design with the upstream mockup, and disclose material translation differences.
+12. Publish with `label-cli apply <working-spec.json> --glb <model.glb> --output <new-output-dir> --json`. Require the labeled GLB, editable project, normalized spec, print manifest, preview, per-area Color/Metalness/Roughness/Bump PNGs, and artifact manifest.
+
+`project` and `patch` are pure Node operations. They do not start Playwright or a local HTTP server. `inspect`, model-aware `validate`, `preview`, `apply`, and `export` may use the plugin-owned browser renderer internally, but the Agent still controls them only through the CLI.
+
+## Explicit human takeover
+
+Use `label-cli open <working-spec.json> --glb <model.glb> --json` only when the user explicitly asks to edit the design manually. This is an explicit human takeover into the editable editor and is separate from the read-only live preview. Do not add `--open` to `apply` automatically, and do not navigate the returned URL on the user's behalf.
 
 ## Label decisions
 
@@ -52,4 +78,4 @@ Keep a visible browser preview open throughout every label-production run, inclu
 
 - Screen and GLB effects are design previews. Require supplier sampling for color, adhesion, die-cut, registration, opacity, and tactile finish.
 - Do not claim press-ready PDF/AI dielines, regulatory verification, or arbitrary freeform-surface flattening.
-- Never overwrite an output directory unless the user explicitly requests `force`.
+- Never overwrite a delivery directory unless the user explicitly requests `--force`. In-place `patch --force` is allowed only for the designated working spec because it is revision-guarded and atomically published.

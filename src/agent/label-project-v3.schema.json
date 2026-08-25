@@ -1,0 +1,282 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://realibox.local/schemas/label-project-v3.schema.json",
+  "title": "GLB Label Editor Project v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "modelFileName", "areas"],
+  "properties": {
+    "version": { "const": 3 },
+    "modelFileName": { "type": "string" },
+    "areas": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/area" } }
+  },
+  "$defs": {
+    "finiteNumber": { "type": "number" },
+    "vector3": {
+      "type": "array",
+      "prefixItems": [
+        { "$ref": "#/$defs/finiteNumber" },
+        { "$ref": "#/$defs/finiteNumber" },
+        { "$ref": "#/$defs/finiteNumber" }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "craftParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "foilColor": { "enum": ["gold", "silver", "rose", "champagne", "holographic", "custom"] },
+        "foilCustomColor": { "type": "string" },
+        "foilSpotName": { "type": "string" },
+        "gradientAngle": { "$ref": "#/$defs/finiteNumber" },
+        "highlight": { "$ref": "#/$defs/finiteNumber" },
+        "depth": { "$ref": "#/$defs/finiteNumber" },
+        "lightAngle": { "$ref": "#/$defs/finiteNumber" },
+        "intensity": { "$ref": "#/$defs/finiteNumber" },
+        "noise": { "$ref": "#/$defs/finiteNumber" },
+        "gloss": { "$ref": "#/$defs/finiteNumber" },
+        "strokeColor": { "type": "string" },
+        "strokeWidth": { "$ref": "#/$defs/finiteNumber" }
+      }
+    },
+    "craft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "params"],
+      "properties": {
+        "type": { "enum": ["foil", "emboss", "deboss", "matte", "uv", "stroke"] },
+        "params": { "$ref": "#/$defs/craftParams" }
+      }
+    },
+    "craftList": { "type": "array", "items": { "$ref": "#/$defs/craft" } },
+    "commonLayer": {
+      "type": "object",
+      "required": ["id", "x", "y", "rotation", "opacity", "visible", "locked", "zIndex", "craft"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "x": { "$ref": "#/$defs/finiteNumber" },
+        "y": { "$ref": "#/$defs/finiteNumber" },
+        "rotation": { "$ref": "#/$defs/finiteNumber" },
+        "opacity": { "$ref": "#/$defs/finiteNumber" },
+        "visible": { "type": "boolean" },
+        "locked": { "type": "boolean" },
+        "zIndex": { "$ref": "#/$defs/finiteNumber" },
+        "craft": { "$ref": "#/$defs/craftList" }
+      }
+    },
+    "textLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/commonLayer" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "text", "fontFamily", "fontSize", "fontWeight", "letterSpacing", "lineHeight", "color", "align", "italic", "x", "y", "rotation", "opacity", "visible", "locked", "zIndex", "craft"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "kind": { "const": "text" },
+            "text": { "type": "string" },
+            "fontFamily": { "type": "string", "minLength": 1 },
+            "fontSize": { "$ref": "#/$defs/finiteNumber" },
+            "fontWeight": { "oneOf": [{ "$ref": "#/$defs/finiteNumber" }, { "enum": ["normal", "bold"] }] },
+            "letterSpacing": { "$ref": "#/$defs/finiteNumber" },
+            "lineHeight": { "$ref": "#/$defs/finiteNumber" },
+            "width": { "type": "number", "exclusiveMinimum": 0 },
+            "color": { "type": "string", "minLength": 1 },
+            "align": { "enum": ["left", "center", "right"] },
+            "italic": { "type": "boolean" },
+            "direction": { "enum": ["horizontal", "vertical"] },
+            "writingDirection": { "enum": ["auto", "ltr", "rtl"] },
+            "language": { "type": "string" },
+            "x": { "$ref": "#/$defs/finiteNumber" },
+            "y": { "$ref": "#/$defs/finiteNumber" },
+            "rotation": { "$ref": "#/$defs/finiteNumber" },
+            "opacity": { "$ref": "#/$defs/finiteNumber" },
+            "visible": { "type": "boolean" },
+            "locked": { "type": "boolean" },
+            "zIndex": { "$ref": "#/$defs/finiteNumber" },
+            "craft": { "$ref": "#/$defs/craftList" }
+          }
+        }
+      ]
+    },
+    "imageLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/commonLayer" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "src", "naturalWidth", "naturalHeight", "width", "height", "x", "y", "rotation", "opacity", "visible", "locked", "zIndex", "craft"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "kind": { "const": "image" },
+            "src": { "type": "string", "minLength": 1 },
+            "naturalWidth": { "$ref": "#/$defs/finiteNumber" },
+            "naturalHeight": { "$ref": "#/$defs/finiteNumber" },
+            "width": { "$ref": "#/$defs/finiteNumber" },
+            "height": { "$ref": "#/$defs/finiteNumber" },
+            "x": { "$ref": "#/$defs/finiteNumber" },
+            "y": { "$ref": "#/$defs/finiteNumber" },
+            "rotation": { "$ref": "#/$defs/finiteNumber" },
+            "opacity": { "$ref": "#/$defs/finiteNumber" },
+            "visible": { "type": "boolean" },
+            "locked": { "type": "boolean" },
+            "zIndex": { "$ref": "#/$defs/finiteNumber" },
+            "craft": { "$ref": "#/$defs/craftList" }
+          }
+        }
+      ]
+    },
+    "shapeGeometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sides": { "$ref": "#/$defs/finiteNumber" },
+        "points": { "$ref": "#/$defs/finiteNumber" },
+        "innerRatio": { "$ref": "#/$defs/finiteNumber" },
+        "amplitude": { "$ref": "#/$defs/finiteNumber" },
+        "frequency": { "$ref": "#/$defs/finiteNumber" },
+        "arrowStart": { "type": "boolean" },
+        "arrowEnd": { "type": "boolean" },
+        "parallel": { "type": "boolean" },
+        "dash": { "type": "array", "items": { "$ref": "#/$defs/finiteNumber" } },
+        "inset": { "$ref": "#/$defs/finiteNumber" },
+        "rows": { "$ref": "#/$defs/finiteNumber" },
+        "columns": { "$ref": "#/$defs/finiteNumber" },
+        "gap": { "$ref": "#/$defs/finiteNumber" }
+      }
+    },
+    "shapeLayer": {
+      "allOf": [
+        { "$ref": "#/$defs/commonLayer" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "shape", "width", "height", "fill", "stroke", "strokeWidth", "cornerRadius", "x", "y", "rotation", "opacity", "visible", "locked", "zIndex", "craft"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "kind": { "const": "shape" },
+            "shape": { "enum": ["rectangle", "ellipse", "triangle", "diamond", "polygon", "star", "line", "wave", "burst", "cross", "bracket", "dot-grid", "frame"] },
+            "geometry": { "$ref": "#/$defs/shapeGeometry" },
+            "width": { "$ref": "#/$defs/finiteNumber" },
+            "height": { "$ref": "#/$defs/finiteNumber" },
+            "fill": { "type": "string", "minLength": 1 },
+            "stroke": { "type": "string", "minLength": 1 },
+            "strokeWidth": { "$ref": "#/$defs/finiteNumber" },
+            "cornerRadius": { "$ref": "#/$defs/finiteNumber" },
+            "x": { "$ref": "#/$defs/finiteNumber" },
+            "y": { "$ref": "#/$defs/finiteNumber" },
+            "rotation": { "$ref": "#/$defs/finiteNumber" },
+            "opacity": { "$ref": "#/$defs/finiteNumber" },
+            "visible": { "type": "boolean" },
+            "locked": { "type": "boolean" },
+            "zIndex": { "$ref": "#/$defs/finiteNumber" },
+            "craft": { "$ref": "#/$defs/craftList" }
+          }
+        }
+      ]
+    },
+    "layer": { "oneOf": [{ "$ref": "#/$defs/textLayer" }, { "$ref": "#/$defs/imageLayer" }, { "$ref": "#/$defs/shapeLayer" }] },
+    "remap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "axis", "origin", "radius", "wrap", "offset", "planarBox"],
+      "properties": {
+        "mode": { "enum": ["cylindrical", "planar"] },
+        "axis": { "$ref": "#/$defs/vector3" },
+        "origin": { "$ref": "#/$defs/vector3" },
+        "radius": { "type": "number", "exclusiveMinimum": 0 },
+        "wrap": { "type": "number", "exclusiveMinimum": 0 },
+        "offset": { "$ref": "#/$defs/finiteNumber" },
+        "mirrorU": { "type": "boolean" },
+        "planarBox": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min", "max"],
+          "properties": { "min": { "$ref": "#/$defs/vector3" }, "max": { "$ref": "#/$defs/vector3" } }
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uStart", "uWidth", "vStart", "vHeight"],
+      "properties": {
+        "uStart": { "type": "number", "minimum": 0, "maximum": 1 },
+        "uWidth": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "vStart": { "type": "number", "minimum": 0, "maximum": 1 },
+        "vHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "aspect"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "aspect": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "paper": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "color", "opacity"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "color": { "type": "string" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "printSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["physicalWidthMm", "physicalHeightMm", "bleedMm", "cornerRadiusMm", "minTextHeightMm", "dieCutShape", "spotColors"],
+      "properties": {
+        "physicalWidthMm": { "type": "number", "exclusiveMinimum": 0 },
+        "physicalHeightMm": { "type": "number", "exclusiveMinimum": 0 },
+        "bleedMm": { "type": "number", "minimum": 0 },
+        "cornerRadiusMm": { "type": "number", "minimum": 0 },
+        "minTextHeightMm": { "type": "number", "exclusiveMinimum": 0 },
+        "dieCutShape": { "enum": ["rectangle", "rounded-rectangle", "custom"] },
+        "spotColors": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "font": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "dataUrl"],
+      "properties": { "name": { "type": "string", "minLength": 1 }, "dataUrl": { "type": "string", "minLength": 1 } }
+    },
+    "area": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "meshIndex", "nodeName", "surfaceMode", "remap", "range", "canvas", "paper", "layers", "globalCraft", "fonts", "referenceVisible"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "meshIndex": { "type": "integer", "minimum": 0 },
+        "nodeName": { "type": "string", "minLength": 1 },
+        "surfaceMode": { "enum": ["overlay", "replace"] },
+        "side": { "enum": ["front", "back"] },
+        "remap": { "$ref": "#/$defs/remap" },
+        "range": { "$ref": "#/$defs/range" },
+        "canvas": { "$ref": "#/$defs/canvas" },
+        "paper": { "$ref": "#/$defs/paper" },
+        "printSpec": { "$ref": "#/$defs/printSpec" },
+        "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
+        "globalCraft": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["craft"],
+          "properties": { "craft": { "$ref": "#/$defs/craftList" } }
+        },
+        "fonts": { "type": "array", "items": { "$ref": "#/$defs/font" } },
+        "referenceVisible": { "type": "boolean" },
+        "axisMin": { "$ref": "#/$defs/finiteNumber" },
+        "axisMax": { "$ref": "#/$defs/finiteNumber" }
+      }
+    }
+  }
+}

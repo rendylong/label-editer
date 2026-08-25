@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "glb-label-editor": {
-      "command": "node",
-      "args": ["./scripts/mcp-server.mjs"],
-      "cwd": "."
-    }
-  }
-}

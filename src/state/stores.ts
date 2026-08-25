@@ -85,6 +85,11 @@ interface LabelState {
   addArea: (area: Omit<LabelAreaConfig, 'undoStack' | 'redoStack' | 'id'> & { id?: string }) => string
   removeArea: (id: string) => void
   activateArea: (id: string | null) => void
+  /** Activate an area together with its matching mesh/remap runtime in one commit. */
+  activateAreaWithRuntime: (
+    id: string,
+    runtime: { remapOutput: RemapOutput; meshAccessors: MeshAccessors },
+  ) => void
   /** mutation 网关：对指定区域应用不可变更新并记录撤销快照 */
   applyAreaOp: (areaId: string, updater: (a: LabelAreaConfig) => LabelAreaConfig, opts?: { commit?: boolean }) => void
   /** 作用于激活区域的撤销/重做 */
@@ -183,6 +188,21 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       selectedLayerIds: [],
     })
     useUiStore.getState().setWorkspaceTab(area ? 'labels' : 'model')
+  },
+
+  activateAreaWithRuntime: (id, runtime) => {
+    const area = get().areas.find((candidate) => candidate.id === id)
+    if (!area) throw new Error(`无法激活不存在的贴标区域：${id}`)
+    set({
+      activeAreaId: area.id,
+      activeArea: area,
+      meshIndex: area.meshIndex,
+      nodeName: area.nodeName,
+      remapOutput: runtime.remapOutput,
+      meshAccessors: runtime.meshAccessors,
+      selectedLayerIds: [],
+    })
+    useUiStore.getState().setWorkspaceTab('labels')
   },
 
   applyAreaOp: (areaId, updater, opts) => {
@@ -347,6 +367,11 @@ function cylinderHeight(mesh: MeshAccessors, remap: RemapParams): number {
 
 // ── uiStore ───────────────────────────────────────────────────────────
 export type EditorViewMode = '2d' | 'split' | '3d'
+export interface AgentPreviewStatus {
+  revision: string
+  state: 'ready' | 'error'
+  message?: string
+}
 
 interface UiState {
   /** 仅供独立贴标区域设置流程使用。 */
@@ -356,6 +381,7 @@ interface UiState {
   workspaceTab: 'labels' | 'model'
   /** 中央编辑工作区视图；不参与项目数据、图层选择或撤销栈。 */
   editorViewMode: EditorViewMode
+  agentPreviewStatus: AgentPreviewStatus | null
   canvasZoom: number
   showSeam: boolean
   channelView: 'color' | 'metalness' | 'roughness' | 'bump' | null
@@ -370,6 +396,7 @@ interface UiState {
   setWorkspaceTab: (tab: UiState['workspaceTab']) => void
   setMode: (m: 'browse' | 'design') => void
   setEditorViewMode: (mode: EditorViewMode) => void
+  setAgentPreviewStatus: (status: AgentPreviewStatus) => void
   setCanvasZoom: (z: number) => void
   toggleSeam: () => void
   setChannelView: (c: UiState['channelView']) => void
@@ -386,6 +413,7 @@ export const useUiStore = create<UiState>((set) => ({
   view: 'editor',
   workspaceTab: 'model',
   editorViewMode: '2d',
+  agentPreviewStatus: null,
   canvasZoom: 1,
   showSeam: true,
   channelView: null,
@@ -399,6 +427,7 @@ export const useUiStore = create<UiState>((set) => ({
   setView: (view) => set({ view }),
   setWorkspaceTab: (workspaceTab) => set({ workspaceTab }),
   setEditorViewMode: (editorViewMode) => set({ editorViewMode }),
+  setAgentPreviewStatus: (agentPreviewStatus) => set({ agentPreviewStatus }),
   setCanvasZoom: (canvasZoom) => set({ canvasZoom }),
   toggleSeam: () => set((s) => ({ showSeam: !s.showSeam })),
   setChannelView: (channelView) => set({ channelView }),

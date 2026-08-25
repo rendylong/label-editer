@@ -43,6 +43,7 @@ const LABEL_CANVAS_GUIDES = {
 
 interface Props {
   displayWidth: number
+  readOnly?: boolean
 }
 
 interface ExportVisibilityNode {
@@ -157,7 +158,7 @@ interface ImageBits {
   preview: HTMLCanvasElement
 }
 
-export function LabelCanvas({ displayWidth }: Props): React.JSX.Element {
+export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JSX.Element {
   const config = useLabelStore((s) => s.activeArea)
   const areaId = config?.id ?? null
   const setBake = useLabelStore((s) => s.setBake)
@@ -181,8 +182,8 @@ export function LabelCanvas({ displayWidth }: Props): React.JSX.Element {
   )
   const selectedLayerIdSet = useMemo(() => new Set(selectedLayerIds), [selectedLayerIds])
   const transformableLayerIds = useMemo(
-    () => layers.filter((layer) => selectedLayerIdSet.has(layer.id) && !layer.locked).map((layer) => layer.id),
-    [layers, selectedLayerIdSet],
+    () => readOnly ? [] : layers.filter((layer) => selectedLayerIdSet.has(layer.id) && !layer.locked).map((layer) => layer.id),
+    [layers, readOnly, selectedLayerIdSet],
   )
 
   const selectFromClick = (clickedId: string | null, shiftKey: boolean): void => {
@@ -346,7 +347,7 @@ export function LabelCanvas({ displayWidth }: Props): React.JSX.Element {
           width={displayWidth}
           height={displayHeight}
           onMouseDown={(e) => {
-            if (e.target === e.target.getStage()) selectFromClick(null, e.evt.shiftKey)
+            if (!readOnly && e.target === e.target.getStage()) selectFromClick(null, e.evt.shiftKey)
           }}
         >
           {/* 设计层（画布坐标） */}
@@ -389,8 +390,8 @@ export function LabelCanvas({ displayWidth }: Props): React.JSX.Element {
                   width={textLayout?.width}
                   height={textLayout?.height}
                   opacity={layer.visible ? baseOpacity : 0}
-                  draggable={!layer.locked && layer.visible}
-                  listening={layer.visible}
+                  draggable={!readOnly && !layer.locked && layer.visible}
+                  listening={!readOnly && layer.visible}
                   onClick={(e) => {
                     e.cancelBubble = true
                     selectFromClick(layer.id, e.evt.shiftKey)
