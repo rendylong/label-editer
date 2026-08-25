@@ -4,6 +4,23 @@ import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 
+function markdownSection(document: string, heading: string): string {
+  const marker = `## ${heading}`
+  const start = document.indexOf(marker)
+  expect(start, `missing ${marker}`).toBeGreaterThanOrEqual(0)
+  const next = document.indexOf('\n## ', start + marker.length)
+  return document.slice(start, next === -1 ? undefined : next)
+}
+
+function expectTextInOrder(section: string, fragments: string[]): void {
+  let cursor = 0
+  for (const fragment of fragments) {
+    const index = section.indexOf(fragment, cursor)
+    expect(index, `missing or out-of-order text: ${fragment}`).toBeGreaterThanOrEqual(cursor)
+    cursor = index + fragment.length
+  }
+}
+
 describe('plugin skill bundle', () => {
   it('installs both cosmetic label skills from the plugin skills root', async () => {
     const manifest = JSON.parse(
@@ -88,16 +105,53 @@ describe('plugin skill bundle', () => {
       'utf8',
     )
 
-    expect(skill).toContain('## Mandatory quality control')
-    expect(skill).toContain('references/quality-control.md')
-    expect(skill).toContain('label-cli qc')
-    expect(skill).toContain('qc-standard')
-    expect(skill).toContain('qc-manifest.json')
-    expect(skill).toContain('manifest revision')
-    expect(skill).toContain('round-0')
-    expect(skill).toContain('maximum of three repair rounds')
-    expect(skill).toContain('Do not confirm delivery')
-    expect(skill).toContain('GLB cross-check')
+    const qcSection = markdownSection(skill, 'Mandatory quality control')
+    const evidenceSection = markdownSection(rubric, 'Evidence integrity and revision')
+
+    expect(qcSection).toContain('references/quality-control.md')
+    expect(qcSection).toContain('label-cli qc')
+    expect(qcSection).toContain('qc-standard')
+    expect(qcSection).toContain('round-0')
+    expect(qcSection).toContain('maximum of three repair rounds')
+
+    expect([...evidenceSection.matchAll(/`(qc-model-[^`]+)`/g)].map((match) => match[1])).toEqual([
+      'qc-model-front',
+      'qc-model-back',
+      'qc-model-left',
+      'qc-model-right',
+      'qc-model-front-right',
+      'qc-model-back-left',
+    ])
+    for (const artifact of [
+      'qc-area-<area-id>-face',
+      'qc-area-<area-id>-craft',
+      'qc-area-<area-id>-metalness',
+      'qc-area-<area-id>-roughness',
+      'qc-area-<area-id>-bump',
+    ]) {
+      expect(evidenceSection).toContain(`\`${artifact}\``)
+    }
+    expect(evidenceSection).toContain('every PBR artifact included by the manifest')
+
+    expectTextInOrder(qcSection, [
+      'Any blocking `fail`',
+      '`baseRevision`',
+      '`patch --force`',
+      'exact revision returned by the patch',
+      '`ready` for that exact revision',
+      '`validate`',
+      'new immutable output directory',
+      '`qc-manifest.json.input.revision` must exactly equal the current `project` revision',
+      'Inspect every required image again',
+    ])
+    expect(evidenceSection).toContain('`qc-manifest.json.input.revision` must exactly equal the current `project` revision')
+    expect(qcSection).toContain('visual defect, evidence gap, or stale/mismatched revision')
+    expect(qcSection).toContain('may require recapture rather than a content mutation')
+    expect(qcSection).toContain('cannot bypass the gated sequence')
+    expect(qcSection).toMatch(/Do not apply\/export[\s\S]{0,120}Do not confirm delivery/)
+    expect(qcSection).toMatch(/output-manifest consistency[\s\S]{0,120}GLB cross-check/)
+    expect(qcSection).not.toContain('On a visual `fail`')
+    expect(qcSection).not.toMatch(/(?:evidence gap|stale\/mismatched revision)[^\n]*(?:may|can) (?:skip|bypass)/i)
 
     for (const heading of [
       'Target and labeled surface',
@@ -130,12 +184,14 @@ describe('plugin skill bundle', () => {
       'utf8',
     )
 
-    expect(skill).toContain('deterministic validation does not replace visual inspection')
-    expect(skill).toContain('Never overwrite an earlier QC round')
-    expect(skill).toContain('Warnings remain visible')
-    expect(skill).not.toContain('schema validation alone proves quality')
-    expect(skill).not.toContain('silently ignore warnings')
-    expect(skill).not.toContain('overwrite earlier QC rounds when convenient')
+    const qcSection = markdownSection(skill, 'Mandatory quality control')
+
+    expect(qcSection).toContain('deterministic validation does not replace visual inspection')
+    expect(qcSection).toContain('Never overwrite an earlier QC round')
+    expect(qcSection).toContain('Warnings remain visible')
+    expect(qcSection).not.toContain('schema validation alone proves quality')
+    expect(qcSection).not.toContain('silently ignore warnings')
+    expect(qcSection).not.toContain('overwrite earlier QC rounds when convenient')
   })
 
   it('provides explicit default prompts for both skills', async () => {

@@ -20,6 +20,7 @@ async function createPluginSource(root: string): Promise<void> {
     'scripts',
     'skills/cosmetic-label',
     'skills/cosmetic-label-editor',
+    'skills/cosmetic-label-editor/references',
     'src',
   ]) {
     await mkdir(path.join(root, directory), { recursive: true })
@@ -60,6 +61,10 @@ process.stdout.write(JSON.stringify({ ok: true, operation: 'schema', data: { sch
   await chmod(path.join(root, 'scripts/label-cli.mjs'), 0o755)
   await writeFile(path.join(root, 'skills/cosmetic-label/SKILL.md'), '# design')
   await writeFile(path.join(root, 'skills/cosmetic-label-editor/SKILL.md'), '# editor')
+  await writeFile(
+    path.join(root, 'skills/cosmetic-label-editor/references/quality-control.md'),
+    '# Quality control fixture',
+  )
   await writeFile(path.join(root, 'src/main.ts'), 'export {}')
 }
 
@@ -86,6 +91,7 @@ describe('GLB label editor installer', () => {
     expect(files.has('TERMS.md')).toBe(true)
     expect(files.has('assets/icon.png')).toBe(true)
     expect(files.has('docs/plugin-directory-submission.md')).toBe(true)
+    expect(files.has('skills/cosmetic-label-editor/references/quality-control.md')).toBe(true)
     expect(files.get('scripts/install-plugin.mjs')).toBe(0o755)
     expect(files.has('.mcp.json')).toBe(false)
     expect(files.has('scripts/mcp-server.mjs')).toBe(false)
@@ -166,6 +172,10 @@ esac
       .resolves.toBe('# French')
     await expect(readFile(path.join(installRoot, 'plugin/assets/icon.png'), 'utf8'))
       .resolves.toBe('icon')
+    await expect(readFile(
+      path.join(installRoot, 'plugin/skills/cosmetic-label-editor/references/quality-control.md'),
+      'utf8',
+    )).resolves.toBe('# Quality control fixture')
 
     const installedManifest = JSON.parse(
       await readFile(path.join(installRoot, 'plugin/.codex-plugin/plugin.json'), 'utf8'),

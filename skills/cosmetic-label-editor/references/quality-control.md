@@ -7,7 +7,7 @@ Use this rubric for every production QC run. `label-cli qc` produces evidence; t
 Before scoring visual quality:
 
 1. Run `label-cli project <working-spec.json> --json` and record its current `revision`.
-2. Read `qc-manifest.json`. Its `input.revision` must exactly equal the current project revision.
+2. Enforce the equality gate: `qc-manifest.json.input.revision` must exactly equal the current `project` revision.
 3. Require the complete `qc-standard` evidence set and verify that every required artifact id resolves to the manifest's relative PNG path. A missing file, missing hash, duplicate id, unsafe path, unreadable image, incomplete area, or stale revision is a blocking `fail`; do not infer a verdict from partial evidence.
 4. Require these model artifacts: `qc-model-front`, `qc-model-back`, `qc-model-left`, `qc-model-right`, `qc-model-front-right`, and `qc-model-back-left`.
 5. For every label area `<area-id>`, require `qc-area-<area-id>-face` and `qc-area-<area-id>-craft`, plus every PBR artifact included by the manifest: `qc-area-<area-id>-metalness`, `qc-area-<area-id>-roughness`, and/or `qc-area-<area-id>-bump`.
@@ -104,6 +104,14 @@ Rendered craft is a visual simulation and does not certify press-ready separatio
 
 ## Repair and recheck evidence
 
-Round 0 is mandatory. If a blocking check fails, patch the same working Spec using the current `baseRevision`, wait until the live preview reports the new ready revision, validate again, and capture the next immutable round. Never overwrite an earlier round.
+Round 0 is mandatory. Any blocking `fail`—a visual defect, evidence gap, stale/mismatched revision, or incomplete required image set—uses this same ordered sequence:
 
-After a repair, inspect every changed area and every view affected by a target, mapping, material, craft, or shared asset change. Recheck evidence integrity against the new current revision before comparing images with the prior round. Only rounds 1, 2, and 3 are allowed as automated repairs after round 0. If round 3 still fails, preserve the live preview and all evidence, stop changing the Spec, and report the remaining blockers without apply/export or delivery confirmation.
+1. Run `project`, take its current revision as `baseRevision`, and publish a revision-safe `patch --force` transaction to the same working Spec.
+2. Capture the exact revision returned by the patch and wait until the live preview reports `ready` for that exact revision.
+3. Run `validate` on that Spec/model, then run `qc` into the next immutable round directory. Never overwrite an earlier round.
+4. Run `project` again and require `qc-manifest.json.input.revision` to exactly equal the current project revision.
+5. Inspect every required image again, rewrite the complete rubric verdict, and compare the result with the prior round.
+
+Stale evidence may require recapture rather than a content mutation. Use a revision-guarded empty patch when no content delta is needed; stale evidence still cannot bypass the gated sequence.
+
+Repeat the complete sequence for every blocking failure, with only rounds 1, 2, and 3 allowed after round 0. Recheck every changed area and every view affected by a target, mapping, material, craft, or shared asset change as part of the full image inspection. If round 3 still fails, preserve the live preview and all evidence, stop changing the Spec, and report the remaining blockers without apply/export or delivery confirmation.
