@@ -40,6 +40,9 @@ function averageFaceNormals(
       : triangleNormal(position, matrixWorld, offset, offset + 1, offset + 2)
     if (face.lengthSq() > NORMAL_EPSILON) normal.add(face)
   }
+  // World-space triangle winding reverses under reflection, while the normal
+  // matrix used by renderer-facing vertex normals does not.
+  if (matrixWorld.determinant() < 0) normal.multiplyScalar(-1)
   return normal
 }
 
@@ -68,9 +71,6 @@ export function surfaceFrameForGeometry(
     for (let index = 0; index < vertexNormals.count; index += 1) {
       normal.add(point.fromBufferAttribute(vertexNormals, index).applyMatrix3(normalMatrix).normalize())
     }
-    // A normal matrix preserves geometric orientation under reflection; triangle
-    // winding does not. Apply the matrix parity explicitly to retain the visible side.
-    if (matrixWorld.determinant() < 0) normal.multiplyScalar(-1)
   }
   if (normal.lengthSq() <= NORMAL_EPSILON) normal.copy(averageFaceNormals(geometry, position, matrixWorld))
   if (normal.lengthSq() <= NORMAL_EPSILON || !Number.isFinite(normal.lengthSq())) {
@@ -98,7 +98,10 @@ export function cameraForFrame(
   direction: THREE.Vector3
   up: THREE.Vector3
 } {
-  if (direction.lengthSq() <= NORMAL_EPSILON) invalidUsage('camera direction must be non-zero')
+  if (![direction.x, direction.y, direction.z].every(Number.isFinite)
+    || direction.lengthSq() <= NORMAL_EPSILON) {
+    invalidUsage('camera direction must be finite and non-zero')
+  }
   if (!Number.isFinite(options.fov) || options.fov <= 0 || options.fov >= 180
     || !Number.isFinite(options.aspect) || options.aspect <= 0
     || !Number.isFinite(options.margin) || options.margin <= 0) {
@@ -118,13 +121,25 @@ export function cameraForFrame(
   const up = upReference.addScaledVector(normalizedDirection, -upReference.dot(normalizedDirection)).normalize()
   const right = normalizedDirection.clone().cross(up).normalize()
   const halfSize = frame.size.clone().multiplyScalar(0.5)
-  const halfWidth = Math.abs(right.x) * halfSize.x + Math.abs(right.y) * halfSize.y + Math.abs(right.z) * halfSize.z
-  const halfHeight = Math.abs(up.x) * halfSize.x + Math.abs(up.y) * halfSize.y + Math.abs(up.z) * halfSize.z
   const verticalHalfFov = THREE.MathUtils.degToRad(options.fov) / 2
   const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * options.aspect)
-  const verticalDistance = halfHeight / Math.tan(verticalHalfFov)
-  const horizontalDistance = halfWidth / Math.tan(horizontalHalfFov)
-  const distance = Math.max(verticalDistance, horizontalDistance, ...sizeComponents) * options.margin
+  const verticalSlope = Math.tan(verticalHalfFov)
+  const horizontalSlope = Math.tan(horizontalHalfFov)
+  let fitDistance = 0
+  for (const x of [-1, 1]) {
+    for (const y of [-1, 1]) {
+      for (const z of [-1, 1]) {
+        const offset = new THREE.Vector3(x * halfSize.x, y * halfSize.y, z * halfSize.z)
+        const depthOffset = offset.dot(normalizedDirection)
+        fitDistance = Math.max(
+          fitDistance,
+          depthOffset + Math.abs(offset.dot(up)) / verticalSlope,
+          depthOffset + Math.abs(offset.dot(right)) / horizontalSlope,
+        )
+      }
+    }
+  }
+  const distance = Math.max(fitDistance, ...sizeComponents) * options.margin
   const target = frame.center.clone()
 
   return {
