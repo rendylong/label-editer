@@ -5,6 +5,7 @@ import { exportGlb, type CrossCheckResult } from '../glb/rebuild'
 import { canvasToPngBytes } from '../glb/textures'
 import { buildPrintManifest } from '../label/printReadiness'
 import type { LabelAreaConfig } from '../label/types'
+import { hasRenderableWhiteUnderbaseDeclaration } from '../label/whiteUnderbase'
 
 export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase'
 
@@ -65,6 +66,9 @@ export async function createChannelArtifact(
   bake: BakeInput,
   channel: ArtifactChannel,
 ): Promise<BrowserArtifact> {
+  if (channel === 'white_underbase' && !hasRenderableWhiteUnderbaseDeclaration(area)) {
+    throw new Error(`贴标区域「${area.name}」没有可渲染的 white_underbase 声明`)
+  }
   const canvas = channel === 'white_underbase' ? bake.whiteUnderbase : bake[channel]
   if (!canvas) throw new Error(`贴标区域「${area.name}」没有 ${channel} 烘焙通道`)
   return {
@@ -89,7 +93,8 @@ export async function createAreaChannelArtifacts(
     if (!bake) throw new Error(`贴标区域「${area.name}」缺少烘焙结果`)
     for (const channel of ['color', 'metalness', 'roughness', 'bump', 'white_underbase'] as const) {
       const present = channel === 'white_underbase' ? bake.whiteUnderbase : bake[channel]
-      if (present) artifacts.push(await createChannelArtifact(area, bake, channel))
+      const declared = channel !== 'white_underbase' || hasRenderableWhiteUnderbaseDeclaration(area)
+      if (present && declared) artifacts.push(await createChannelArtifact(area, bake, channel))
     }
   }
   return artifacts

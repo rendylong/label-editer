@@ -256,6 +256,11 @@ export interface CanvasSpec {
   aspect: number
 }
 
+export interface LegacyPaperCarrierProvenance {
+  /** Snapshot used to retire provenance when the migrated legacy appearance is edited. */
+  paper: LabelPaper
+}
+
 /** 贴标区域 = 一个可独立编辑的标签面（多区域系统核心对象）。 */
 export interface LabelAreaConfig {
   /** 区域唯一 id */
@@ -280,7 +285,7 @@ export interface LabelAreaConfig {
   /** Physical carrier selected by the approved design contract. */
   carrier?: CarrierMode
   /** Runtime-only provenance for a no-carrier legacy project migrated from enabled paper. */
-  legacyPaperCarrier?: true
+  legacyPaperCarrier?: LegacyPaperCarrierProvenance
   artboard?: PhysicalArtboard
   substrate?: SubstrateSpec
   placementPolicy?: TargetAspectPolicy

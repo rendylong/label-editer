@@ -20,6 +20,16 @@ export interface PreparedArea {
   normalPng?: Uint8Array
 }
 
+function neutralMaskLike(reference: HTMLCanvasElement, tone: 0 | 255): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = reference.width
+  canvas.height = reference.height
+  const context = canvas.getContext('2d')!
+  context.fillStyle = `rgb(${tone},${tone},${tone})`
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  return canvas
+}
+
 /** 为所有区域准备导出数据（每个区域独立提取网格 + 重算 remap + 编码纹理）。 */
 export async function prepareAllAreas(glbBytes: Uint8Array, areas: LabelAreaConfig[], bakeMap: Record<string, BakeInput>): Promise<PreparedArea[]> {
   const doc = await readGlb(glbBytes)
@@ -30,8 +40,10 @@ export async function prepareAllAreas(glbBytes: Uint8Array, areas: LabelAreaConf
     const mesh = extractMeshAccessors(doc, area.meshIndex)
     const remap: RemapOutput = computeRemap(mesh, area.remap, area.range, { exteriorOnly: area.surfaceMode === 'overlay' })
     const colorPng = await canvasToPngBytes(bake.color)
-    const metalRoughPng = bake.metalness && bake.roughness
-      ? await canvasToPngBytes(packMetalRough(bake.metalness, bake.roughness))
+    const metalness = bake.metalness ?? (bake.roughness ? neutralMaskLike(bake.roughness, 0) : undefined)
+    const roughness = bake.roughness ?? (bake.metalness ? neutralMaskLike(bake.metalness, 255) : undefined)
+    const metalRoughPng = metalness && roughness
+      ? await canvasToPngBytes(packMetalRough(metalness, roughness))
       : undefined
     const normalPng = bake.bump ? await canvasToPngBytes(bumpToNormal(bake.bump)) : undefined
     out.push({

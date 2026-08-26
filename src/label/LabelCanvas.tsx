@@ -29,7 +29,7 @@ import {
   type MaskDrawMode,
   type TextMeasureMetrics,
 } from './craft'
-import { resolveCarrierSurface, resolveLabelPaper } from './paper'
+import { fitCarrierBoundaryToCanvas, resolveCarrierSurface, resolveLabelPaper } from './paper'
 import { normalizeShapeLayer } from './shapeGeometry'
 import { commitLayerGesture, nextLayerSelection, type LayerNodeTransform } from './selection'
 import { useFlushableDebouncedBake } from './useFlushableDebouncedBake'
@@ -338,12 +338,17 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       applyPhysicalColorSurface(cctx, color.width, color.height, renderGlobalCraft)
       clearTransparentCanvasBorder(cctx, color.width, color.height)
     }
-    const drawLayer = (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode) => {
-      if (layer.kind === 'text') drawTextShape(ctx, layer, gray, fontCssFor(layer.fontFamily, cfg.fonts), mode)
+    const drawLayer = (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode): boolean => {
+      if (layer.kind === 'text') {
+        if (layer.text.trim().length === 0) return false
+        drawTextShape(ctx, layer, gray, fontCssFor(layer.fontFamily, cfg.fonts), mode)
+      }
       else if (layer.kind === 'image') {
         const image = imgBits.get(layer.id)?.original
-        if (image) drawImageMaskShape(ctx, layer, image, gray)
+        if (!image) return false
+        drawImageMaskShape(ctx, layer, image, gray)
       } else drawShapeMask(ctx, layer, gray, mode)
+      return true
     }
     const masks = renderCarrierMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, cfg)
     const textOverflowLayerIds = renderLayers.flatMap((layer) => {
@@ -435,6 +440,9 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
   const sorted = [...layers].sort((a, b) => a.zIndex - b.zIndex)
   const carrierSurface = resolveCarrierSurface(config)
   const substrateBoundary = carrierSurface.boundary
+  const customBoundaryTransform = substrateBoundary?.shape === 'custom'
+    ? fitCarrierBoundaryToCanvas(substrateBoundary, spec)
+    : undefined
   // 显示尺寸 → 画布坐标 1:1 缩放：Stage 显示 displayWidth×displayHeight，
   // 内部所有元素统一使用画布坐标（canvas.width×canvas.height），经 contentScale 映射。
   const contentScale = spec.width > 0 ? displayWidth / spec.width : 1
@@ -465,10 +473,10 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
             ) : carrierSurface.substrateVisible && substrateBoundary?.shape === 'custom' && substrateBoundary.pathData ? (
               <KPath
                 data={substrateBoundary.pathData}
-                x={-(substrateBoundary.pathBounds?.x ?? 0) * spec.width / Math.max(substrateBoundary.pathBounds?.width ?? spec.width, 1)}
-                y={-(substrateBoundary.pathBounds?.y ?? 0) * spec.height / Math.max(substrateBoundary.pathBounds?.height ?? spec.height, 1)}
-                scaleX={spec.width / Math.max(substrateBoundary.pathBounds?.width ?? spec.width, 1)}
-                scaleY={spec.height / Math.max(substrateBoundary.pathBounds?.height ?? spec.height, 1)}
+                x={customBoundaryTransform?.x}
+                y={customBoundaryTransform?.y}
+                scaleX={customBoundaryTransform?.scaleX}
+                scaleY={customBoundaryTransform?.scaleY}
                 fill={carrierSurface.substrateColor}
                 opacity={carrierSurface.substrateOpacity}
                 listening={false}

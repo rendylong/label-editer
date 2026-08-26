@@ -45,6 +45,16 @@ export interface CarrierBoundaryResolution {
 
 type CarrierSurfaceInput = Pick<LabelAreaConfig, 'carrier' | 'substrate' | 'paper' | 'legacyPaperCarrier'>
 
+export function hasValidLegacyPaperCarrierProvenance(area: CarrierSurfaceInput): boolean {
+  const provenance = area.legacyPaperCarrier
+  if (!provenance || area.carrier !== 'applied_label' || area.substrate !== undefined) return false
+  const paper = resolveLabelPaper(area.paper)
+  return paper.enabled
+    && paper.enabled === provenance.paper.enabled
+    && paper.color === provenance.paper.color
+    && paper.opacity === provenance.paper.opacity
+}
+
 export function resolveCarrierBoundary(area: Pick<LabelAreaConfig, 'substrate'>): CarrierBoundaryResolution {
   const boundary = area.substrate?.boundary
   if (!boundary) return {}
@@ -66,18 +76,36 @@ export function resolveCarrierBoundary(area: Pick<LabelAreaConfig, 'substrate'>)
   }
 }
 
+export interface CarrierBoundaryTransform {
+  x: number
+  y: number
+  scaleX: number
+  scaleY: number
+}
+
+export function fitCarrierBoundaryToCanvas(
+  boundary: CarrierBoundary,
+  canvas: Pick<LabelAreaConfig['canvas'], 'width' | 'height'>,
+): CarrierBoundaryTransform {
+  const bounds = boundary.pathBounds
+  if (boundary.shape !== 'custom' || !bounds || !Number.isFinite(bounds.width) || !Number.isFinite(bounds.height) || bounds.width <= 0 || bounds.height <= 0) {
+    throw new Error('custom substrate boundary 缺少有效正尺寸 bounds')
+  }
+  return {
+    x: bounds.x === 0 ? 0 : -bounds.x * canvas.width / bounds.width,
+    y: bounds.y === 0 ? 0 : -bounds.y * canvas.height / bounds.height,
+    scaleX: canvas.width / bounds.width,
+    scaleY: canvas.height / bounds.height,
+  }
+}
+
 /**
  * Resolves clean artwork geometry independently from production diagnostics.
  * A carrier-incompatible substrate remains available to readiness validation,
  * but can never make this resolver synthesize a panel.
  */
 export function resolveCarrierSurface(area: CarrierSurfaceInput): CarrierSurface {
-  if (!area.carrier || (
-    area.legacyPaperCarrier === true
-    && area.carrier === 'applied_label'
-    && area.substrate === undefined
-    && area.paper?.enabled === true
-  )) {
+  if (!area.carrier || hasValidLegacyPaperCarrierProvenance(area)) {
     const paper = resolveLabelPaper(area.paper)
     return {
       carrier: 'legacy',

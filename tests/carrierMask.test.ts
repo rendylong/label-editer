@@ -132,6 +132,37 @@ describe('carrier mask raster production', () => {
     expect(pixel(masks.whiteUnderbase, 1, 1)).toEqual([0, 0, 0])
   })
 
+  it.each([
+    { visible: false },
+    { opacity: 0 },
+  ] as const)('does not allocate a white-underbase channel for non-rendering contributor %j', (overrides) => {
+    const masks = renderCarrierMasks(2, 2, drawLayer, area('clear_label', layer({
+      ...overrides,
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+    })))
+
+    expect(masks).not.toHaveProperty('whiteUnderbase')
+  })
+
+  it('drops a black-only white-underbase channel when the declared layer could not draw', () => {
+    const masks = renderCarrierMasks(2, 2, () => false, area('clear_label', layer({
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+    })))
+
+    expect(masks).not.toHaveProperty('whiteUnderbase')
+  })
+
+  it('clears a stale white-underbase channel on the next non-rendering rebake', () => {
+    const declared = layer({
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+    })
+    const first = renderCarrierMasks(2, 2, drawLayer, area('clear_label', declared))
+    const second = renderCarrierMasks(2, 2, drawLayer, area('clear_label', { ...declared, visible: false }))
+
+    expect(first).toHaveProperty('whiteUnderbase')
+    expect(second).not.toHaveProperty('whiteUnderbase')
+  })
+
   it('never bakes decorative or process masks for bare', () => {
     expect(renderCarrierMasks(2, 2, drawLayer, area('bare', layer({
       craft: [{ type: 'foil', params: {} }],

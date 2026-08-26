@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveCarrierSurface } from '../src/label/paper'
+import { fitCarrierBoundaryToCanvas, resolveCarrierSurface } from '../src/label/paper'
 import { carrierReadinessChecks } from '../src/label/exportReadiness'
 import { buildPrintManifest, validatePrintReadiness } from '../src/label/printReadiness'
 import type { CarrierMode, LabelAreaConfig, LabelLayer, ProcessIntent } from '../src/label/types'
@@ -209,6 +209,19 @@ describe('canonical carrier rendering and readiness', () => {
       boundary: expect.objectContaining({ shape }),
     })
     expect(validatePrintReadiness(area).map((issue) => issue.code)).not.toContain('invalid-custom-boundary')
+  })
+
+  it('fits a positive sub-unit custom boundary exactly to the render artboard', () => {
+    const surface = resolveCarrierSurface(carrierArea('applied_label', {
+      substrate: {
+        kind: 'opaque', color: '#f2efe4', opacity: 1,
+        boundary: { shape: 'custom', pathData: 'M0 0H0.5V0.5H0Z' },
+      },
+    }))
+
+    expect(fitCarrierBoundaryToCanvas(surface.boundary!, { width: 400, height: 600 })).toEqual({
+      x: 0, y: 0, scaleX: 800, scaleY: 1200,
+    })
   })
 
   it.each([

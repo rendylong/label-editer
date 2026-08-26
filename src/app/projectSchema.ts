@@ -1,7 +1,7 @@
 /** Versioned .lbl project serialization and legacy migration boundary. */
 
 import { legacyFontId } from '../label/fontCatalog'
-import { resolveLabelPaper } from '../label/paper'
+import { hasValidLegacyPaperCarrierProvenance, resolveLabelPaper } from '../label/paper'
 import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
@@ -519,6 +519,7 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     placementPolicy = raw.placementPolicy as TargetAspectPolicy
   }
   if (raw.blueprintAreaId !== undefined) nonEmptyString(raw.blueprintAreaId, 'blueprintAreaId', 128)
+  const paper = resolveLabelPaper(paperInput)
   return {
     id: idValue,
     name,
@@ -531,9 +532,9 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     remap,
     range,
     canvas,
-    paper: resolveLabelPaper(paperInput),
+    paper,
     ...(carrier === undefined ? {} : { carrier }),
-    ...(raw.carrier === undefined && paperInput?.enabled === true ? { legacyPaperCarrier: true as const } : {}),
+    ...(raw.carrier === undefined && paperInput?.enabled === true ? { legacyPaperCarrier: { paper: { ...paper } } } : {}),
     ...(raw.artboard === undefined ? {} : { artboard: normalizeArtboard(raw.artboard) }),
     ...(substrate === undefined ? {} : { substrate }),
     ...(placementPolicy === undefined ? {} : { placementPolicy }),
@@ -571,21 +572,22 @@ export function serializeLabelProject(modelFileName: string, areas: Array<LabelA
     version: PROJECT_VERSION,
     modelFileName,
     areas: areas.map((area, index) => {
+      const preserveLegacyCarrier = hasValidLegacyPaperCarrierProvenance(area)
       const withRuntimeFields = area as SerializedArea & Partial<Pick<LabelAreaConfig, 'undoStack' | 'redoStack' | 'referenceUrl' | 'legacyPaperCarrier'>>
       const {
         undoStack: _undoStack,
         redoStack: _redoStack,
         referenceUrl: _referenceUrl,
-        legacyPaperCarrier,
+        legacyPaperCarrier: _legacyPaperCarrier,
         ...serializable
       } = withRuntimeFields
       const normalized = normalizeArea(
-        legacyPaperCarrier ? { ...serializable, carrier: undefined } : serializable,
+        preserveLegacyCarrier ? { ...serializable, carrier: undefined } : serializable,
         index,
         PROJECT_VERSION,
       )
-      const { legacyPaperCarrier: _legacyPaperCarrier, carrier: normalizedCarrier, ...projectArea } = normalized
-      return legacyPaperCarrier ? projectArea : { ...projectArea, ...(normalizedCarrier ? { carrier: normalizedCarrier } : {}) }
+      const { legacyPaperCarrier: _normalizedLegacyPaperCarrier, carrier: normalizedCarrier, ...projectArea } = normalized
+      return preserveLegacyCarrier ? projectArea : { ...projectArea, ...(normalizedCarrier ? { carrier: normalizedCarrier } : {}) }
     }),
   }
 }

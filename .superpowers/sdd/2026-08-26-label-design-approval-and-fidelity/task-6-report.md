@@ -257,3 +257,89 @@ Tests       1 passed | 1 skipped (2)
 - Confirmed QC-only four-channel contracts remain unchanged because white underbase is a production separation, not a newly claimed GLB shader/QC material channel.
 
 All production checks remain unverified prompts. The implementation is not physical-production, supplier, press, adhesion, opacity, registration, abrasion, film, die-cut, foil, in-mold, white-ink, or tooling certification.
+
+## Fix round 2
+
+### Review findings and RED evidence
+
+The second review identified five lifecycle/export defects: stale source PBR textures on replace export, migration provenance surviving semantic edits, white-underbase artifacts trusting an injected canvas without current renderable intent, one-sided metalness/roughness bakes being dropped from GLB export, and sub-unit custom paths being under-scaled by a one-pixel clamp.
+
+All five findings were captured before implementation with:
+
+```text
+pnpm vitest run tests/exportOverlay.test.ts tests/projectSchema.test.ts tests/carrierMask.test.ts tests/carrierExport.test.ts tests/carrierBehavior.test.ts
+Test Files  5 failed (5)
+Tests       12 failed | 93 passed (105)
+```
+
+The failures independently showed the stale glTF material slots, omitted edited carrier fields, black-only/injected white channel publication, absent one-sided pack calls, and missing exact custom-boundary fit.
+
+### Implemented corrections
+
+| Finding | Correction |
+| --- | --- |
+| Replace-mode stale PBR | Texture application now explicitly clears absent metallic-roughness and normal slots before applying neutral factors. A real glTF material regression starts with old textures, proves color-only replace clears both, and proves a later channel-bearing replace reattaches new textures. Overlay still uses its independent material. |
+| Legacy provenance lifecycle | Runtime provenance now contains the normalized migrated paper snapshot. It is valid only while carrier remains `applied_label`, substrate remains absent, paper remains enabled, and its color/opacity still match the snapshot. Carrier, paper, or substrate edits serialize the actual canonical state; untouched legacy still omits the synthetic carrier for exact roundtrip behavior. The runtime marker is always removed from serialized output. |
+| White-underbase integrity | A shared renderability predicate requires a current per-layer white-underbase declaration, visible/non-zero-opacity renderable geometry, a successful mask draw, and a current bake canvas. The renderer discards a black-only channel; rebake therefore removes stale white output. Artifact and manifest paths use the same renderable-intent rules, so empty, hidden, zero-opacity, undeclared, or failed contributors publish neither PNG nor separation. |
+| One-sided metal/rough export | Export preparation transiently creates only the missing neutral companion: black metalness for rough-only or white roughness for metal-only. The pair is packed for GLB, while artifact export still exposes only the originally declared channel. Applied/legacy full-channel bakes remain unchanged. |
+| Sub-unit custom boundary | Custom boundary fitting now divides by the validated positive bounds directly, with no `Math.max(1, …)` clamp. A 0.5×0.5 path scales exactly to 400×600 as `scaleX=800`, `scaleY=1200`. |
+
+### Scope notes
+
+- Added `src/label/whiteUnderbase.ts` to centralize current renderable white-separation intent across mask, manifest, and artifact paths.
+- Evolved the runtime-only legacy provenance type from a boolean to a normalized paper snapshot; no serialized schema field was added.
+- Neutral companion canvases exist only within GLB preparation and are never inserted into `BakeResult` or artifact lists.
+- Missing optional material textures remain backward compatible; applied/legacy defaults still provide the original complete PBR set.
+
+### Final verification
+
+Focused GREEN:
+
+```text
+pnpm vitest run tests/exportOverlay.test.ts tests/projectSchema.test.ts tests/carrierMask.test.ts tests/carrierExport.test.ts tests/carrierBehavior.test.ts
+Test Files  5 passed (5)
+Tests       105 passed (105)
+```
+
+Affected integration suite:
+
+```text
+pnpm vitest run tests/exportOverlay.test.ts tests/export-roundtrip.test.ts tests/rebuildWorkerProtocol.test.ts tests/sceneTexture.test.ts tests/carrierBehavior.test.ts tests/carrierMask.test.ts tests/carrierExport.test.ts tests/projectSchema.test.ts tests/labelPaper.test.ts tests/renderingFidelity.test.ts tests/labelImageReadiness.test.ts tests/bakeLifecycle.test.ts tests/artifactExport.test.ts tests/agentContracts.test.ts tests/agentBrowserRuntime.test.ts tests/exportReadiness.test.ts tests/capabilityGaps.test.ts
+Test Files  17 passed (17)
+Tests       261 passed (261)
+```
+
+Full suite:
+
+```text
+pnpm test
+Test Files  71 passed (71)
+Tests       891 passed | 1 skipped (892)
+```
+
+Production build:
+
+```text
+pnpm build
+PASS — TypeScript and Vite production build completed.
+```
+
+Vite emitted the existing browser externalization, mixed static/dynamic import, and large-chunk warnings; no build error occurred.
+
+Dedicated plugin browser E2E:
+
+```text
+pnpm test:plugin-e2e
+Test Files  1 passed (1)
+Tests       1 passed | 1 skipped (2)
+```
+
+### Fix-round self-review and certification boundary
+
+- Confirmed replace export explicitly removes source PBR maps when optional channels are absent and reattaches later supplied maps without affecting overlay ownership.
+- Confirmed untouched legacy paper preserves its exact compatibility path, while direct/paper/substrate edits retire provenance and serialize current fields; the runtime marker never leaks.
+- Confirmed white-underbase canvas allocation, rebake removal, artifact publication, and manifest separation are gated by current visible renderable declarations plus a successful current draw.
+- Confirmed metal-only and rough-only inputs produce transient neutral paired packing without fabricating an artifact or persistent bake channel.
+- Confirmed all positive finite custom-path bounds, including sub-unit extents, fit the full intended artboard.
+
+All carrier/readiness results remain unverified production prompts. This fix does not certify physical ink opacity, white-ink performance, adhesion, registration, abrasion, film, foil, die cutting, in-mold compatibility, tooling, supplier capability, press readiness, or any GLB shader simulation of white ink.

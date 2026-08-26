@@ -65,4 +65,49 @@ describe('GLB 贴标叠加导出', () => {
     const exportedPosition = labelPrimitive?.getAttribute('POSITION')?.getArray() as Float32Array
     expect(exportedPosition[2]).toBeGreaterThan(0)
   })
+
+  it('clears stale replace-mode PBR slots for a color-only bake and can attach later channels', () => {
+    const doc = new Document()
+    const buffer = doc.createBuffer()
+    const position = doc.createAccessor().setType('VEC3').setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])).setBuffer(buffer)
+    const indices = doc.createAccessor().setType('SCALAR').setArray(new Uint16Array([0, 1, 2])).setBuffer(buffer)
+    const staleMetalRough = doc.createTexture('old-metal-rough').setImage(new Uint8Array([1])).setMimeType('image/png')
+    const staleNormal = doc.createTexture('old-normal').setImage(new Uint8Array([2])).setMimeType('image/png')
+    const material = doc.createMaterial('Old Label')
+      .setMetallicRoughnessTexture(staleMetalRough)
+      .setNormalTexture(staleNormal)
+      .setMetallicFactor(0.75)
+      .setRoughnessFactor(0.25)
+    const mesh = doc.createMesh('Label').addPrimitive(doc.createPrimitive().setAttribute('POSITION', position).setIndices(indices).setMaterial(material))
+    doc.createScene().addChild(doc.createNode('Label').setMesh(mesh))
+    const baseJob = {
+      meshIndex: 0,
+      nodeName: 'Label',
+      surfaceMode: 'replace' as const,
+      fullRange: false,
+      remap: {
+        positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+        uv: new Float32Array([0, 0, 1, 0, 0, 1]),
+        indices: new Uint32Array([0, 1, 2]),
+      },
+      colorPng: new Uint8Array([3]).buffer,
+    }
+
+    applyLabelJobToDocument(doc, baseJob)
+    expect(material.getMetallicRoughnessTexture()).toBeNull()
+    expect(material.getNormalTexture()).toBeNull()
+    expect(material.getMetallicFactor()).toBe(0)
+    expect(material.getRoughnessFactor()).toBe(1)
+
+    applyLabelJobToDocument(doc, {
+      ...baseJob,
+      metalRoughPng: new Uint8Array([4]).buffer,
+      normalPng: new Uint8Array([5]).buffer,
+    })
+    expect(material.getMetallicRoughnessTexture()).not.toBeNull()
+    expect(material.getMetallicRoughnessTexture()).not.toBe(staleMetalRough)
+    expect(material.getNormalTexture()).not.toBeNull()
+    expect(material.getNormalTexture()).not.toBe(staleNormal)
+    expect(material.getMetallicFactor()).toBe(1)
+  })
 })

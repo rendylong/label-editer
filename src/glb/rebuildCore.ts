@@ -45,13 +45,16 @@ function applyTextures(doc: Document, material: Material, job: AreaJob): void {
   const setTexture = (
     name: string,
     png: ArrayBuffer | undefined,
-    setSlot: (texture: ReturnType<Document['createTexture']>) => void,
+    setSlot: (texture: ReturnType<Document['createTexture']> | null) => void,
     getInfo: () => {
       setWrapS(value: number): { setWrapT(next: number): unknown }
       setWrapT(value: number): unknown
     } | null | undefined,
   ): void => {
-    if (!png) return
+    if (!png) {
+      setSlot(null)
+      return
+    }
     const texture = doc.createTexture(name).setImage(new Uint8Array(png)).setMimeType('image/png')
     setSlot(texture)
     getInfo()?.setWrapS(wrap).setWrapT(wrap)

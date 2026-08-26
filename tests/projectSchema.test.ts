@@ -171,6 +171,59 @@ describe('label project v3', () => {
 
     const reparsed = parseLabelProject(serializeLabelProject('legacy.glb', project.areas))
     expect(resolveCarrierSurface(reparsed.areas[0])).toMatchObject({ carrier: 'legacy', substrateVisible: true })
+    const serialized = serializeLabelProject('legacy.glb', project.areas)
+    expect(serialized.areas[0]).not.toHaveProperty('legacyPaperCarrier')
+    expect(serialized.areas[0]).not.toHaveProperty('carrier')
+  })
+
+  it('retires legacy provenance after carrier and paper edits', () => {
+    const project = parseLabelProject({
+      version: 2,
+      modelFileName: 'legacy.glb',
+      areas: [{ ...makeArea(), paper: { enabled: true, color: '#ede7dc', opacity: 0.84 } }],
+    })
+    project.areas[0].carrier = 'direct_surface_print'
+    project.areas[0].paper = { enabled: false, color: '#ede7dc', opacity: 0.84 }
+
+    const serialized = serializeLabelProject('edited.glb', project.areas)
+    expect(serialized.areas[0]).toMatchObject({
+      carrier: 'direct_surface_print',
+      paper: { enabled: false, color: '#ede7dc', opacity: 0.84 },
+    })
+    expect(serialized.areas[0]).not.toHaveProperty('legacyPaperCarrier')
+    const reparsed = parseLabelProject(serialized)
+    expect(reparsed.areas[0].carrier).toBe('direct_surface_print')
+    expect(resolveCarrierSurface(reparsed.areas[0]).carrier).toBe('direct_surface_print')
+  })
+
+  it('retires legacy provenance after an explicit substrate edit', () => {
+    const project = parseLabelProject({
+      version: 2,
+      modelFileName: 'legacy.glb',
+      areas: [{ ...makeArea(), paper: { enabled: true, color: '#ede7dc', opacity: 0.84 } }],
+    })
+    project.areas[0].substrate = {
+      kind: 'opaque', color: '#ffffff', opacity: 1, boundary: { shape: 'rectangle' },
+    }
+
+    const serialized = serializeLabelProject('edited.glb', project.areas)
+    expect(serialized.areas[0]).toMatchObject({ carrier: 'applied_label', substrate: project.areas[0].substrate })
+    expect(serialized.areas[0]).not.toHaveProperty('legacyPaperCarrier')
+    const reparsed = parseLabelProject(serialized)
+    expect(resolveCarrierSurface(reparsed.areas[0])).toMatchObject({ carrier: 'applied_label', substrateVisible: true })
+  })
+
+  it('retires legacy provenance after changing the migrated paper appearance', () => {
+    const project = parseLabelProject({
+      version: 2,
+      modelFileName: 'legacy.glb',
+      areas: [{ ...makeArea(), paper: { enabled: true, color: '#ede7dc', opacity: 0.84 } }],
+    })
+    project.areas[0].paper = { enabled: true, color: '#123456', opacity: 0.5 }
+
+    const serialized = serializeLabelProject('edited.glb', project.areas)
+    expect(serialized.areas[0]).toMatchObject({ carrier: 'applied_label', paper: project.areas[0].paper })
+    expect(serialized.areas[0]).not.toHaveProperty('legacyPaperCarrier')
   })
 
   it('does not treat an explicit carrier-aware applied label as legacy paper fallback', () => {
