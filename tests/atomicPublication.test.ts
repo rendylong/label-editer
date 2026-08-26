@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
 import { publishAtomically } from '../scripts/lib/files.mjs'
+// @ts-expect-error Pure Node ESM module is consumed directly by the internal renderer.
+import { renderDesignReview } from '../scripts/lib/design-review.mjs'
 
 const temporaryDirectories: string[] = []
 const filesModuleUrl = pathToFileURL(path.resolve(import.meta.dirname, '../scripts/lib/files.mjs')).href
@@ -206,5 +208,36 @@ describe('atomic directory publication recovery', () => {
     expect(results.map((result) => result.code).sort(), results.map((result) => result.stderr).join('\n')).toEqual([0, 9])
     expect(['writer-a', 'writer-b']).toContain(await readRound(output))
     expect(await readdir(root)).toEqual(['round-0'])
+  })
+
+  it('exposes exactly one complete design review under concurrent non-forced publication', async () => {
+    const root = await temporaryDirectory()
+    const outputDir = path.join(root, 'review')
+    const blueprintPath = path.join(root, 'layout-blueprint.json')
+    await writeFile(blueprintPath, JSON.stringify({
+      version: 1, revision: 'rev-atomic', carrierDefaults: { carrier: 'bare' }, assets: [],
+      areas: [
+        { id: 'front', side: 'front', carrier: 'bare', artboard: { widthMm: 40, heightMm: 60, background: 'transparent' }, placementIntent: 'Front', layers: [] },
+        { id: 'back', side: 'back', carrier: 'bare', artboard: { widthMm: 40, heightMm: 60, background: 'transparent' }, placementIntent: 'Back', layers: [] },
+      ],
+    }))
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+    const capture = async ({ width, height }: { width: number; height: number }) => ({
+      front: { bytes: png, width, height },
+      back: { bytes: png, width, height },
+      areas: {},
+    })
+
+    const settled = await Promise.allSettled([
+      renderDesignReview({ blueprintPath, outputDir, width: 320, height: 240, pxPerMm: 2, capture }),
+      renderDesignReview({ blueprintPath, outputDir, width: 320, height: 240, pxPerMm: 2, capture }),
+    ])
+
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(settled.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    expect(await readdir(outputDir)).toEqual(expect.arrayContaining([
+      'design-review-manifest.json', 'mockup-back.png', 'mockup-front.png', 'mockup.html',
+    ]))
+    expect(await readdir(root)).toEqual(['layout-blueprint.json', 'review'])
   })
 })

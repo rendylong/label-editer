@@ -1,179 +1,38 @@
 <!doctype html>
-<html lang="zh">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>贴标 Mockup · {BRAND} {PRODUCT}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Carrier-aware label mockup reference</title>
 <style>
-/* ============================================================
-   cosmetic-label / label_mockup.html
-   Proto-type scale: 1mm = --px-per-mm px (default 4 → bottle ≈ life-size at ~96dpi).
-   Default proto: serum dropper 30ml Ø35×H110mm.
-   Element→工艺 legend:  amber=hot_stamp_foil · blue=emboss · green=screen_print
-                           red=offset_print · purple=emblem
-   ============================================================ */
-  :root{
-    --px-per-mm: 5;
-    --bottle-w-mm: 35;  --bottle-h-mm: 110;
-    --label-w-mm: 24;   --label-h-mm: 58;
-    --cap-w-mm: 18;     --cap-h-mm: 18;
-    --ink:#1c1a17; --muted:#8a857b; --bg:{BODY_BG}; --bg2:{BODY_BG2};
-    --labelbg:{LABEL_BG}; --label-fg:{LABEL_FG}; --brandcol:{BRAND_COLOR}; --acc:{ACCENT};
-    --serif:"Songti SC",Georgia,"Noto Serif SC",serif;
-    --sans:-apple-system,"PingFang SC","Noto Sans SC",Helvetica,sans-serif;
-    --c-foil:#d4950b; --c-emboss:#3a78c2; --c-screen:#2f8f55;
-    --c-offset:#b43a3a; --c-emblem:#7a4ea8;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:var(--sans);background:#efede8;color:var(--ink);padding:32px;display:flex;
-    gap:32px;flex-wrap:wrap;align-items:flex-start;justify-content:center}
-  .scene{background:#fbfbf9;border:1px solid #e3e0da;border-radius:14px;padding:22px 28px 18px;
-    width:420px;display:flex;flex-direction:column;box-shadow:0 8px 28px rgba(0,0,0,.05)}
-  .lbl-cap{font-size:11px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase;margin-bottom:10px}
-  .legend{font-size:10px;color:var(--muted);margin-bottom:10px;line-height:1.7;border-bottom:1px dashed #e3e0da;padding-bottom:10px}
-  .legend b{color:var(--ink)}
-  .legend .tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
-  .legend .tag{display:inline-flex;align-items:center;gap:4px;font-size:10px}
-  .legend .sw{width:10px;height:10px;border-radius:2px;border:1px solid rgba(0,0,0,.1)}
-  .bottle-wrap{
-    position:relative;margin:calc(var(--cap-h-mm) * var(--px-per-mm) * 1px) auto 0;
-    width:calc(var(--bottle-w-mm) * var(--px-per-mm) * 1px);
-    aspect-ratio: var(--bottle-w-mm) / var(--bottle-h-mm);
-  }
-  .cap{position:absolute;left:50%;top:calc(var(--cap-h-mm) * var(--px-per-mm) * -1px);
-    transform:translateX(-50%);width:calc(var(--cap-w-mm) * var(--px-per-mm) * 1px);
-    height:calc(var(--cap-h-mm) * var(--px-per-mm) * 1px);background:var(--muted);
-    border-radius:3px}
-  .neck{position:absolute;left:50%;top:calc(var(--cap-h-mm) * var(--px-per-mm) * -0.5 * 1px);
-    transform:translateX(-50%);width:calc(var(--cap-w-mm) * var(--px-per-mm) * 0.6 * 1px);
-    height:calc(var(--cap-h-mm) * var(--px-per-mm) * 0.4 * 1px);background:var(--muted);border-radius:2px}
-  .bottle{position:absolute;inset:0;background:var(--bg);border-radius:calc(var(--bottle-w-mm) * var(--px-per-mm) * 1px * 0.18);
-    box-shadow:inset -14px 0 26px rgba(0,0,0,.07),0 16px 34px rgba(0,0,0,.10)}
-  .label{position:absolute;left:50%;top:calc(var(--bottle-h-mm) * var(--px-per-mm) * 0.1 * 1px);
-    transform:translateX(-50%);width:calc(var(--label-w-mm) * var(--px-per-mm) * 1px);
-    min-height:calc(var(--label-h-mm) * var(--px-per-mm) * 1px);
-    background:var(--labelbg);border-radius:2px;padding:calc(var(--label-w-mm) * var(--px-per-mm) * 0.2 * 1px);
-    display:flex;flex-direction:column;align-items:center;gap:calc(var(--bottle-h-mm) * var(--px-per-mm) * 0.013 * 1px);
-    text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.12)}
-  /* elements */
-  .el-logo{margin-bottom:2px}
-  .logo-mark{width:calc(var(--label-w-mm) * var(--px-per-mm) * 0.34 * 1px);height:calc(var(--label-w-mm) * var(--px-per-mm) * 0.34 * 1px);
-    border:1.5px solid var(--brandcol);border-radius:50%;display:flex;align-items:center;justify-content:center;
-    font-family:var(--serif);color:var(--brandcol);font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.14 * 1px);font-weight:600}
-  .el-brand{font-family:var(--serif);font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.11 * 1px);
-    letter-spacing:.18em;color:var(--brandcol);font-weight:600;line-height:1.15}
-  .el-product{font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.075 * 1px);
-    line-height:1.3;color:var(--label-fg,var(--ink));font-weight:500}
-  .el-divider{width:calc(var(--label-w-mm) * var(--px-per-mm) * 0.5 * 1px);height:1px;background:var(--acc);margin:2px 0}
-  .el-icon{width:calc(var(--label-w-mm) * var(--px-per-mm) * 0.3 * 1px);height:calc(var(--label-w-mm) * var(--px-per-mm) * 0.3 * 1px);
-    display:flex;align-items:center;justify-content:center;color:var(--ink);opacity:.75}
-  .el-benefit{font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.062 * 1px);line-height:1.5;color:var(--label-fg,var(--ink))}
-  .el-meta{font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.055 * 1px);color:var(--label-fg,var(--muted));letter-spacing:.04em;opacity:.82}
-  .el-vol{font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.075 * 1px);color:var(--label-fg,var(--ink));font-weight:500}
-  /* element process tag (colored dashed border + tiny chip) */
-  /* element→工艺: dashed border color + a tiny non-overlapping corner badge */
-  .el-proc{position:relative;padding:2px 2px 2px 6px;border:1px dashed transparent;border-radius:3px}
-  .el-proc::after{content:"";position:absolute;left:-1px;top:-1px;bottom:-1px;width:3px;
-    background:var(--p,#999);border-radius:3px 0 0 3px}
-  .el-proc[data-proc~="hot_stamp_foil"]{--p:var(--c-foil);border-color:var(--c-foil)}
-  .el-proc[data-proc~="emboss"]{--p:var(--c-emboss);border-color:var(--c-emboss)}
-  .el-proc[data-proc~="screen_print"]{--p:var(--c-screen);border-color:var(--c-screen)}
-  .el-proc[data-proc~="offset_print"]{--p:var(--c-offset);border-color:var(--c-offset)}
-  .el-proc[data-proc~="emblem"]{--p:var(--c-emblem);border-color:var(--c-emblem)}
-  /* back */
-  .back{position:absolute;left:50%;top:calc(var(--bottle-h-mm) * var(--px-per-mm) * 0.1 * 1px);
-    transform:translateX(-50%);width:calc(var(--label-w-mm) * var(--px-per-mm) * 1px);
-    min-height:calc(var(--label-h-mm) * var(--px-per-mm) * 1.05 * 1px);
-    background:#fff;border:1px dashed #bbb;border-radius:2px;
-    padding:calc(var(--label-w-mm) * var(--px-per-mm) * 0.18 * 1px);
-    font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.062 * 1px);color:#555;line-height:1.55;text-align:left}
-  .back b{display:block;font-family:var(--serif);font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.085 * 1px);
-    color:var(--ink);letter-spacing:.06em}
-  .back .bt{font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.072 * 1px);color:var(--ink);margin:2px 0 6px}
-  .back ul{margin:6px 0 6px calc(var(--label-w-mm) * var(--px-per-mm) * 0.14 * 1px);padding:0}
-  .back .ph{display:block;font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.055 * 1px);color:#888;line-height:1.5;margin-top:2px}
-  .back .reg{font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.055 * 1px);color:#888;margin-top:6px;line-height:1.5}
-  .barcode{display:flex;align-items:flex-end;height:calc(var(--label-w-mm) * var(--px-per-mm) * 0.16 * 1px);
-    margin-top:6px;gap:1px}
-  .barcode i{display:inline-block;background:#222;width:2px;height:100%}
-  .meta{margin-top:14px;padding-top:10px;border-top:1px solid #ecebe6;font-size:11px;color:var(--muted);line-height:1.6}
-  .meta b{color:var(--ink)}
-  .note{position:fixed;bottom:12px;left:18px;font-size:11px;color:#999}
+  :root{--ink:#171714;--paper:#f4efe5;--film:rgba(190,220,225,.14);--package:#d7d2c8;--accent:#9b5d39}
+  *{box-sizing:border-box}
+  body{margin:0;padding:32px;background:#ece9e2;color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  h1{margin:0 0 6px;font-size:22px}p{margin:0 0 24px;color:#666}
+  .matrix{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:20px}
+  .variant{background:#faf9f6;border:1px solid #ddd8cd;border-radius:12px;padding:16px}
+  .variant h2{margin:0 0 4px;font-size:14px}.variant small{display:block;color:#777;min-height:42px}
+  .package{position:relative;width:150px;height:250px;margin:18px auto 10px;border-radius:38px 38px 24px 24px;background:linear-gradient(90deg,#c8c2b7,#ebe8e1 48%,#c1baae);box-shadow:inset -10px 0 22px rgba(0,0,0,.08)}
+  .art{position:absolute;left:25px;top:54px;width:100px;height:142px;display:flex;align-items:center;justify-content:center;text-align:center}
+  .substrate{position:absolute;inset:0;background:var(--paper);border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+  .film{position:absolute;inset:0;border:1px solid rgba(60,100,110,.35);background:var(--film);border-radius:8px}
+  .copy{position:relative;z-index:2;font-family:Georgia,serif;letter-spacing:.12em}.copy b{display:block;font-size:18px}.copy span{display:block;margin-top:8px;font:10px/1.4 sans-serif;letter-spacing:.04em}
+  .foil .copy{color:var(--accent);text-shadow:0 1px rgba(255,255,255,.6)}
+  .bare .art{display:none}
+  .legend{margin-top:24px;padding:16px;border:1px solid #d8d2c7;background:#f8f6f1;color:#555}.legend b{color:var(--ink)}
 </style>
 </head>
 <body>
-  <!-- ============ FRONT ============ -->
-  <div class="scene">
-    <div class="lbl-cap">FRONT · 正面</div>
-    <div class="legend">
-      <b>样机 30ml 滴管精华瓶</b> · Ø35 × H110 mm · 标签 24 × 58 mm · 显示比例 1mm = <span id="scale">4</span>px (≈ 1:1 样机)
-      <div class="tags">
-        <span class="tag"><span class="sw" style="background:#d4950b"></span>hot_stamp_foil 烫金</span>
-        <span class="tag"><span class="sw" style="background:#3a78c2"></span>emboss 浮雕</span>
-        <span class="tag"><span class="sw" style="background:#2f8f55"></span>screen_print 丝印</span>
-        <span class="tag"><span class="sw" style="background:#b43a3a"></span>offset_print 平版</span>
-        <span class="tag"><span class="sw" style="background:#7a4ea8"></span>emblem 徽记</span>
-      </div>
-    </div>
-    <div class="bottle-wrap">
-      <div class="cap"></div><div class="neck"></div>
-      <div class="bottle">
-        <div class="label">
-          <div class="el-logo el-proc" data-proc="emblem emboss hot_stamp_foil">
-            <div class="logo-mark">L</div>
-          </div>
-          <div class="el-brand el-proc" data-proc="hot_stamp_foil">{BRAND}</div>
-          <div class="el-divider el-proc" data-proc="hot_stamp_foil"></div>
-          <div class="el-product el-proc" data-proc="screen_print">{PRODUCT}</div>
-          <div class="el-icon el-proc" data-proc="hot_stamp_foil" aria-hidden="true">
-            <svg width="100%" height="100%" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
-              <path d="M12 3 C8 9 6 12 6 15 a6 6 0 0 0 12 0 C18 12 16 9 12 3 Z"/>
-              <circle cx="12" cy="17" r="1" fill="currentColor"/>
-            </svg>
-          </div>
-          <div class="el-benefit el-proc" data-proc="screen_print">{BENEFIT}<br><span style="color:#888">{HERO}</span></div>
-          <div class="el-vol el-proc" data-proc="hot_stamp_foil">{VOLUME}</div>
-          <div class="el-meta el-proc" data-proc="offset_print">{REGULATORY}</div>
-        </div>
-      </div>
-    </div>
-    <div class="meta"><b>排版 {LAYOUT}</b> · 字体 {TYPO} · 工艺 {PRINT}</div>
-  </div>
-
-  <!-- ============ BACK ============ -->
-  <div class="scene">
-    <div class="lbl-cap">BACK · 背面</div>
-    <div class="legend">
-      <b>法规与背标占位</b> · 即使客户未提供真实内容，也输出可替换的占位格式
-    </div>
-    <div class="bottle-wrap">
-      <div class="cap"></div><div class="neck"></div>
-      <div class="bottle" style="background:var(--bg2)">
-        <div class="back">
-          <b class="el-proc" data-proc="emblem">{BRAND}</b>
-          <div class="bt el-proc" data-proc="screen_print">{PRODUCT}</div>
-          <ul>
-            <li><b>用法</b><span class="ph">{USAGE}</span></li>
-            <li><b>成分</b><span class="ph">{INGREDIENTS}</span></li>
-            <li><b>备案号</b><span class="ph">{REG_NO}</span></li>
-            <li><b>批号 / 限期</b><span class="ph">{BATCH_EXP}</span></li>
-          </ul>
-          <div class="reg el-proc" data-proc="offset_print">{MADE_IN} · 净含量 {VOLUME}</div>
-          <div class="barcode el-proc" data-proc="hot_stamp_foil" aria-label="条码占位">
-            <i style="height:100%"></i><i style="height:60%"></i><i style="height:100%"></i>
-            <i style="height:80%"></i><i style="height:40%"></i><i style="height:100%"></i>
-            <i style="height:70%"></i><i style="height:100%"></i><i style="height:50%"></i>
-            <i style="height:90%"></i><i style="height:100%"></i><i style="height:60%"></i>
-            <i style="height:100%"></i>
-          </div>
-          <div style="font-size:calc(var(--label-w-mm) * var(--px-per-mm) * 0.05 * 1px);color:#888;margin-top:2px;letter-spacing:.1em">{BARCODE_TEXT}</div>
-        </div>
-      </div>
-    </div>
-    <div class="meta"><b>内容层级 {HIERARCHY}</b></div>
-  </div>
-
-  <div class="note">internal-reference-only · 占位内容请替换为真实备案/成分/条码 · 打印前打样 (ΔE&lt;2, 附着, 模切)</div>
-  <script>document.getElementById('scale').textContent = getComputedStyle(document.documentElement).getPropertyValue('--px-per-mm').trim();</script>
+  <h1>Carrier-aware static reference</h1>
+  <p>仅用于人工理解不同载体的视觉差异。运行时 mockup 必须直接由 layout blueprint 生成，不读取本文件推断布局。</p>
+  <main class="matrix">
+    <section class="variant"><h2>Applied label</h2><small>只显示 blueprint 明确声明的基材与边界。</small><div class="package"><div class="art"><div class="substrate"></div><div class="copy"><b>BRAND</b><span>APPLIED LABEL</span></div></div></div></section>
+    <section class="variant"><h2>Direct surface print</h2><small>油墨/矢量层直接位于包装轮廓上，不增加纸张矩形。</small><div class="package"><div class="art"><div class="copy"><b>BRAND</b><span>DIRECT PRINT</span></div></div></div></section>
+    <section class="variant"><h2>Clear label</h2><small>记录透明膜范围；白墨仅为选择性区域，不生成整块白底。</small><div class="package"><div class="art"><div class="film"></div><div class="copy"><b>BRAND</b><span>CLEAR FILM</span></div></div></div></section>
+    <section class="variant"><h2>In-mold</h2><small>声明图层直接合成在包装轮廓上，不模拟纸张。</small><div class="package"><div class="art"><div class="copy"><b>BRAND</b><span>IN-MOLD</span></div></div></div></section>
+    <section class="variant foil"><h2>Foil / ink only</h2><small>仅显示明确声明的箔或油墨几何。</small><div class="package"><div class="art"><div class="copy"><b>BRAND</b><span>FOIL / INK</span></div></div></div></section>
+    <section class="variant bare"><h2>Bare</h2><small>包装正面无装饰内容。</small><div class="package"><div class="art"></div></div></section>
+  </main>
+  <aside class="legend"><b>物理边界：</b>颜色、透明度、材料、附着、套准、耐磨、模切与供应商能力均需实体样品和供应商复核；此静态参考不构成生产认证。</aside>
 </body>
 </html>

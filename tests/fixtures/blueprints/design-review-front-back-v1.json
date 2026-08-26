@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "revision": "fixture-front-back-v1",
+  "carrierDefaults": {
+    "carrier": "direct_surface_print",
+    "evidence": ["Digital carrier preview fixture only"],
+    "assumptions": ["Physical processes require supplier and sample review"]
+  },
+  "assets": [],
+  "areas": [
+    {
+      "id": "front-primary",
+      "side": "front",
+      "carrier": "direct_surface_print",
+      "artboard": { "widthMm": 42, "heightMm": 68, "background": "transparent" },
+      "placementIntent": "Centered on the package front face.",
+      "layers": [
+        {
+          "id": "front-frame",
+          "kind": "shape",
+          "boundsMm": { "x": 3, "y": 3, "width": 36, "height": 62 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [{ "process": "hot_stamp_foil", "spotName": "COPPER", "requiredMask": "metalness" }],
+          "shape": "path",
+          "pathData": "M0 1 L0 0 L1 0 L1 1",
+          "pathViewBox": [0, 0, 1, 1],
+          "fillRule": "evenodd",
+          "fill": "transparent",
+          "stroke": "#9b5d39",
+          "strokeWidthMm": 0.25
+        },
+        {
+          "id": "front-title",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 10, "width": 32, "height": 9 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 1,
+          "processes": [{ "process": "screen_print", "spotName": "BRAND_BLACK", "requiredMask": "color" }],
+          "text": "LAVIRA PLACEHOLDER",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 2.4,
+          "fontWeight": 600,
+          "letterSpacingEm": 0.08,
+          "lineHeight": 1.1,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#161616"
+        }
+      ]
+    },
+    {
+      "id": "back-primary",
+      "side": "back",
+      "carrier": "clear_label",
+      "artboard": { "widthMm": 40, "heightMm": 64, "background": "transparent" },
+      "placementIntent": "Centered on the package back face.",
+      "substrate": {
+        "kind": "transparent",
+        "opacity": 0.08,
+        "boundary": { "shape": "rounded_rectangle", "radiusMm": 2 },
+        "material": "clear film"
+      },
+      "layers": [
+        {
+          "id": "back-copy",
+          "kind": "text",
+          "boundsMm": { "x": 4, "y": 6, "width": 32, "height": 26 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [
+            { "process": "offset_print", "spotName": "BACK_BLACK", "requiredMask": "color" },
+            { "process": "white_underbase", "requiredMask": "white_underbase" }
+          ],
+          "text": "PLACEHOLDER ingredients, usage, batch and regulatory copy",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 2.4,
+          "fontWeight": 400,
+          "letterSpacingEm": 0,
+          "lineHeight": 1.25,
+          "alignment": "left",
+          "wrapPolicy": "word",
+          "maxLines": 6,
+          "color": "#222222"
+        }
+      ]
+    }
+  ]
+}
