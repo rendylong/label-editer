@@ -66,6 +66,91 @@ function physicalSpec() {
 }
 
 describe('physical design rendering fidelity', () => {
+  it('rejects a captured raster whose dimensions disagree with the canvas aspect', () => {
+    const capture = (labelCanvas as typeof labelCanvas & {
+      captureDesignCanvas: (
+        stage: {
+          find: () => []
+          draw: () => void
+          toCanvas: () => HTMLCanvasElement
+        },
+        pixelRatio: number,
+        expected: { width: number; height: number; aspect: number },
+      ) => HTMLCanvasElement
+    }).captureDesignCanvas
+    const stage = {
+      find: () => [] as [],
+      draw: () => undefined,
+      toCanvas: () => ({ width: 1600, height: 1600 }) as HTMLCanvasElement,
+    }
+
+    expect(() => capture(stage, 1, { width: 1600, height: 2400, aspect: 2 / 3 })).toThrow(expect.objectContaining({
+      name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
+    }))
+  })
+
+  it('rejects a mismatched actual bake channel before it enters store state', () => {
+    const raster = { width: 1600, height: 1600 } as HTMLCanvasElement
+
+    expect(() => useLabelStore.getState().setBake('bad-raster', {
+      color: raster,
+      metalness: raster,
+      roughness: raster,
+      bump: raster,
+      spec: { width: 1600, height: 2400, aspect: 2 / 3 },
+      version: 1,
+    })).toThrow(expect.objectContaining({
+      name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
+    }))
+    expect(useLabelStore.getState().bakeMap['bad-raster']).toBeUndefined()
+  })
+
+  it.each([
+    ['top_left', { x: 0, y: 0 }, { x: 200, y: 100, width: 100, height: 40 }],
+    ['top_center', { x: -50, y: 0 }, { x: 150, y: 100, width: 100, height: 40 }],
+    ['center', { x: -50, y: -20 }, { x: 150, y: 80, width: 100, height: 40 }],
+    ['baseline_left', { x: 0, y: -30 }, { x: 200, y: 70, width: 100, height: 40 }],
+    ['baseline_center', { x: -50, y: -30 }, { x: 150, y: 70, width: 100, height: 40 }],
+  ] as const)('keeps the %s anchor as the render transform origin', (anchor, box, worldBounds) => {
+    const resolve = (craft as typeof craft & {
+      resolveLayerRenderTransform?: (input: {
+        x: number
+        y: number
+        rotation: number
+        width: number
+        height: number
+        anchor: string
+        baselineFromTop?: number
+      }) => { box: { x: number; y: number }; worldBounds: { x: number; y: number; width: number; height: number } }
+    }).resolveLayerRenderTransform
+
+    expect(resolve).toBeTypeOf('function')
+    expect(resolve?.({ x: 200, y: 100, rotation: 0, width: 100, height: 40, anchor, baselineFromTop: 30 })).toMatchObject({
+      box,
+      worldBounds,
+    })
+  })
+
+  it('rotates top-left content around the declared anchor instead of its center', () => {
+    const resolve = (craft as typeof craft & {
+      resolveLayerRenderTransform?: (input: {
+        x: number
+        y: number
+        rotation: number
+        width: number
+        height: number
+        anchor: string
+      }) => { origin: { x: number; y: number }; worldBounds: { x: number; y: number; width: number; height: number } }
+    }).resolveLayerRenderTransform
+
+    const result = resolve?.({ x: 10, y: 20, rotation: 90, width: 100, height: 40, anchor: 'top_left' })
+    expect(result?.origin).toEqual({ x: 10, y: 20 })
+    expect(result?.worldBounds.x).toBeCloseTo(-30, 12)
+    expect(result?.worldBounds.y).toBeCloseTo(20, 12)
+    expect(result?.worldBounds.width).toBeCloseTo(40, 12)
+    expect(result?.worldBounds.height).toBeCloseTo(100, 12)
+  })
+
   it.each([[1024, 1536], [2048, 3072], [4096, 6144]])(
     'derives pixels from immutable millimetres at bake %ix%i',
     (width, height) => {
@@ -105,6 +190,57 @@ describe('physical design rendering fidelity', () => {
     expect(rebaked.canvas).toEqual({ width: 2048, height: 3072, aspect: 2 / 3 })
     expect(rebaked.layers[0]).toMatchObject({ x: 256, y: 409.6, width: 1536 })
     expect(sourceAfter).toBe(sourceBefore)
+    useLabelStore.getState().clearAll()
+  })
+
+  it('scales every legacy pixel field proportionally through a 1024 to 4096 to 2048 rebake cycle', () => {
+    const area = physicalBaseArea(1024, 1536)
+    area.layers = [{
+      id: 'legacy-text', kind: 'text', text: 'Legacy', fontFamily: 'Arial', fontSize: 48, fontWeight: 400,
+      letterSpacing: 2, lineHeight: 1.2, width: 400, color: '#111111', align: 'left', italic: false,
+      x: 200, y: 300, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0,
+      craft: [{ type: 'stroke', params: { strokeColor: '#ffffff', strokeWidth: 3 } }],
+    }, {
+      id: 'legacy-image', kind: 'image', src: 'data:image/png;base64,AA==', naturalWidth: 80, naturalHeight: 40,
+      width: 160, height: 80, x: 500, y: 700, rotation: 0, opacity: 1,
+      visible: true, locked: false, zIndex: 1, craft: [],
+    }, {
+      id: 'legacy-shape', kind: 'shape', shape: 'rectangle', geometry: {}, width: 300, height: 120,
+      fill: '#000000', stroke: '#ffffff', strokeWidth: 4, cornerRadius: 12,
+      x: 600, y: 900, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 2, craft: [],
+    }]
+    useLabelStore.getState().clearAll()
+    useLabelStore.getState().addArea(area)
+
+    useLabelStore.getState().setAreaBakeSize(area.id, 4096, 6144)
+    useLabelStore.getState().setAreaBakeSize(area.id, 2048, 3072)
+    const [text, image, shape] = useLabelStore.getState().areas[0].layers
+
+    expect(text).toMatchObject({ x: 400, y: 600, width: 800, fontSize: 96, letterSpacing: 4 })
+    expect(text.craft).toEqual([{ type: 'stroke', params: { strokeColor: '#ffffff', strokeWidth: 6 } }])
+    expect(image).toMatchObject({ x: 1000, y: 1400, width: 320, height: 160 })
+    expect(shape).toMatchObject({ x: 1200, y: 1800, width: 600, height: 240, strokeWidth: 8, cornerRadius: 24 })
+    useLabelStore.getState().clearAll()
+  })
+
+  it('scales pixel-derived fields when design metadata declares wrapping but no physical coordinate source', () => {
+    const area = physicalBaseArea(1024, 1536)
+    area.artboard = { widthMm: 40, heightMm: 60, background: 'transparent' }
+    area.layers = [{
+      id: 'hybrid-text', kind: 'text', text: 'Legacy coordinates', fontFamily: 'Arial', fontSize: 48,
+      fontWeight: 400, letterSpacing: 2, lineHeight: 1.2, width: 400, color: '#111111', align: 'left', italic: false,
+      x: 200, y: 300, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, craft: [],
+      designMetrics: { anchor: 'top_left', wrapPolicy: 'word', maxLines: 2 },
+    }]
+    useLabelStore.getState().clearAll()
+    useLabelStore.getState().addArea(area)
+
+    useLabelStore.getState().setAreaBakeSize(area.id, 2048, 3072)
+
+    expect(useLabelStore.getState().areas[0].layers[0]).toMatchObject({
+      x: 400, y: 600, width: 800, fontSize: 96, letterSpacing: 4,
+      designMetrics: { anchor: 'top_left', wrapPolicy: 'word', maxLines: 2 },
+    })
     useLabelStore.getState().clearAll()
   })
 

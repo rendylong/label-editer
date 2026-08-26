@@ -225,9 +225,9 @@ describe('Task 9 Fix Round 1 accessibility and visual contracts', () => {
     let finish!: () => void
     mocks.exportPng.mockImplementationOnce(() => new Promise<undefined>((resolve) => { finish = () => resolve(undefined) }))
     useLabelStore.getState().addArea(area)
+    const raster = { width: area.canvas.width, height: area.canvas.height } as HTMLCanvasElement
     useLabelStore.getState().setBake(area.id, {
-      color: {} as HTMLCanvasElement, metalness: {} as HTMLCanvasElement,
-      roughness: {} as HTMLCanvasElement, bump: {} as HTMLCanvasElement,
+      color: raster, metalness: raster, roughness: raster, bump: raster,
       spec: area.canvas, version: 1,
     })
     useModelStore.setState({ status: 'ready' })

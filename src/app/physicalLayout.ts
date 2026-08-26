@@ -297,6 +297,61 @@ export function resolvePhysicalLayer(area: LabelAreaConfig, layer: LabelLayer, c
   }
 }
 
+function scaleLegacyCraft(layer: LabelLayer, scalar: number): LabelLayer['craft'] {
+  return layer.craft.map((effect) => effect.type === 'stroke' && typeof effect.params.strokeWidth === 'number'
+    ? { ...effect, params: { ...effect.params, strokeWidth: effect.params.strokeWidth * scalar } }
+    : effect)
+}
+
+function scaleLegacyLayer(layer: LabelLayer, scaleX: number, scaleY: number, scalar: number): LabelLayer {
+  const common = {
+    ...layer,
+    x: layer.x * scaleX,
+    y: layer.y * scaleY,
+    craft: scaleLegacyCraft(layer, scalar),
+  }
+  if (common.kind === 'text') {
+    return {
+      ...common,
+      fontSize: common.fontSize * scalar,
+      letterSpacing: common.letterSpacing * scalar,
+      ...(common.width === undefined ? {} : { width: common.width * scaleX }),
+    }
+  }
+  if (common.kind === 'image') {
+    return { ...common, width: common.width * scaleX, height: common.height * scaleY }
+  }
+  const geometry = common.geometry ? {
+    ...common.geometry,
+    ...(common.geometry.amplitude === undefined ? {} : { amplitude: common.geometry.amplitude * scaleY }),
+    ...(common.geometry.inset === undefined ? {} : { inset: common.geometry.inset * scalar }),
+    ...(common.geometry.gap === undefined ? {} : { gap: common.geometry.gap * scalar }),
+    ...(common.geometry.dash === undefined ? {} : { dash: common.geometry.dash.map((value) => value * scalar) }),
+  } : common.geometry
+  return {
+    ...common,
+    width: common.width * scaleX,
+    height: common.height * scaleY,
+    strokeWidth: common.strokeWidth * scalar,
+    cornerRadius: common.cornerRadius * scalar,
+    geometry,
+  }
+}
+
+/** Re-resolve approved physical layers and proportionally migrate legacy pixel layers. */
+export function resolveLayersForCanvas(area: LabelAreaConfig, canvas: CanvasSpec): LabelLayer[] {
+  const scaleX = canvas.width / area.canvas.width
+  const scaleY = canvas.height / area.canvas.height
+  const scalar = Math.sqrt(scaleX * scaleY)
+  const nextArea = { ...area, canvas }
+  return area.layers.map((layer) => {
+    const scaled = scaleLegacyLayer(layer, scaleX, scaleY, scalar)
+    return area.artboard && layer.designMetrics
+      ? resolvePhysicalLayer(nextArea, scaled)
+      : scaled
+  })
+}
+
 export function assertPhysicalAreaPlacement(area: LabelAreaConfig, canvas: CanvasSpec = area.canvas): void {
   if (!area.artboard) return
   const result = resolvePhysicalLayout({

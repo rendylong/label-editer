@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import { resolvePhysicalLayout, resolveTargetAspect } from '../src/app/physicalLayout'
+import * as canvasLayout from '../src/app/canvasLayout'
 
 describe('physical label layout', () => {
+  it('accepts proportional bake sizes that preserve the declared target aspect', () => {
+    expect(canvasLayout.withBakeCanvasSize(
+      { width: 1024, height: 1536, aspect: 2 / 3 },
+      { width: 4096, height: 6144 },
+    )).toEqual({ width: 4096, height: 6144, aspect: 2 / 3 })
+  })
+
+  it('rejects a bake raster that disagrees with the declared target aspect', () => {
+    expect(() => canvasLayout.withBakeCanvasSize(
+      { width: 1024, height: 1536, aspect: 2 / 3 },
+      { width: 4096, height: 4096 },
+    )).toThrow(expect.objectContaining({
+      name: 'RasterAspectError',
+      code: 'RASTER_ASPECT_MISMATCH',
+      details: expect.objectContaining({ declaredAspect: 2 / 3, rasterAspect: 1, width: 4096, height: 4096 }),
+    }))
+  })
+
   it.each([[1024, 1024], [2048, 2048], [4096, 4096]])(
     'keeps apparent type and relative spacing at bake %ix%i',
     (width, height) => {

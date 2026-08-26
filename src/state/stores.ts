@@ -7,8 +7,8 @@ import { create } from 'zustand'
 import type { GlbAnalysis, LabelAreaConfig, LabelLayer, PartNode, RemapParams, CanvasSpec, CraftEffect, AreaSnapshot, LabelAreaRange } from '../label/types'
 import { computeRemap, deriveCanvasSpec, deriveSurfaceCanvasSpec, type MeshAccessors, type RemapOutput } from '../glb/uvRemap'
 import { normalizeAreaRange } from '../glb/areaMath'
-import { withBakeCanvasSize } from '../app/canvasLayout'
-import { assertPhysicalAreaPlacement, resolvePhysicalLayer } from '../app/physicalLayout'
+import { assertRasterAspect, withBakeCanvasSize } from '../app/canvasLayout'
+import { assertPhysicalAreaPlacement, resolveLayersForCanvas } from '../app/physicalLayout'
 
 export interface BakeResult {
   color: HTMLCanvasElement
@@ -17,6 +17,8 @@ export interface BakeResult {
   bump: HTMLCanvasElement
   spec: CanvasSpec
   version: number
+  /** Visible text layers whose approved copy did not fit the rendered layout. */
+  textOverflowLayerIds?: string[]
   /** Exact immutable design owner rendered into this bake. Runtime-only. */
   areaOwner?: LabelAreaConfig
   /** Visible-font request identity that was ready when this bake completed. Runtime-only. */
@@ -270,7 +272,13 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     set((s) => {
       const bakeMap = { ...s.bakeMap }
       if (bake === null) delete bakeMap[areaId]
-      else bakeMap[areaId] = bake
+      else {
+        assertRasterAspect(bake.spec)
+        for (const canvas of [bake.color, bake.metalness, bake.roughness, bake.bump]) {
+          assertRasterAspect({ width: canvas.width, height: canvas.height, aspect: bake.spec.aspect })
+        }
+        bakeMap[areaId] = bake
+      }
       return { bakeMap }
     }),
   setAreaBakeSize: (areaId, width, height) =>
@@ -280,7 +288,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
         const canvas = withBakeCanvasSize(area.canvas, { width, height })
         const next = { ...area, canvas }
         assertPhysicalAreaPlacement(next)
-        return { ...next, layers: next.layers.map((layer) => resolvePhysicalLayer(next, layer)) }
+        return { ...next, layers: resolveLayersForCanvas(area, canvas) }
       })
       const updated = areas.find((area) => area.id === areaId)
       return {
@@ -321,7 +329,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       if (a.id !== areaId) return a
       const next = { ...a, range, canvas }
       assertPhysicalAreaPlacement(next)
-      return { ...next, layers: next.layers.map((layer) => resolvePhysicalLayer(next, layer)) }
+      return { ...next, layers: resolveLayersForCanvas(a, canvas) }
     })
     const updated = areas.find((a) => a.id === areaId)!
     set({

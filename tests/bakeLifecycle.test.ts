@@ -6,7 +6,12 @@ import { useFlushableDebouncedBake } from '../src/label/useFlushableDebouncedBak
 import { useLabelStore, useUiStore, type BakeResult } from '../src/state/stores'
 
 function bakeResult(document: Document, version: number): BakeResult {
-  const canvas = (): HTMLCanvasElement => document.createElement('canvas')
+  const canvas = (): HTMLCanvasElement => {
+    const element = document.createElement('canvas')
+    element.width = 400
+    element.height = 300
+    return element
+  }
   return {
     color: canvas(),
     metalness: canvas(),

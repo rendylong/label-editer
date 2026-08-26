@@ -24,15 +24,17 @@ import {
   measureTextLayerLayout,
   renderCraftedImage,
   rectangleRenderProps,
+  resolveLayerRenderTransform,
   shapeUsesOpenStroke,
-  textLineAnchorX,
   type MaskDrawMode,
+  type TextMeasureMetrics,
 } from './craft'
 import { resolveLabelPaper } from './paper'
 import { normalizeShapeLayer } from './shapeGeometry'
 import { commitLayerGesture, nextLayerSelection, type LayerNodeTransform } from './selection'
 import { useFlushableDebouncedBake } from './useFlushableDebouncedBake'
 import { registerExportBakeSurface } from '../app/actions'
+import { assertRasterAspect } from '../app/canvasLayout'
 
 export { resolveLabelPaper } from './paper'
 
@@ -66,7 +68,11 @@ interface ExportableStage {
  * 只捕获可交付的标签内容。参考图、Transformer 和定位线属于编辑器 UI，
  * 必须在导出期间排除，并在异常情况下也恢复原有可见状态。
  */
-export function captureDesignCanvas(stage: ExportableStage, pixelRatio: number): HTMLCanvasElement {
+export function captureDesignCanvas(
+  stage: ExportableStage,
+  pixelRatio: number,
+  expectedCanvas?: { width: number; height: number; aspect: number },
+): HTMLCanvasElement {
   const excluded = Array.from(stage.find('.non-export')).filter((node): node is ExportVisibilityNode => 'visible' in node)
   const relief = Array.from(stage.find('.craft-relief')).filter((node): node is ExportReliefNode => 'shadowEnabled' in node)
   const visibility = excluded.map((node) => node.visible())
@@ -75,7 +81,12 @@ export function captureDesignCanvas(stage: ExportableStage, pixelRatio: number):
     excluded.forEach((node) => node.visible(false))
     relief.forEach((node) => node.shadowEnabled(false))
     stage.draw()
-    return stage.toCanvas({ pixelRatio })
+    const captured = stage.toCanvas({ pixelRatio })
+    if (expectedCanvas) {
+      assertRasterAspect(expectedCanvas)
+      assertRasterAspect({ width: captured.width, height: captured.height, aspect: expectedCanvas.aspect })
+    }
+    return captured
   } finally {
     excluded.forEach((node, index) => node.visible(visibility[index]))
     relief.forEach((node, index) => node.shadowEnabled(shadowVisibility[index]))
@@ -118,28 +129,46 @@ function fontString(layer: TextLayer, css: string): string {
   return `${style}${weight} ${layer.fontSize}px ${css}`
 }
 
-function measureTextWidth(ctx: CanvasRenderingContext2D, layer: TextLayer, line: string): number {
-  return ctx.measureText(line).width + Math.max(0, line.length - 1) * layer.letterSpacing
+function measureTextWidth(ctx: CanvasRenderingContext2D, layer: TextLayer, line: string): TextMeasureMetrics {
+  const measured = ctx.measureText(line)
+  return {
+    width: measured.width + Math.max(0, Array.from(line).length - 1) * layer.letterSpacing,
+    actualBoundingBoxAscent: measured.actualBoundingBoxAscent,
+    actualBoundingBoxDescent: measured.actualBoundingBoxDescent,
+  }
 }
 
-/** 绘制图层文本剪影（mask 用），与 Konva 可见文字共享中心锚点。 */
+/** 绘制图层文本剪影（mask 用），与 Konva 可见文字共享已声明的锚点。 */
 function drawTextShape(ctx: CanvasRenderingContext2D, layer: TextLayer, gray: number, css: string, mode: MaskDrawMode): void {
   ctx.save()
-  ctx.translate(layer.x, layer.y)
   ctx.font = fontString(layer, css)
   const layout = measureTextLayerLayout(layer, (line) => measureTextWidth(ctx, layer, line))
-  ctx.rotate((layout.rotation * Math.PI) / 180)
+  const transform = resolveLayerRenderTransform({
+    x: layer.x,
+    y: layer.y,
+    rotation: layout.rotation,
+    width: layout.width,
+    height: layout.height,
+    anchor: layer.designMetrics?.anchor,
+    baselineFromTop: layout.baselineFromTop,
+  })
+  ctx.translate(transform.origin.x, transform.origin.y)
+  ctx.rotate((transform.rotation * Math.PI) / 180)
   ctx.fillStyle = `rgb(${gray},${gray},${gray})`
   ctx.strokeStyle = `rgb(${gray},${gray},${gray})`
   ctx.lineWidth = Math.max(1, layer.craft.find((effect) => effect.type === 'stroke')?.params.strokeWidth ?? 1)
   ctx.lineJoin = 'round'
   ctx.textAlign = layer.align
   ctx.direction = resolvedTextDirection(layer)
-  ctx.textBaseline = 'middle'
+  ctx.textBaseline = 'alphabetic'
   if ('letterSpacing' in ctx) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${layer.letterSpacing}px`
   const lineH = layer.fontSize * (layer.lineHeight || 1.2)
-  const startY = -layout.height / 2 + lineH / 2
-  const x = textLineAnchorX(layer.align, layout.width)
+  const startY = transform.box.y + layout.baselineFromTop
+  const x = layer.align === 'left'
+    ? transform.box.x
+    : layer.align === 'right'
+      ? transform.box.x + layout.width
+      : transform.box.x + layout.width / 2
   for (let i = 0; i < layout.lines.length; i++) {
     if (mode === 'stroke') ctx.strokeText(layout.lines[i], x, startY + i * lineH)
     else ctx.fillText(layout.lines[i], x, startY + i * lineH)
@@ -222,7 +251,10 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
 
   const displayHeight = useMemo(() => {
     if (!spec || displayWidth <= 0) return 300
-    return Math.round(displayWidth / spec.aspect)
+    // Keep the display stage on the authoritative target aspect. Rounding here
+    // compounds under export pixelRatio and can turn a proportional stage into
+    // a detectably mismatched bake raster.
+    return displayWidth / spec.aspect
   }, [spec, displayWidth])
 
   // 烘焙（防抖）
@@ -230,9 +262,10 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     const stage = stageRef.current
     const cfg = useLabelStore.getState().activeArea
     if (!stage || !cfg || cfg.id !== areaId) return false
+    assertRasterAspect(cfg.canvas)
     const ratio = cfg.canvas.width / (stage.width() || 1)
     if (!isFinite(ratio) || ratio <= 0) return false
-    let color = captureDesignCanvas(stage, ratio)
+    let color = captureDesignCanvas(stage, ratio, cfg.canvas)
     // Konva 对非整数显示尺寸使用 floor，2048px 目标偶发得到 2047px，导致
     // 预览、PNG 文件名和 GLB 纹理声明不一致。统一重采样到画布契约的精确尺寸。
     if (color.width !== cfg.canvas.width || color.height !== cfg.canvas.height) {
@@ -256,6 +289,16 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       } else drawShapeMask(ctx, layer, gray, mode)
     }
     const masks = renderMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, cfg.layers, cfg.globalCraft.craft)
+    const textOverflowLayerIds = cfg.layers.flatMap((layer) => {
+      if (layer.kind !== 'text' || !layer.visible) return []
+      const measurementCanvas = document.createElement('canvas')
+      const measurementContext = measurementCanvas.getContext('2d')
+      if (!measurementContext) return []
+      measurementContext.font = fontString(layer, fontCssFor(layer.fontFamily, cfg.fonts))
+      return measureTextLayerLayout(layer, (line) => measureTextWidth(measurementContext, layer, line)).overflow
+        ? [layer.id]
+        : []
+    })
     const previousVersion = useLabelStore.getState().bakeMap[cfg.id]?.version ?? 0
     const version = Math.max(Date.now(), previousVersion + 1)
     setBake(cfg.id, {
@@ -266,6 +309,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       spec: cfg.canvas,
       version,
       areaOwner: cfg,
+      textOverflowLayerIds,
       fontReadinessKey: visibleFontReadinessKey === '' || fontRevision > 0 ? visibleFontReadinessKey : undefined,
     })
     return true
@@ -371,6 +415,24 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                 })()
                 : null
               const shapeLayout = layer.kind === 'shape' ? normalizeShapeLayer(layer) : null
+              const renderTransform = layer.kind === 'text' && textLayout
+                ? resolveLayerRenderTransform({
+                    x: layer.x,
+                    y: layer.y,
+                    rotation: textLayout.rotation,
+                    width: textLayout.width,
+                    height: textLayout.height,
+                    anchor: layer.designMetrics?.anchor,
+                    baselineFromTop: textLayout.baselineFromTop,
+                  })
+                : resolveLayerRenderTransform({
+                    x: layer.x,
+                    y: layer.y,
+                    rotation: layer.rotation,
+                    width: layer.kind === 'text' ? 1 : layer.width,
+                    height: layer.kind === 'text' ? 1 : layer.height,
+                    anchor: layer.designMetrics?.anchor,
+                  })
               const foilProps = textLayout ? foilFillProps(foil, textLayout.width, textLayout.height) : foilFillProps(undefined, 1, 1)
               const shapeFoilProps = shapeLayout ? foilFillProps(foil, shapeLayout.width, shapeLayout.height) : null
               const genericShapePaint = shapeLayout && layer.kind === 'shape' && layer.shape !== 'rectangle'
@@ -384,9 +446,9 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                 <Group
                   key={layer.id}
                   id={`layer-${layer.id}`}
-                  x={layer.x}
-                  y={layer.y}
-                  rotation={textLayout?.rotation ?? layer.rotation}
+                  x={renderTransform.origin.x}
+                  y={renderTransform.origin.y}
+                  rotation={renderTransform.rotation}
                   width={textLayout?.width}
                   height={textLayout?.height}
                   opacity={layer.visible ? baseOpacity : 0}
@@ -422,8 +484,8 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                       fontSize={layer.fontSize}
                       letterSpacing={layer.letterSpacing}
                       lineHeight={layer.lineHeight || 1.2}
-                      x={-(textLayout?.width ?? 1) / 2}
-                      y={-(textLayout?.height ?? 1) / 2}
+                      x={renderTransform.box.x}
+                      y={renderTransform.box.y}
                       width={textLayout?.width}
                       height={textLayout?.height}
                       wrap="none"
@@ -450,8 +512,8 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                         <KImage
                           name={relief ? 'craft-relief' : undefined}
                           image={bits.preview}
-                          x={-layer.width / 2}
-                          y={-layer.height / 2}
+                          x={renderTransform.box.x}
+                          y={renderTransform.box.y}
                           width={layer.width}
                           height={layer.height}
                           shadowColor={emboss ? 'rgba(0,0,0,0.35)' : deboss ? 'rgba(255,255,255,0.3)' : 'transparent'}
@@ -481,8 +543,8 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                   ) : (
                     <KShape
                       name={relief ? 'craft-relief' : undefined}
-                      x={-(shapeLayout?.width ?? layer.width) / 2}
-                      y={-(shapeLayout?.height ?? layer.height) / 2}
+                      x={renderTransform.box.x}
+                      y={renderTransform.box.y}
                       width={shapeLayout?.width ?? layer.width}
                       height={shapeLayout?.height ?? layer.height}
                       sceneFunc={(context, shape) => {

@@ -165,18 +165,24 @@ function refreshExportBake(snapshot: ExportAreaSnapshot): BakeResult {
 
 function freezeExportBakes(snapshots: ExportAreaSnapshot[]): Readonly<Record<string, BakeResult>> {
   const entries = snapshots.map((snapshot): [string, BakeResult] => {
+    let frozen: BakeResult
     if (exportBakeSurfaces.has(snapshot.owner.id)) {
-      return [snapshot.owner.id, refreshExportBake(snapshot)]
+      frozen = refreshExportBake(snapshot)
+    } else {
+      const bake = snapshot.bake
+      if (
+        !bake
+        || bake.areaOwner !== snapshot.owner
+        || bake.fontReadinessKey !== snapshot.fontReadinessKey
+      ) {
+        throw staleAreaBakeError(snapshot)
+      }
+      frozen = frozenBakeCopy(bake, snapshot.owner, snapshot.fontReadinessKey)
     }
-    const bake = snapshot.bake
-    if (
-      !bake
-      || bake.areaOwner !== snapshot.owner
-      || bake.fontReadinessKey !== snapshot.fontReadinessKey
-    ) {
-      throw staleAreaBakeError(snapshot)
+    if ((frozen.textOverflowLayerIds?.length ?? 0) > 0) {
+      throw new Error(`贴标区域「${snapshot.owner.name}」有 ${frozen.textOverflowLayerIds!.length} 个文本图层溢出，未完整渲染获批文案`)
     }
-    return [snapshot.owner.id, frozenBakeCopy(bake, snapshot.owner, snapshot.fontReadinessKey)]
+    return [snapshot.owner.id, frozen]
   })
   return Object.freeze(Object.fromEntries(entries))
 }

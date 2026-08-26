@@ -17,6 +17,48 @@ export interface BakeCanvasSize {
   height: number
 }
 
+export interface RasterAspectDetails {
+  declaredAspect: number
+  rasterAspect: number
+  width: number
+  height: number
+  tolerance: number
+}
+
+export class RasterAspectError extends Error {
+  readonly code = 'RASTER_ASPECT_MISMATCH' as const
+
+  constructor(readonly details: RasterAspectDetails) {
+    super(`RASTER_ASPECT_MISMATCH: ${details.width}x${details.height} raster aspect ${details.rasterAspect} does not match declared aspect ${details.declaredAspect}`)
+    this.name = 'RasterAspectError'
+  }
+}
+
+/** Allow only the sub-pixel ratio drift introduced by integer raster dimensions. */
+export function assertRasterAspect(canvas: { width: number; height: number; aspect: number }): void {
+  if (!Number.isInteger(canvas.width) || canvas.width <= 0 || !Number.isInteger(canvas.height) || canvas.height <= 0
+    || !Number.isFinite(canvas.aspect) || canvas.aspect <= 0) {
+    throw new RasterAspectError({
+      declaredAspect: canvas.aspect,
+      rasterAspect: canvas.width / canvas.height,
+      width: canvas.width,
+      height: canvas.height,
+      tolerance: 0,
+    })
+  }
+  const rasterAspect = canvas.width / canvas.height
+  const tolerance = Math.max(1e-6, canvas.aspect / canvas.height)
+  if (Math.abs(rasterAspect - canvas.aspect) > tolerance) {
+    throw new RasterAspectError({
+      declaredAspect: canvas.aspect,
+      rasterAspect,
+      width: canvas.width,
+      height: canvas.height,
+      tolerance,
+    })
+  }
+}
+
 export const INITIAL_SPLIT_PERCENT = 65
 export const MIN_SPLIT_PERCENT = 25
 export const MAX_SPLIT_PERCENT = 80
@@ -56,5 +98,7 @@ export function withBakeCanvasSize<T extends { width: number; height: number; as
   if (!Number.isInteger(size.width) || size.width <= 0 || !Number.isInteger(size.height) || size.height <= 0) {
     throw new RangeError('Bake canvas width and height must be positive integers')
   }
-  return { ...canvas, width: size.width, height: size.height }
+  const resized = { ...canvas, width: size.width, height: size.height }
+  assertRasterAspect(resized)
+  return resized
 }

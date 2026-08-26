@@ -243,6 +243,27 @@ describe('export font and bake readiness', () => {
     unregister()
   })
 
+  it('blocks export when the current bake reports clipped approved copy', async () => {
+    installArea([textLayer('body', 'system-sans')])
+    const register = (actions as typeof actions & { registerExportBakeSurface?: RegisterExportBakeSurface }).registerExportBakeSurface
+    const unregister = register?.('area-a', () => {
+      useLabelStore.getState().setBake('area-a', {
+        ...bake('overflow', 2),
+        textOverflowLayerIds: ['body'],
+      })
+      return true
+    }) ?? (() => undefined)
+
+    await actions.exportPng()
+
+    expect(external.canvasToPngBytes).not.toHaveBeenCalled()
+    expect(useUiStore.getState().toast).toEqual({
+      msg: '贴标区域「Front label」有 1 个文本图层溢出，未完整渲染获批文案',
+      kind: 'error',
+    })
+    unregister()
+  })
+
   it('blocks PNG encoding with the exact unavailable used-font display names', async () => {
     ControlledFontFace.failingSource = '/fonts/playfair-display/'
     installArea([

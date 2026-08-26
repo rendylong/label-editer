@@ -14,6 +14,63 @@ export type MaskDrawMode = 'fill' | 'stroke'
 const LAYER_CRAFT_TYPES: CraftType[] = ['foil', 'emboss', 'deboss', 'matte', 'uv', 'stroke']
 const GLOBAL_CRAFT_TYPES: CraftType[] = ['matte', 'uv']
 
+type LayerAnchor = NonNullable<LabelLayer['designMetrics']>['anchor']
+
+export interface LayerRenderTransformInput {
+  x: number
+  y: number
+  rotation: number
+  width: number
+  height: number
+  anchor?: LayerAnchor
+  baselineFromTop?: number
+}
+
+export interface LayerRenderTransform {
+  origin: { x: number; y: number }
+  rotation: number
+  box: { x: number; y: number; width: number; height: number }
+  worldBounds: { x: number; y: number; width: number; height: number }
+}
+
+/** Resolve local content offsets while keeping the declared anchor as the rotation origin. */
+export function resolveLayerRenderTransform(input: LayerRenderTransformInput): LayerRenderTransform {
+  const anchor = input.anchor ?? 'center'
+  const baselineFromTop = input.baselineFromTop ?? input.height / 2
+  const box = {
+    x: anchor === 'top_left' || anchor === 'baseline_left' ? 0 : -input.width / 2,
+    y: anchor === 'top_left' || anchor === 'top_center'
+      ? 0
+      : anchor === 'center' ? -input.height / 2 : -baselineFromTop,
+    width: input.width,
+    height: input.height,
+  }
+  const radians = input.rotation * Math.PI / 180
+  const cosine = Math.cos(radians)
+  const sine = Math.sin(radians)
+  const corners = [
+    [box.x, box.y],
+    [box.x + box.width, box.y],
+    [box.x + box.width, box.y + box.height],
+    [box.x, box.y + box.height],
+  ].map(([x, y]) => ({
+    x: input.x + x * cosine - y * sine,
+    y: input.y + x * sine + y * cosine,
+  }))
+  const xs = corners.map((corner) => corner.x)
+  const ys = corners.map((corner) => corner.y)
+  const minimumX = Math.min(...xs)
+  const maximumX = Math.max(...xs)
+  const minimumY = Math.min(...ys)
+  const maximumY = Math.max(...ys)
+  return {
+    origin: { x: input.x, y: input.y },
+    rotation: input.rotation,
+    box,
+    worldBounds: { x: minimumX, y: minimumY, width: maximumX - minimumX, height: maximumY - minimumY },
+  }
+}
+
 /** 全局工艺只允许整面材质属性；字形工艺必须绑定具体图层。 */
 export function craftTypesForScope(scope: CraftScope): CraftType[] {
   return scope === 'global' ? [...GLOBAL_CRAFT_TYPES] : [...LAYER_CRAFT_TYPES]
@@ -74,7 +131,7 @@ export function textLineAnchorX(align: TextLayer['align'], width: number): numbe
 }
 
 /** 矩形以图层中心为锚点，2D 预览、变换和导出共享同一盒模型。 */
-export function rectangleRenderProps(layer: Pick<ShapeLayer, 'width' | 'height' | 'fill' | 'stroke' | 'strokeWidth' | 'cornerRadius'>): {
+export function rectangleRenderProps(layer: Pick<ShapeLayer, 'width' | 'height' | 'fill' | 'stroke' | 'strokeWidth' | 'cornerRadius' | 'designMetrics'>): {
   x: number
   y: number
   width: number
@@ -84,9 +141,17 @@ export function rectangleRenderProps(layer: Pick<ShapeLayer, 'width' | 'height' 
   strokeWidth: number
   cornerRadius: number
 } {
+  const transform = resolveLayerRenderTransform({
+    x: 0,
+    y: 0,
+    rotation: 0,
+    width: layer.width,
+    height: layer.height,
+    anchor: layer.designMetrics?.anchor,
+  })
   return {
-    x: -layer.width / 2,
-    y: -layer.height / 2,
+    x: transform.box.x,
+    y: transform.box.y,
     width: layer.width,
     height: layer.height,
     fill: layer.fill,
@@ -190,9 +255,18 @@ export function drawShapeMask(
   mode: MaskDrawMode,
 ): void {
   const normalized = normalizeShapeLayer(layer)
+  const transform = resolveLayerRenderTransform({
+    x: normalized.x,
+    y: normalized.y,
+    rotation: normalized.rotation,
+    width: normalized.width,
+    height: normalized.height,
+    anchor: normalized.designMetrics?.anchor,
+  })
   ctx.save()
-  ctx.translate(normalized.x, normalized.y)
-  ctx.rotate((normalized.rotation * Math.PI) / 180)
+  ctx.translate(transform.origin.x, transform.origin.y)
+  ctx.rotate((transform.rotation * Math.PI) / 180)
+  ctx.translate(transform.box.x + normalized.width / 2, transform.box.y + normalized.height / 2)
   ctx.beginPath()
   traceShape(ctx, normalized)
   ctx.fillStyle = `rgb(${gray},${gray},${gray})`
@@ -205,6 +279,19 @@ export function drawShapeMask(
 }
 
 const CJK_CHARACTER = /[\u2e80-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]/u
+
+export interface TextMeasureMetrics {
+  width: number
+  actualBoundingBoxAscent?: number
+  actualBoundingBoxDescent?: number
+}
+
+export type TextMeasureResult = number | TextMeasureMetrics
+export type TextMeasureLine = (line: string) => TextMeasureResult
+
+function measuredWidth(result: TextMeasureResult): number {
+  return typeof result === 'number' ? result : result.width
+}
 
 function splitLongToken(token: string, maximumWidth: number, measureLine: (line: string) => number): string[] {
   const pieces: string[] = []
@@ -220,6 +307,54 @@ function splitLongToken(token: string, maximumWidth: number, measureLine: (line:
   }
   if (current || pieces.length === 0) pieces.push(current)
   return pieces
+}
+
+function wrapTextCharacters(paragraph: string, maximumWidth: number, measureLine: (line: string) => number): string[] {
+  if (paragraph === '') return ['']
+  const lines: string[] = []
+  let current = ''
+  for (const character of Array.from(paragraph)) {
+    const candidate = current + character
+    if (current && measureLine(candidate) > maximumWidth) {
+      lines.push(current)
+      current = character
+    } else {
+      current = candidate
+    }
+  }
+  lines.push(current)
+  return lines
+}
+
+function wrapTextWords(paragraph: string, maximumWidth: number, measureLine: (line: string) => number): string[] {
+  if (paragraph === '') return ['']
+  const tokens = paragraph.match(/\s+|[\u3400-\u9fff\uf900-\ufaff]|[^\s\u3400-\u9fff\uf900-\ufaff]+/gu) ?? []
+  const lines: string[] = []
+  let current = ''
+  for (const token of tokens) {
+    const candidate = current + token
+    if (!current || measureLine(candidate) <= maximumWidth) {
+      current = candidate
+      continue
+    }
+    lines.push(current.trimEnd())
+    current = /^\s+$/u.test(token) ? '' : token
+  }
+  if (current || lines.length === 0) lines.push(current.trimEnd())
+  return lines
+}
+
+export interface TextLayerLayout {
+  width: number
+  height: number
+  rotation: number
+  /** Lines that are actually rendered after maxLines clipping. */
+  lines: string[]
+  totalLineCount: number
+  hiddenLineCount: number
+  overflow: boolean
+  /** Alphabetic baseline of the first rendered line, measured from the local box top. */
+  baselineFromTop: number
 }
 
 function wrapTextParagraph(paragraph: string, maximumWidth: number, measureLine: (line: string) => number): string[] {
@@ -271,21 +406,48 @@ function wrapTextParagraph(paragraph: string, maximumWidth: number, measureLine:
 /** 2D 可见文字、烘焙颜色与 PBR 遮罩共用的确定性盒模型。 */
 export function measureTextLayerLayout(
   layer: TextLayer,
-  measureLine: (line: string) => number,
-): { width: number; height: number; rotation: number; lines: string[] } {
+  measureLine: TextMeasureLine,
+): TextLayerLayout {
+  const lineWidth = (line: string): number => measuredWidth(measureLine(line))
   const explicitWidth = typeof layer.width === 'number' && Number.isFinite(layer.width) && layer.width > 0
     ? layer.width
     : null
-  const lines = explicitWidth === null
+  const wrapPolicy = layer.designMetrics?.wrapPolicy
+  const allLines = explicitWidth === null || wrapPolicy === 'none'
     ? layer.text.split('\n')
-    : layer.text.split('\n').flatMap((paragraph) => wrapTextParagraph(paragraph, explicitWidth, measureLine))
-  const width = explicitWidth ?? Math.max(1, ...lines.map((line) => measureLine(line)))
+    : layer.text.split('\n').flatMap((paragraph) => (
+        wrapPolicy === 'word'
+          ? wrapTextWords(paragraph, explicitWidth, lineWidth)
+          : wrapPolicy === 'character'
+            ? wrapTextCharacters(paragraph, explicitWidth, lineWidth)
+            : wrapTextParagraph(paragraph, explicitWidth, lineWidth)
+      ))
+  const maximumLines = layer.designMetrics?.maxLines
+  const renderedLineCount = typeof maximumLines === 'number' && Number.isInteger(maximumLines) && maximumLines > 0
+    ? Math.min(maximumLines, allLines.length)
+    : allLines.length
+  const lines = allLines.slice(0, renderedLineCount)
+  const hiddenLineCount = allLines.length - lines.length
+  const horizontalOverflow = explicitWidth !== null && allLines.some((line) => lineWidth(line) > explicitWidth)
+  const width = explicitWidth ?? Math.max(1, ...lines.map(lineWidth))
+  const lineHeight = layer.fontSize * (layer.lineHeight || 1.2)
   const height = Math.max(1, layer.fontSize * (layer.lineHeight || 1.2) * lines.length)
+  const referenceMetrics = measureLine('Mg')
+  const ascent = typeof referenceMetrics === 'number'
+    ? layer.fontSize * 0.8
+    : referenceMetrics.actualBoundingBoxAscent ?? layer.fontSize * 0.8
+  const descent = typeof referenceMetrics === 'number'
+    ? layer.fontSize * 0.2
+    : referenceMetrics.actualBoundingBoxDescent ?? layer.fontSize * 0.2
   return {
     width,
     height,
     rotation: layer.rotation + (layer.direction === 'vertical' ? 90 : 0),
     lines,
+    totalLineCount: allLines.length,
+    hiddenLineCount,
+    overflow: hiddenLineCount > 0 || horizontalOverflow,
+    baselineFromTop: Math.max(0, (lineHeight - ascent - descent) / 2 + ascent),
   }
 }
 
@@ -459,9 +621,17 @@ export function drawImageMaskShape(
   tctx.fillStyle = `rgb(${gray},${gray},${gray})`
   tctx.fillRect(0, 0, width, height)
   ctx.save()
-  ctx.translate(layer.x, layer.y)
-  ctx.rotate((layer.rotation * Math.PI) / 180)
-  ctx.drawImage(temp, -layer.width / 2, -layer.height / 2, layer.width, layer.height)
+  const transform = resolveLayerRenderTransform({
+    x: layer.x,
+    y: layer.y,
+    rotation: layer.rotation,
+    width: layer.width,
+    height: layer.height,
+    anchor: layer.designMetrics?.anchor,
+  })
+  ctx.translate(transform.origin.x, transform.origin.y)
+  ctx.rotate((transform.rotation * Math.PI) / 180)
+  ctx.drawImage(temp, transform.box.x, transform.box.y, layer.width, layer.height)
   ctx.restore()
 }
 
