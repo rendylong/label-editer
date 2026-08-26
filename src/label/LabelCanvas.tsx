@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Stage, Layer, Group, Text as KText, Image as KImage, Rect as KRect, Shape as KShape, Line, Transformer } from 'react-konva'
+import { Stage, Layer, Group, Text as KText, Image as KImage, Rect as KRect, Ellipse as KEllipse, Path as KPath, Shape as KShape, Line, Transformer } from 'react-konva'
 import type Konva from 'konva'
 import { useLabelStore, useUiStore } from '../state/stores'
 import type { LabelLayer, TextLayer, ImageLayer } from './types'
@@ -29,14 +29,14 @@ import {
   type MaskDrawMode,
   type TextMeasureMetrics,
 } from './craft'
-import { resolveLabelPaper } from './paper'
+import { resolveCarrierSurface, resolveLabelPaper } from './paper'
 import { normalizeShapeLayer } from './shapeGeometry'
 import { commitLayerGesture, nextLayerSelection, type LayerNodeTransform } from './selection'
 import { useFlushableDebouncedBake } from './useFlushableDebouncedBake'
 import { registerExportBakeSurface } from '../app/actions'
 import { assertRasterAspect, assertRasterDimensions, fitRasterDisplayHeight, RasterAspectError } from '../app/canvasLayout'
 
-export { resolveLabelPaper } from './paper'
+export { resolveCarrierSurface, resolveLabelPaper } from './paper'
 
 const LABEL_CANVAS_GUIDES = {
   seam: 'rgba(217,45,32,0.55)',
@@ -329,10 +329,13 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     const ratio = cfg.canvas.width / (stage.width() || 1)
     if (!isFinite(ratio) || ratio <= 0) return false
     const color = captureDesignCanvas(stage, ratio, cfg.canvas)
+    const carrierSurface = resolveCarrierSurface(cfg)
+    const renderLayers = carrierSurface.renderDecoration ? cfg.layers : []
+    const renderGlobalCraft = carrierSurface.renderDecoration ? cfg.globalCraft.craft : []
     // 全局工艺后处理（颜色画布）
     const cctx = color.getContext('2d')
     if (cctx) {
-      applyPhysicalColorSurface(cctx, color.width, color.height, cfg.globalCraft.craft)
+      applyPhysicalColorSurface(cctx, color.width, color.height, renderGlobalCraft)
       clearTransparentCanvasBorder(cctx, color.width, color.height)
     }
     const drawLayer = (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode) => {
@@ -342,8 +345,8 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         if (image) drawImageMaskShape(ctx, layer, image, gray)
       } else drawShapeMask(ctx, layer, gray, mode)
     }
-    const masks = renderMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, cfg.layers, cfg.globalCraft.craft)
-    const textOverflowLayerIds = cfg.layers.flatMap((layer) => {
+    const masks = renderMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, renderLayers, renderGlobalCraft)
+    const textOverflowLayerIds = renderLayers.flatMap((layer) => {
       if (layer.kind !== 'text' || !layer.visible) return []
       const measurementCanvas = document.createElement('canvas')
       const measurementContext = measurementCanvas.getContext('2d')
@@ -383,7 +386,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
 
   // 编辑中保持 300ms 防抖；若立即切到纯 3D，layout cleanup 会在 Stage ref
   // 释放前同步完成最后一次烘焙，避免 bakeMap 永久停留在旧版本。
-  useFlushableDebouncedBake(flushBake, [layers, globalCraft, config?.paper, config?.canvas, imgBits, fontRevision, flushBake], 300)
+  useFlushableDebouncedBake(flushBake, [layers, globalCraft, config?.paper, config?.carrier, config?.substrate, config?.canvas, imgBits, fontRevision, flushBake], 300)
 
   // Transformer 绑定
   useEffect(() => {
@@ -432,7 +435,8 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
   }
 
   const sorted = [...layers].sort((a, b) => a.zIndex - b.zIndex)
-  const paper = resolveLabelPaper(config.paper)
+  const carrierSurface = resolveCarrierSurface(config)
+  const substrateBoundary = config.carrier === 'applied_label' ? config.substrate?.boundary : undefined
   // 显示尺寸 → 画布坐标 1:1 缩放：Stage 显示 displayWidth×displayHeight，
   // 内部所有元素统一使用画布坐标（canvas.width×canvas.height），经 contentScale 映射。
   const contentScale = spec.width > 0 ? displayWidth / spec.width : 1
@@ -450,10 +454,36 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         >
           {/* 设计层（画布坐标） */}
           <Layer scaleX={contentScale} scaleY={contentScale}>
-            {paper.enabled && (
-              <KRect width={spec.width} height={spec.height} fill={paper.color} opacity={paper.opacity} listening={false} />
-            )}
-            {sorted.map((layer) => {
+            {carrierSurface.substrateVisible && substrateBoundary?.shape === 'ellipse' ? (
+              <KEllipse
+                x={spec.width / 2}
+                y={spec.height / 2}
+                radiusX={spec.width / 2}
+                radiusY={spec.height / 2}
+                fill={carrierSurface.substrateColor}
+                opacity={carrierSurface.substrateOpacity}
+                listening={false}
+              />
+            ) : carrierSurface.substrateVisible && substrateBoundary?.shape === 'custom' && substrateBoundary.pathData ? (
+              <KPath
+                data={substrateBoundary.pathData}
+                fill={carrierSurface.substrateColor}
+                opacity={carrierSurface.substrateOpacity}
+                listening={false}
+              />
+            ) : carrierSurface.substrateVisible ? (
+              <KRect
+                width={spec.width}
+                height={spec.height}
+                fill={carrierSurface.substrateColor}
+                opacity={carrierSurface.substrateOpacity}
+                cornerRadius={substrateBoundary?.shape === 'rounded_rectangle'
+                  ? Math.max(0, (substrateBoundary.radiusMm ?? 0) * spec.width / Math.max(config.artboard?.widthMm ?? spec.width, 1))
+                  : 0}
+                listening={false}
+              />
+            ) : null}
+            {carrierSurface.renderDecoration && sorted.map((layer) => {
               const css = layer.kind === 'text' ? fontCssFor(layer.fontFamily, uploadedFonts) : ''
               const foil = layer.craft.find((c) => c.type === 'foil')
               const emboss = layer.craft.find((c) => c.type === 'emboss')

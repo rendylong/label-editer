@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LabelAreaConfig, LabelLayer } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
-import { designFontReadinessKey } from '../src/label/exportReadiness'
+import { carrierReadinessChecks, designFontReadinessKey } from '../src/label/exportReadiness'
 
 const external = vi.hoisted(() => ({
   canvasToPngBytes: vi.fn(async () => new Uint8Array([137, 80, 78, 71])),
@@ -179,6 +179,19 @@ function installArea(layers: LabelLayer[], fonts: LabelAreaConfig['fonts'] = [])
   useLabelStore.getState().addArea(area(layers, fonts))
   useLabelStore.getState().setBake('area-a', bake('stale', 1))
 }
+
+describe('carrier export readiness', () => {
+  it('exposes only declared-process checks for foil-or-ink-only output', () => {
+    const source = {
+      ...area([{ ...textLayer('foil', 'system-sans'), processes: [{ process: 'hot_stamp_foil' as const, spotName: 'COPPER' }] }]),
+      carrier: 'foil_or_ink_only' as const,
+    }
+
+    expect(carrierReadinessChecks(source).map((check) => check.code)).toEqual([
+      'registration', 'declared-process',
+    ])
+  })
+})
 
 async function settleAsyncWork(): Promise<void> {
   await Promise.resolve()
