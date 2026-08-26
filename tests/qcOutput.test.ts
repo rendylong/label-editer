@@ -57,10 +57,10 @@ function descriptor(id: string, viewId: string, areaId?: string, channel: 'color
   }
 }
 
-function inputFor(spec: Record<string, unknown>) {
+function inputFor(spec: Record<string, unknown>, areaTokensById: Record<string, string> = {}) {
   const specAreas = (spec as { areas: Array<{ id: string; side?: 'front' | 'back' }> }).areas
   const areaEntries = specAreas.flatMap((area) => {
-    const token = qcAreaToken(area.id)
+    const token = areaTokensById[area.id] ?? qcAreaToken(area.id)
     const face = view(`area-${token}-face`, area.id)
     const craft = view(`area-${token}-craft`, area.id)
     return [
@@ -87,7 +87,7 @@ function inputFor(spec: Record<string, unknown>) {
       preset: 'qc-standard',
       views: entries.map(([request, artifact]) => ({ artifact, view: request, camera: camera() })),
       areas: specAreas.map((area) => {
-        const token = qcAreaToken(area.id)
+        const token = areaTokensById[area.id] ?? qcAreaToken(area.id)
         return {
           areaId: area.id, meshIndex: 7, nodeName: 'Bottle',
           ...(area.side === undefined ? {} : { side: area.side }),
@@ -193,6 +193,38 @@ describe('QC output manifest', () => {
     expect(new Set(areaPaths).size).toBe(areaPaths.length)
     expect(areaPaths.every((value: string) => /^areas\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.png$/.test(value))).toBe(true)
     expect(validateQcManifest(manifest)).toEqual(manifest)
+  })
+
+  it('publishes case-fold-colliding opaque area ids under distinct deterministic tokens', async () => {
+    const spec = await fixture()
+    spec.areas[0].id = 'Front'
+    spec.areas[1].id = 'front'
+    const manifest = buildQcManifest(inputFor(spec, {
+      Front: 'Front-6de898785ca4f504',
+      front: 'front-e179dbd83ca4c2a4',
+    }))
+
+    expect(manifest.areas.map((area: { id: string }) => area.id)).toEqual(['Front', 'front'])
+    const pathsByArea = new Map(manifest.areas.map((area: { id: string; artifactIds: string[] }) => [
+      area.id,
+      area.artifactIds.map((artifactId) => manifest.artifacts.find((artifact: { id: string }) => artifact.id === artifactId)?.path),
+    ]))
+    expect(pathsByArea.get('Front')).toEqual([
+      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-face.png',
+      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-craft.png',
+    ])
+    expect(pathsByArea.get('front')).toEqual([
+      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-face.png',
+      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-craft.png',
+    ])
+    expect(validateQcManifest(manifest)).toEqual(manifest)
+
+    const rawCaseOnlyDirectories = structuredClone(manifest)
+    for (const artifact of rawCaseOnlyDirectories.artifacts) {
+      if (artifact.areaId === 'Front') artifact.path = artifact.path.replace('areas/Front-6de898785ca4f504/', 'areas/Front/')
+      if (artifact.areaId === 'front') artifact.path = artifact.path.replace('areas/front-e179dbd83ca4c2a4/', 'areas/front/')
+    }
+    expect(() => validateQcManifest(rawCaseOnlyDirectories)).toThrow()
   })
 
   it('preserves the stored artifact hash format without recomputing it', async () => {
@@ -384,6 +416,14 @@ describe('QC output manifest', () => {
     const views = [{ id: 'unicode-detail', direction: [0, 0, 1], target: areaId, framing: 'fit-area', channel: 'color' }]
 
     expect(parseQcCameraConfig({ version: 1, views }, { areaIds: [areaId] })).toEqual(views)
+  })
+
+  it('accepts target model with area framing only when model is an exact known opaque area id', () => {
+    const areaView = [{ id: 'model-area', direction: [0, 0, 1], target: 'model', framing: 'fit-area', channel: 'color' }]
+
+    expect(parseQcCameraConfig({ version: 1, views: areaView }, { areaIds: ['model'] })).toEqual(areaView)
+    expect(() => parseQcCameraConfig({ version: 1, views: areaView }, { areaIds: ['front'] }))
+      .toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
   })
 
   it.each([

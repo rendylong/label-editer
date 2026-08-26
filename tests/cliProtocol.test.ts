@@ -74,6 +74,29 @@ function qcView(id: string, areaId?: string, channel: 'color' | 'metalness' | 'r
   }
 }
 
+type QcCustomFixtureView = {
+  id: string
+  direction: [number, number, number]
+  target: string
+  framing: 'fit-model' | 'fit-area'
+  channel: 'color' | 'metalness' | 'roughness' | 'bump'
+}
+
+function qcCustomView(view: QcCustomFixtureView) {
+  const areaId = view.framing === 'fit-area' ? view.target : undefined
+  return {
+    id: view.id,
+    target: areaId ? { kind: 'area' as const, areaId } : { kind: 'model' as const },
+    framing: view.framing,
+    pose: { kind: 'direction' as const, direction: view.direction },
+    channel: view.channel,
+    width: 1440,
+    height: 1440,
+    ...(areaId ? { areaId } : {}),
+    reason: 'Custom QC view',
+  }
+}
+
 function qcDescriptor(view: ReturnType<typeof qcView>) {
   return {
     id: `qc-${view.id}`,
@@ -96,6 +119,8 @@ function qcRuntime(options: {
   areaIds?: string[]
   includeSide?: boolean
   requiredChannelsByArea?: Record<string, Array<'metalness' | 'roughness' | 'bump'>>
+  areaTokensByArea?: Record<string, string>
+  customViews?: QcCustomFixtureView[]
 } = {}) {
   const areaIds = options.areaIds ?? ['front', 'back']
   const requiredChannelsByArea = options.requiredChannelsByArea
@@ -103,10 +128,11 @@ function qcRuntime(options: {
   const views = [
     ...QC_MODEL_VIEW_IDS.map((id) => qcView(id)),
     ...areaIds.flatMap((areaId) => [
-      qcView(`area-${qcAreaToken(areaId)}-face`, areaId),
-      qcView(`area-${qcAreaToken(areaId)}-craft`, areaId),
-      ...(requiredChannelsByArea[areaId] ?? []).map((channel) => qcView(`area-${qcAreaToken(areaId)}-${channel}`, areaId, channel)),
+      qcView(`area-${options.areaTokensByArea?.[areaId] ?? qcAreaToken(areaId)}-face`, areaId),
+      qcView(`area-${options.areaTokensByArea?.[areaId] ?? qcAreaToken(areaId)}-craft`, areaId),
+      ...(requiredChannelsByArea[areaId] ?? []).map((channel) => qcView(`area-${options.areaTokensByArea?.[areaId] ?? qcAreaToken(areaId)}-${channel}`, areaId, channel)),
     ]),
+    ...(options.customViews ?? []).map(qcCustomView),
   ]
   const descriptors = views.map(qcDescriptor)
   const bridgeCalls: Array<{ method: string, input: unknown }> = []
@@ -442,6 +468,76 @@ describe('label-cli protocol', () => {
     expect(manifest.areas.map((area: { id: string }) => area.id)).toEqual(areaIds)
     expect(manifest.artifacts.filter((artifact: { areaId?: string }) => artifact.areaId !== undefined)
       .every((artifact: { path: string }) => /^areas\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.png$/.test(artifact.path))).toBe(true)
+  })
+
+  it.each(['label-spec-v2', 'label-project-v3'] as const)('publishes distinct case-fold-safe tokens for a %s document', async (kind) => {
+    const directory = await temporaryDirectory()
+    const input = kind === 'label-spec-v2' ? await fixture() : projectV3()
+    const sourceAreas = input.areas
+    input.areas = [
+      { ...sourceAreas[0], id: 'Front', name: 'Uppercase area' },
+      { ...(sourceAreas[1] ?? sourceAreas[0]), id: 'front', name: 'Lowercase area' },
+    ]
+    const areaIds = ['Front', 'front']
+    const inputPath = path.join(directory, kind === 'label-spec-v2' ? 'spec.json' : 'project.lbl.json')
+    const glbPath = path.join(directory, 'model.glb')
+    const outputDir = path.join(directory, 'qc-output')
+    await writeFile(inputPath, JSON.stringify(input))
+    await writeFile(glbPath, 'glb')
+    const harness = qcRuntime({
+      areaIds,
+      requiredChannelsByArea: {},
+      areaTokensByArea: {
+        Front: 'Front-6de898785ca4f504',
+        front: 'front-e179dbd83ca4c2a4',
+      },
+    })
+    harness.runtime.allowedRoots = [directory]
+
+    const result = await createOperations(harness.runtime).qc({ inputPath, glbPath, outputDir })
+
+    expect(result.ok).toBe(true)
+    const manifest = JSON.parse(Buffer.from(harness.publications[0].artifacts.at(-1).bytes).toString('utf8'))
+    expect(manifest.areas.map((area: { id: string }) => area.id)).toEqual(areaIds)
+    expect(manifest.artifacts.filter((artifact: { areaId?: string }) => artifact.areaId === 'Front').map((artifact: { path: string }) => artifact.path)).toEqual([
+      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-face.png',
+      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-craft.png',
+    ])
+    expect(manifest.artifacts.filter((artifact: { areaId?: string }) => artifact.areaId === 'front').map((artifact: { path: string }) => artifact.path)).toEqual([
+      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-face.png',
+      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-craft.png',
+    ])
+  })
+
+  it.each(['label-spec-v2', 'label-project-v3'] as const)('targets an opaque area named model from %s camera config by fit-area framing', async (kind) => {
+    const directory = await temporaryDirectory()
+    const input = kind === 'label-spec-v2' ? await fixture() : projectV3()
+    input.areas = [{ ...input.areas[0], id: 'model', name: 'Opaque model area' }]
+    const customViews: QcCustomFixtureView[] = [
+      { id: 'whole-model', direction: [0, 0, 1], target: 'model', framing: 'fit-model', channel: 'color' },
+      { id: 'model-area', direction: [0, 0, 1], target: 'model', framing: 'fit-area', channel: 'color' },
+    ]
+    const inputPath = path.join(directory, kind === 'label-spec-v2' ? 'spec.json' : 'project.lbl.json')
+    const cameraConfigPath = path.join(directory, 'cameras.json')
+    const glbPath = path.join(directory, 'model.glb')
+    const outputDir = path.join(directory, 'qc-output')
+    await writeFile(inputPath, JSON.stringify(input))
+    await writeFile(cameraConfigPath, JSON.stringify({ version: 1, views: customViews }))
+    await writeFile(glbPath, 'glb')
+    const harness = qcRuntime({ areaIds: ['model'], requiredChannelsByArea: {}, customViews })
+    harness.runtime.allowedRoots = [directory]
+
+    const result = await createOperations(harness.runtime).qc({ inputPath, glbPath, outputDir, cameraConfigPath })
+
+    expect(result.ok).toBe(true)
+    expect(harness.bridgeCalls.at(-1)?.input).toMatchObject({ customViews })
+    const manifest = JSON.parse(Buffer.from(harness.publications[0].artifacts.at(-1).bytes).toString('utf8'))
+    expect(manifest.artifacts.find((artifact: { viewId: string }) => artifact.viewId === 'whole-model')).toMatchObject({
+      view: { target: 'model', framing: 'fit-model' },
+    })
+    expect(manifest.artifacts.find((artifact: { viewId: string }) => artifact.viewId === 'model-area')).toMatchObject({
+      areaId: 'model', view: { target: 'model', framing: 'fit-area' },
+    })
   })
 
   it('leaves no output or staging directory when the browser QC batch fails', async () => {

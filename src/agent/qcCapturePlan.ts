@@ -39,6 +39,11 @@ function stableAreaHash(areaId: string, seed: number, reverse = false): string {
   return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
+function areaFingerprint(areaId: string, attempt = 0): string {
+  const value = attempt === 0 ? areaId : `${areaId}\u0000${attempt}`
+  return `${stableAreaHash(value, 2166136261)}${stableAreaHash(value, 0x9e3779b9, true)}`
+}
+
 function assertOpaqueAreaId(areaId: unknown): asserts areaId is string {
   if (typeof areaId !== 'string' || areaId.length === 0) invalidUsage('Area id must be a non-empty string')
 }
@@ -51,12 +56,39 @@ export function qcAreaToken(areaId: string): string {
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^[-._]+|[-._]+$/g, '')
     .slice(0, 31) || 'area'
-  const fingerprint = `${stableAreaHash(areaId, 2166136261)}${stableAreaHash(areaId, 0x9e3779b9, true)}`
-  return `${stem}-${fingerprint}`
+  return `${stem}-${areaFingerprint(areaId)}`
 }
 
-function areaViewId(areaId: string, suffix: string): string {
-  return `area-${qcAreaToken(areaId)}-${suffix}`
+function publicationTokenKey(value: string): string {
+  return value.normalize('NFKC').toLowerCase()
+}
+
+function deriveQcAreaTokens(areaIds: Iterable<string>): Map<string, string> {
+  const baseTokens = new Map<string, string>()
+  for (const areaId of areaIds) baseTokens.set(areaId, qcAreaToken(areaId))
+  const tokens = new Map(baseTokens)
+  const attempts = new Map<string, number>()
+  for (let pass = 0; pass <= 8; pass += 1) {
+    const groups = new Map<string, string[]>()
+    for (const [areaId, token] of tokens) {
+      const key = publicationTokenKey(token)
+      groups.set(key, [...(groups.get(key) ?? []), areaId])
+    }
+    const collisions = [...groups.values()].filter((group) => group.length > 1)
+    if (collisions.length === 0) return tokens
+    for (const group of collisions) {
+      for (const areaId of group) {
+        const attempt = (attempts.get(areaId) ?? -1) + 1
+        attempts.set(areaId, attempt)
+        tokens.set(areaId, `${baseTokens.get(areaId)!.slice(0, 48)}-${areaFingerprint(areaId, attempt)}`)
+      }
+    }
+  }
+  invalidUsage('QC area tokens cannot be made publication-safe and unique')
+}
+
+function areaViewId(areaToken: string, suffix: string): string {
+  return `area-${areaToken}-${suffix}`
 }
 
 function assertValidId(id: string, label: string): void {
@@ -95,16 +127,12 @@ export function buildQcCapturePlan(input: {
     invalidUsage('QC capture dimensions must be finite and positive')
   }
   const areaIds = new Set<string>()
-  const areaTokens = new Map<string, string>()
   for (const area of input.areas) {
     assertOpaqueAreaId(area.id)
     if (areaIds.has(area.id)) invalidUsage(`Duplicate area id: ${area.id}`)
     areaIds.add(area.id)
-    const token = qcAreaToken(area.id)
-    const existing = areaTokens.get(token)
-    if (existing !== undefined && existing !== area.id) invalidUsage(`QC area token collision: ${existing} / ${area.id}`)
-    areaTokens.set(token, area.id)
   }
+  const areaTokens = deriveQcAreaTokens(areaIds)
   const ids = new Set<string>()
   const plan: QcViewRequest[] = []
   const add = (view: QcViewRequest) => {
@@ -118,24 +146,31 @@ export function buildQcCapturePlan(input: {
     add({ id, target: { kind: 'model' }, framing: 'fit-model', pose: { kind: 'direction', direction: [...direction] }, channel: 'color', width: input.width, height: input.height, reason: 'Standard model orientation' })
   }
   for (const area of input.areas) {
+    const areaToken = areaTokens.get(area.id)!
     const target = { kind: 'area' as const, areaId: area.id }
     for (const [id, pose, reason] of [
-      [areaViewId(area.id, 'face'), { kind: 'area-face' as const }, 'Area face color close-up'],
-      [areaViewId(area.id, 'craft'), { kind: 'area-craft' as const }, 'Area craft color close-up'],
+      [areaViewId(areaToken, 'face'), { kind: 'area-face' as const }, 'Area face color close-up'],
+      [areaViewId(areaToken, 'craft'), { kind: 'area-craft' as const }, 'Area craft color close-up'],
     ] as const) {
       add({ id, target, framing: 'fit-area', pose, channel: 'color', width: input.width, height: input.height, areaId: area.id, reason })
     }
     for (const channel of craftChannelsForArea(area)) {
-      add({ id: areaViewId(area.id, channel), target, framing: 'fit-area', pose: { kind: 'area-face' }, channel, width: input.width, height: input.height, areaId: area.id, reason: `Area ${channel} craft channel` })
+      add({ id: areaViewId(areaToken, channel), target, framing: 'fit-area', pose: { kind: 'area-face' }, channel, width: input.width, height: input.height, areaId: area.id, reason: `Area ${channel} craft channel` })
     }
   }
   for (const custom of input.customViews) {
     assertValidId(custom.id, 'custom view')
     assertDirection(custom.direction, `custom view ${custom.id}`)
-    const isModel = custom.target === 'model'
-    if (custom.framing === 'fit-area' && isModel) invalidUsage(`fit-area custom view must target an area: ${custom.id}`)
-    if (!isModel && !areaIds.has(custom.target)) invalidUsage(`Custom view targets missing area: ${custom.target}`)
-    if (custom.framing === 'fit-model' && !isModel) invalidUsage(`fit-model custom view must target model: ${custom.id}`)
+    let isModel: boolean
+    if (custom.framing === 'fit-model') {
+      if (custom.target !== 'model') invalidUsage(`fit-model custom view must target model: ${custom.id}`)
+      isModel = true
+    } else if (custom.framing === 'fit-area') {
+      if (!areaIds.has(custom.target)) invalidUsage(`Custom view targets missing area: ${custom.target}`)
+      isModel = false
+    } else {
+      invalidUsage(`Invalid custom view framing: ${custom.id}`)
+    }
     add({ id: custom.id, target: isModel ? { kind: 'model' } : { kind: 'area', areaId: custom.target }, framing: custom.framing, pose: { kind: 'direction', direction: [...custom.direction] }, channel: custom.channel, width: input.width, height: input.height, ...(isModel ? {} : { areaId: custom.target }), reason: 'Custom QC view' })
   }
   return plan

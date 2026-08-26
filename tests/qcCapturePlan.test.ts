@@ -66,6 +66,25 @@ describe('QC capture plan', () => {
     }
   })
 
+  it('disambiguates case-fold-colliding area ids without changing an isolated safe token', () => {
+    const build = (ids: string[]) => buildQcCapturePlan({
+      preset: 'qc-standard', width: 1440, height: 1440,
+      areas: ids.map((id) => area(id)), customViews: [],
+    }).filter((view) => view.areaId !== undefined)
+    const expected = new Map([
+      ['Front', ['area-Front-6de898785ca4f504-face', 'area-Front-6de898785ca4f504-craft']],
+      ['front', ['area-front-e179dbd83ca4c2a4-face', 'area-front-e179dbd83ca4c2a4-craft']],
+    ])
+
+    for (const views of [build(['Front', 'front']), build(['front', 'Front'])]) {
+      for (const [areaId, viewIds] of expected) {
+        expect(views.filter((view) => view.areaId === areaId).map((view) => view.id)).toEqual(viewIds)
+      }
+      expect(new Set(views.map((view) => view.id.normalize('NFKC').toLowerCase())).size).toBe(views.length)
+    }
+    expect(build(['Front']).map((view) => view.id)).toEqual(['area-Front-face', 'area-Front-craft'])
+  })
+
   it('allows a safe custom view id to target a known opaque area id', () => {
     const areaId = '正面 标签／α'
     const plan = buildQcCapturePlan({
@@ -78,6 +97,22 @@ describe('QC capture plan', () => {
       id: 'unicode-detail', areaId,
       target: { kind: 'area', areaId },
     })
+  })
+
+  it('uses framing to distinguish the whole-model sentinel from an opaque area id named model', () => {
+    const plan = buildQcCapturePlan({
+      preset: 'qc-standard', width: 1440, height: 1440,
+      areas: [area('model')],
+      customViews: [
+        { id: 'whole-model', direction: [0, 0, 1], target: 'model', framing: 'fit-model', channel: 'color' },
+        { id: 'model-area', direction: [0, 0, 1], target: 'model', framing: 'fit-area', channel: 'color' },
+      ],
+    })
+
+    expect(plan.slice(-2)).toEqual([
+      expect.objectContaining({ id: 'whole-model', target: { kind: 'model' }, framing: 'fit-model' }),
+      expect.objectContaining({ id: 'model-area', target: { kind: 'area', areaId: 'model' }, areaId: 'model', framing: 'fit-area' }),
+    ])
   })
 
   it('keeps six model views and two color close-ups for every area', () => {
@@ -120,6 +155,7 @@ describe('QC capture plan', () => {
     [{ id: '../escape', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }],
     [{ id: 'zero', direction: [0, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }],
     [{ id: 'missing', direction: [1, 0, 0], target: 'absent', framing: 'fit-area', channel: 'color' }],
+    [{ id: 'missing-model-area', direction: [1, 0, 0], target: 'model', framing: 'fit-area', channel: 'color' }],
   ])('rejects an invalid custom view', (view) => {
     expect(() => buildQcCapturePlan({
       preset: 'qc-standard', width: 1440, height: 1440,

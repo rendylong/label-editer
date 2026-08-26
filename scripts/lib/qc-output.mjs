@@ -118,6 +118,11 @@ function stableAreaHash(areaId, seed, reverse = false) {
   return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
+function areaFingerprint(areaId, attempt = 0) {
+  const value = attempt === 0 ? areaId : `${areaId}\u0000${attempt}`
+  return `${stableAreaHash(value, 2166136261)}${stableAreaHash(value, 0x9e3779b9, true)}`
+}
+
 export function qcAreaToken(areaId) {
   assertOpaqueAreaId(areaId)
   if (areaId.length <= 48 && SAFE_TOKEN_PATTERN.test(areaId)) return areaId
@@ -125,12 +130,34 @@ export function qcAreaToken(areaId) {
     .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/^[-._]+|[-._]+$/g, '')
     .slice(0, 31) || 'area'
-  const fingerprint = `${stableAreaHash(areaId, 2166136261)}${stableAreaHash(areaId, 0x9e3779b9, true)}`
-  return `${stem}-${fingerprint}`
+  return `${stem}-${areaFingerprint(areaId)}`
 }
 
-function standardAreaViewId(areaId, suffix) {
-  return `area-${qcAreaToken(areaId)}-${suffix}`
+function deriveQcAreaTokens(areaIds) {
+  const baseTokens = new Map(areaIds.map((areaId) => [areaId, qcAreaToken(areaId)]))
+  const tokens = new Map(baseTokens)
+  const attempts = new Map()
+  for (let pass = 0; pass <= 8; pass += 1) {
+    const groups = new Map()
+    for (const [areaId, token] of tokens) {
+      const key = publicationPathKey(token)
+      groups.set(key, [...(groups.get(key) ?? []), areaId])
+    }
+    const collisions = [...groups.values()].filter((group) => group.length > 1)
+    if (collisions.length === 0) return tokens
+    for (const group of collisions) {
+      for (const areaId of group) {
+        const attempt = (attempts.get(areaId) ?? -1) + 1
+        attempts.set(areaId, attempt)
+        tokens.set(areaId, `${baseTokens.get(areaId).slice(0, 48)}-${areaFingerprint(areaId, attempt)}`)
+      }
+    }
+  }
+  throw invalid('QC area tokens cannot be made publication-safe and unique')
+}
+
+function standardAreaViewId(areaToken, suffix) {
+  return `area-${areaToken}-${suffix}`
 }
 
 function assertUnique(items, key, label) {
@@ -318,14 +345,17 @@ function modelSnapshot(inspection) {
   return { fileName: inspection.name, fingerprint: inspection.fingerprint, dimensions, meshes }
 }
 
-export function qcArtifactRelativePath(view) {
+export function qcArtifactRelativePath(view, areaTokens) {
   const request = view?.view
   if (!isRecord(request)) throw invalid('QC artifact view is missing')
   assertSafeString(request.id, 'QC view id')
   if (request.areaId !== undefined) assertOpaqueAreaId(request.areaId)
   const file = `${sanitizeArtifactName(request.id)}.png`
+  const areaToken = request.areaId === undefined
+    ? undefined
+    : (areaTokens?.get(request.areaId) ?? qcAreaToken(request.areaId))
   const relativePath = request.areaId
-    ? `areas/${qcAreaToken(request.areaId)}/${file}`
+    ? `areas/${areaToken}/${file}`
     : `model/${file}`
   assertSafeRelativePath(relativePath)
   return relativePath
@@ -338,20 +368,16 @@ export function parseQcCameraConfig(value, { areaIds = [] } = {}) {
   }
   if (!Array.isArray(areaIds)) throw invalid('QC camera area ids must be an array')
   const knownAreaIds = new Set()
-  const areaTokens = new Map()
   for (const areaId of areaIds) {
     if (typeof areaId !== 'string' || areaId.length === 0 || knownAreaIds.has(areaId)) {
       throw invalid(`Invalid or duplicate QC area id: ${String(areaId)}`)
     }
     knownAreaIds.add(areaId)
-    const token = qcAreaToken(areaId)
-    const existing = areaTokens.get(token)
-    if (existing !== undefined && existing !== areaId) throw invalid(`QC area token collision: ${existing} / ${areaId}`)
-    areaTokens.set(token, areaId)
   }
+  const areaTokens = deriveQcAreaTokens([...knownAreaIds])
   const ids = new Set(STANDARD_MODEL_VIEW_IDS)
   for (const areaId of knownAreaIds) {
-    for (const suffix of STANDARD_AREA_VIEW_SUFFIXES) ids.add(standardAreaViewId(areaId, suffix))
+    for (const suffix of STANDARD_AREA_VIEW_SUFFIXES) ids.add(standardAreaViewId(areaTokens.get(areaId), suffix))
   }
   return value.views.map((view, index) => {
     const label = `QC custom view ${index}`
@@ -362,9 +388,11 @@ export function parseQcCameraConfig(value, { areaIds = [] } = {}) {
     const direction = assertVector(view.direction, `${label} direction`)
     if (direction.every((part) => part === 0)) throw invalid(`Invalid ${label} direction: zero vector`)
     if (typeof view.target !== 'string' || view.target.length === 0) throw invalid(`Invalid ${label} target`)
-    const isModel = view.target === 'model'
-    if (!isModel && !knownAreaIds.has(view.target)) throw invalid(`${label} targets missing area: ${view.target}`)
-    if ((isModel && view.framing !== 'fit-model') || (!isModel && view.framing !== 'fit-area')) {
+    if (view.framing === 'fit-model') {
+      if (view.target !== 'model') throw invalid(`${label} framing does not match target`)
+    } else if (view.framing === 'fit-area') {
+      if (!knownAreaIds.has(view.target)) throw invalid(`${label} targets missing area: ${view.target}`)
+    } else {
       throw invalid(`${label} framing does not match target`)
     }
     if (!CHANNELS.has(view.channel)) throw invalid(`Invalid ${label} channel`)
@@ -388,6 +416,10 @@ export function buildQcManifest({ createdAt, project, inspection, evidence, arti
     throw invalid('Invalid QC evidence result')
   }
   if (!Array.isArray(artifacts)) throw invalid('QC session artifacts must be an array')
+  const areaTokens = deriveQcAreaTokens(evidence.areas.map((area, index) => {
+    if (!isRecord(area)) throw invalid(`Invalid QC evidence area ${index}`)
+    return assertOpaqueAreaId(area.areaId, `QC evidence area ${index} id`)
+  }))
   assertUnique(evidence.views.map((entry) => entry?.artifact), 'id', 'QC evidence artifact')
   assertUnique(evidence.views.map((entry) => entry?.view), 'id', 'QC evidence view')
   assertUnique(artifacts, 'id', 'stored QC artifact')
@@ -412,7 +444,7 @@ export function buildQcManifest({ createdAt, project, inspection, evidence, arti
     }
     return {
       id: descriptor.id,
-      path: qcArtifactRelativePath(entry),
+      path: qcArtifactRelativePath(entry, areaTokens),
       sha256: descriptor.sha256,
       mimeType: descriptor.mimeType,
       byteLength: descriptor.byteLength,
@@ -497,6 +529,8 @@ export function validateQcManifest(value) {
   validationSnapshot(value.validation)
   if (!Array.isArray(value.areas) || !Array.isArray(value.artifacts)) throw invalid('QC manifest areas and artifacts must be arrays')
   assertUnique(value.areas, 'id', 'QC manifest area')
+  const areaIds = new Set(value.areas.map((area) => area.id))
+  const areaTokens = deriveQcAreaTokens([...areaIds])
   assertUnique(value.artifacts, 'id', 'QC manifest artifact')
   assertUnique(value.artifacts, 'viewId', 'QC manifest artifact')
   assertUnique(value.artifacts.map((artifact) => ({ id: publicationPathKey(artifact.path) })), 'id', 'QC manifest artifact path')
@@ -516,7 +550,12 @@ export function validateQcManifest(value) {
     if (!POSE_KINDS.has(artifact.view.kind) || !FRAMINGS.has(artifact.view.framing)) throw invalid(`Invalid QC manifest artifact view: ${artifact.id}`)
     if (artifact.view.target === 'model') assertSafeString(artifact.view.target, 'QC manifest artifact target')
     else assertOpaqueAreaId(artifact.view.target, 'QC manifest artifact target')
-    if (artifact.areaId !== undefined) assertOpaqueAreaId(artifact.areaId, 'QC manifest artifact area id')
+    if (artifact.areaId !== undefined) {
+      assertOpaqueAreaId(artifact.areaId, 'QC manifest artifact area id')
+      const areaToken = areaTokens.get(artifact.areaId)
+      if (areaToken === undefined) throw invalid(`QC manifest artifact references missing area: ${artifact.id}`)
+      if (!artifact.path.startsWith(`areas/${areaToken}/`)) throw invalid(`QC manifest artifact path does not match area token: ${artifact.id}`)
+    }
     if (artifact.areaId === undefined && (artifact.view.target !== 'model' || artifact.view.framing !== 'fit-model')) {
       throw invalid(`QC manifest model artifact target or framing is invalid: ${artifact.id}`)
     }
@@ -528,12 +567,6 @@ export function validateQcManifest(value) {
       || artifact.view.kind !== 'direction' || artifact.view.target !== 'model'
       || artifact.view.framing !== 'fit-model') {
       throw invalid(`QC manifest is missing or has invalid required model view: ${viewId}`)
-    }
-  }
-  const areaIds = new Set(value.areas.map((area) => area.id))
-  for (const artifact of value.artifacts) {
-    if (artifact.areaId !== undefined && !areaIds.has(artifact.areaId)) {
-      throw invalid(`QC manifest artifact references missing area: ${artifact.id}`)
     }
   }
   for (const area of value.areas) {
