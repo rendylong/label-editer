@@ -7,7 +7,7 @@ import { create } from 'zustand'
 import type { GlbAnalysis, LabelAreaConfig, LabelLayer, PartNode, RemapParams, CanvasSpec, CraftEffect, AreaSnapshot, LabelAreaRange } from '../label/types'
 import { computeRemap, deriveCanvasSpec, deriveSurfaceCanvasSpec, type MeshAccessors, type RemapOutput } from '../glb/uvRemap'
 import { normalizeAreaRange } from '../glb/areaMath'
-import { assertRasterAspect, withBakeCanvasSize } from '../app/canvasLayout'
+import { assertRasterAspect, assertRasterDimensions, withBakeCanvasSize } from '../app/canvasLayout'
 import { assertPhysicalAreaPlacement, resolveLayersForCanvas } from '../app/physicalLayout'
 
 export interface BakeResult {
@@ -275,7 +275,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       else {
         assertRasterAspect(bake.spec)
         for (const canvas of [bake.color, bake.metalness, bake.roughness, bake.bump]) {
-          assertRasterAspect({ width: canvas.width, height: canvas.height, aspect: bake.spec.aspect })
+          assertRasterDimensions(canvas, bake.spec)
         }
         bakeMap[areaId] = bake
       }

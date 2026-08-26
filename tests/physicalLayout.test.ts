@@ -21,6 +21,35 @@ describe('physical label layout', () => {
     }))
   })
 
+  it.each([
+    [4096, 6143],
+    [4095, 6144],
+  ])('rejects a one-pixel raster mismatch at %ix%i', (width, height) => {
+    expect(() => canvasLayout.withBakeCanvasSize(
+      { width: 1024, height: 1536, aspect: 2 / 3 },
+      { width, height },
+    )).toThrow(expect.objectContaining({
+      name: 'RasterAspectError',
+      code: 'RASTER_ASPECT_MISMATCH',
+      details: expect.objectContaining({ width, height, tolerance: 0 }),
+    }))
+  })
+
+  it('uses one canonical rounded height for a non-integer ideal raster and its display stage', () => {
+    const aspect = 1.9846801867572283
+
+    expect(canvasLayout.canonicalRasterHeight?.(2048, aspect)).toBe(1032)
+    expect(canvasLayout.withBakeCanvasSize(
+      { width: 2048, height: 1032, aspect },
+      { width: 2048, height: 1032 },
+    )).toEqual({ width: 2048, height: 1032, aspect })
+    expect(() => canvasLayout.withBakeCanvasSize(
+      { width: 2048, height: 1032, aspect },
+      { width: 2048, height: 1031 },
+    )).toThrow(expect.objectContaining({ code: 'RASTER_ASPECT_MISMATCH' }))
+    expect(canvasLayout.fitRasterDisplayHeight?.(900, { width: 2048, height: 1032, aspect })).toBe(453.515625)
+  })
+
   it.each([[1024, 1024], [2048, 2048], [4096, 4096]])(
     'keeps apparent type and relative spacing at bake %ix%i',
     (width, height) => {

@@ -89,6 +89,33 @@ describe('physical design rendering fidelity', () => {
     }))
   })
 
+  it.each([
+    [4096, 6143],
+    [4095, 6144],
+  ])('rejects a one-pixel capture mismatch at %ix%i', (width, height) => {
+    const stage = {
+      find: () => [] as [],
+      draw: () => undefined,
+      toCanvas: () => ({ width, height }) as HTMLCanvasElement,
+    }
+
+    expect(() => labelCanvas.captureDesignCanvas(stage, 1, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toThrow(expect.objectContaining({
+      name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
+      details: expect.objectContaining({ width, height, tolerance: 0 }),
+    }))
+  })
+
+  it('accepts the canonical capture dimensions for a non-integer ideal height', () => {
+    const raster = { width: 2048, height: 1032 } as HTMLCanvasElement
+    const stage = { find: () => [] as [], draw: () => undefined, toCanvas: () => raster }
+
+    expect(labelCanvas.captureDesignCanvas(stage, 1, {
+      width: 2048, height: 1032, aspect: 1.9846801867572283,
+    })).toBe(raster)
+  })
+
   it('rejects a mismatched actual bake channel before it enters store state', () => {
     const raster = { width: 1600, height: 1600 } as HTMLCanvasElement
 
@@ -103,6 +130,22 @@ describe('physical design rendering fidelity', () => {
       name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
     }))
     expect(useLabelStore.getState().bakeMap['bad-raster']).toBeUndefined()
+  })
+
+  it.each([
+    [4096, 6143],
+    [4095, 6144],
+  ])('rejects a one-pixel store raster mismatch at %ix%i', (width, height) => {
+    const raster = { width, height } as HTMLCanvasElement
+
+    expect(() => useLabelStore.getState().setBake('bad-one-pixel-raster', {
+      color: raster, metalness: raster, roughness: raster, bump: raster,
+      spec: { width: 4096, height: 6144, aspect: 2 / 3 }, version: 1,
+    })).toThrow(expect.objectContaining({
+      name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
+      details: expect.objectContaining({ width, height, tolerance: 0 }),
+    }))
+    expect(useLabelStore.getState().bakeMap['bad-one-pixel-raster']).toBeUndefined()
   })
 
   it.each([

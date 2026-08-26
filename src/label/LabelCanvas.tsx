@@ -34,7 +34,7 @@ import { normalizeShapeLayer } from './shapeGeometry'
 import { commitLayerGesture, nextLayerSelection, type LayerNodeTransform } from './selection'
 import { useFlushableDebouncedBake } from './useFlushableDebouncedBake'
 import { registerExportBakeSurface } from '../app/actions'
-import { assertRasterAspect } from '../app/canvasLayout'
+import { assertRasterAspect, assertRasterDimensions, fitRasterDisplayHeight } from '../app/canvasLayout'
 
 export { resolveLabelPaper } from './paper'
 
@@ -83,8 +83,7 @@ export function captureDesignCanvas(
     stage.draw()
     const captured = stage.toCanvas({ pixelRatio })
     if (expectedCanvas) {
-      assertRasterAspect(expectedCanvas)
-      assertRasterAspect({ width: captured.width, height: captured.height, aspect: expectedCanvas.aspect })
+      assertRasterDimensions(captured, expectedCanvas)
     }
     return captured
   } finally {
@@ -251,10 +250,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
 
   const displayHeight = useMemo(() => {
     if (!spec || displayWidth <= 0) return 300
-    // Keep the display stage on the authoritative target aspect. Rounding here
-    // compounds under export pixelRatio and can turn a proportional stage into
-    // a detectably mismatched bake raster.
-    return displayWidth / spec.aspect
+    return fitRasterDisplayHeight(displayWidth, spec)
   }, [spec, displayWidth])
 
   // 烘焙（防抖）

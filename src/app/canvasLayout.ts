@@ -34,7 +34,15 @@ export class RasterAspectError extends Error {
   }
 }
 
-/** Allow only the sub-pixel ratio drift introduced by integer raster dimensions. */
+/** Canonical integer raster height for a chosen width and authoritative aspect. */
+export function canonicalRasterHeight(width: number, aspect: number): number {
+  if (!Number.isInteger(width) || width <= 0 || !Number.isFinite(aspect) || aspect <= 0) {
+    throw new RangeError('Raster width and aspect must be positive')
+  }
+  return Math.max(1, Math.round(width / aspect))
+}
+
+/** Require the one deterministic integer raster derived from width and aspect. */
 export function assertRasterAspect(canvas: { width: number; height: number; aspect: number }): void {
   if (!Number.isInteger(canvas.width) || canvas.width <= 0 || !Number.isInteger(canvas.height) || canvas.height <= 0
     || !Number.isFinite(canvas.aspect) || canvas.aspect <= 0) {
@@ -47,16 +55,42 @@ export function assertRasterAspect(canvas: { width: number; height: number; aspe
     })
   }
   const rasterAspect = canvas.width / canvas.height
-  const tolerance = Math.max(1e-6, canvas.aspect / canvas.height)
-  if (Math.abs(rasterAspect - canvas.aspect) > tolerance) {
+  if (canvas.height !== canonicalRasterHeight(canvas.width, canvas.aspect)) {
     throw new RasterAspectError({
       declaredAspect: canvas.aspect,
       rasterAspect,
       width: canvas.width,
       height: canvas.height,
-      tolerance,
+      tolerance: 0,
     })
   }
+}
+
+/** Require an actual capture/channel to match the explicit canonical canvas. */
+export function assertRasterDimensions(
+  actual: { width: number; height: number },
+  expected: { width: number; height: number; aspect: number },
+): void {
+  assertRasterAspect(expected)
+  if (actual.width !== expected.width || actual.height !== expected.height) {
+    throw new RasterAspectError({
+      declaredAspect: expected.aspect,
+      rasterAspect: actual.width / actual.height,
+      width: actual.width,
+      height: actual.height,
+      tolerance: 0,
+    })
+  }
+}
+
+/** Display height whose export pixel ratio lands on the canonical raster exactly. */
+export function fitRasterDisplayHeight(
+  displayWidth: number,
+  canvas: { width: number; height: number; aspect: number },
+): number {
+  assertRasterAspect(canvas)
+  if (!Number.isFinite(displayWidth) || displayWidth <= 0) throw new RangeError('Display width must be positive')
+  return displayWidth * canvas.height / canvas.width
 }
 
 export const INITIAL_SPLIT_PERCENT = 65
