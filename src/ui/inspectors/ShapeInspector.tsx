@@ -7,7 +7,7 @@ import { TransformFields } from './TextInspector'
 
 const SHAPE_NAMES: Record<ShapeKind, string> = {
   rectangle: '矩形', ellipse: '椭圆', triangle: '三角形', diamond: '菱形', polygon: '多边形', star: '星形',
-  line: '线条', wave: '波浪线', burst: '放射形', cross: '十字', bracket: '括号', 'dot-grid': '点阵', frame: '边框',
+  line: '线条', wave: '波浪线', burst: '放射形', cross: '十字', bracket: '括号', 'dot-grid': '点阵', frame: '边框', path: '路径',
 }
 
 export function ShapeInspector({ layer, patch }: { layer: ShapeLayer; patch: (patch: Partial<LabelLayer>) => void }): React.JSX.Element {

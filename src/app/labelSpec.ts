@@ -1,6 +1,19 @@
 /** Structured Label Spec -> editable area/layer mapping. */
 
-import type { CraftEffect, LabelAreaConfig, LabelLayer, LabelPrintSpec, ShapeGeometry, ShapeKind } from '../label/types'
+import type {
+  CraftEffect,
+  DesignBinding,
+  LabelAreaConfig,
+  LabelLayer,
+  LabelPrintSpec,
+  LayerDesignMetrics,
+  PhysicalArtboard,
+  ProcessIntent,
+  ShapeGeometry,
+  ShapeKind,
+  SubstrateSpec,
+  TargetAspectPolicy,
+} from '../label/types'
 import { validateLabelSpec } from '../agent/labelSpecSchema'
 
 type UnknownRecord = Record<string, unknown>
@@ -70,6 +83,8 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
     id: typeof input.id === 'string' ? input.id : `spec-layer-${index + 1}`,
     x, y, rotation: finite(input.rotation, 0), opacity: ratio(input.opacity, 1),
     visible: input.visible !== false, locked: input.locked === true, zIndex: index, craft: craft(input.craft),
+    ...(input.designMetrics === undefined ? {} : { designMetrics: structuredClone(input.designMetrics) as LayerDesignMetrics }),
+    ...(input.processes === undefined ? {} : { processes: structuredClone(input.processes) as ProcessIntent[] }),
   }
   if (input.type === 'shape') {
     const shape = (typeof input.shape === 'string' ? input.shape : 'rectangle') as ShapeKind
@@ -78,6 +93,9 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
       height: Math.max(4, normalizedDimension(input.height, 0.1, 4) * area.canvas.height), fill: typeof input.fill === 'string' ? input.fill : '#000000',
       stroke: typeof input.stroke === 'string' ? input.stroke : '#000000', strokeWidth: Math.max(0, finite(input.strokeWidth, 0)),
       cornerRadius: Math.max(0, finite(input.cornerRadius, 0)),
+      ...(typeof input.pathData === 'string' ? { pathData: input.pathData } : {}),
+      ...(Array.isArray(input.pathViewBox) ? { pathViewBox: structuredClone(input.pathViewBox) as [number, number, number, number] } : {}),
+      ...(input.fillRule === 'nonzero' || input.fillRule === 'evenodd' ? { fillRule: input.fillRule } : {}),
     }
   }
   if (input.type === 'image') {
@@ -131,6 +149,12 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
       side,
       remap: { ...baseArea.remap, offset },
       paper: input.paper && typeof input.paper === 'object' ? { ...baseArea.paper, ...(input.paper as LabelAreaConfig['paper']) } as LabelAreaConfig['paper'] : baseArea.paper,
+      ...(typeof input.carrier === 'string' ? { carrier: input.carrier as LabelAreaConfig['carrier'] } : {}),
+      ...(input.artboard === undefined ? {} : { artboard: structuredClone(input.artboard) as PhysicalArtboard }),
+      ...(input.substrate === undefined ? {} : { substrate: structuredClone(input.substrate) as SubstrateSpec }),
+      ...(input.placementPolicy === undefined ? {} : { placementPolicy: input.placementPolicy as TargetAspectPolicy }),
+      ...(typeof input.blueprintAreaId === 'string' ? { blueprintAreaId: input.blueprintAreaId } : {}),
+      ...(input.designBinding === undefined ? {} : { designBinding: structuredClone(input.designBinding) as DesignBinding }),
       printSpec: printSpec(input.print, baseArea.printSpec),
       layers: [], undoStack: [], redoStack: [], referenceVisible: false,
     }

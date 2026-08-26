@@ -404,6 +404,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name", "target", "surfaceMode", "range", "layers"],
+      "allOf": [{
+        "if": {
+          "properties": { "carrier": { "enum": ["direct_surface_print", "in_mold", "foil_or_ink_only", "bare"] } },
+          "required": ["carrier"]
+        },
+        "then": { "properties": { "substrate": false } }
+      }],
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import Ajv2020 from 'ajv/dist/2020.js'
 import { Document, NodeIO } from '@gltf-transform/core'
+import labelProjectV3Schema from '../src/agent/label-project-v3.schema.json'
 import { importProject } from '../src/app/actions'
 import { parseLabelProject, serializeLabelProject } from '../src/app/projectSchema'
 import type { LabelAreaConfig, ShapeKind } from '../src/label/types'
@@ -156,6 +158,19 @@ describe('label project v3', () => {
 
     expect(project.areas[0].carrier).toBe('direct_surface_print')
     expect(project.areas[0].substrate).toBeUndefined()
+  })
+
+  it.each(['direct_surface_print', 'in_mold', 'foil_or_ink_only', 'bare'])('rejects substrate for %s', (carrier) => {
+    const invalid = {
+      ...physicalProjectFixture(),
+      areas: [{
+        ...makeArea(), carrier,
+        substrate: { kind: 'opaque', opacity: 1, boundary: { shape: 'rectangle' } },
+      }],
+    }
+
+    expect(() => parseLabelProject(invalid)).toThrow(/substrate/)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(invalid)).toBe(false)
   })
 
   it('migrates a v2 rectangle and legacy font name', () => {

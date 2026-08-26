@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { labelSpecV2Schema, validateLabelSpec } from '../src/agent/labelSpecSchema'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
+import { serializeLabelProject } from '../src/app/projectSchema'
 import type { LabelAreaConfig } from '../src/label/types'
 import existingPerfumeFixture from './fixtures/specs/perfume-front-back-v2.json'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
@@ -62,6 +63,77 @@ describe('Label Spec v2', () => {
     }
     expect(validateLabelSpec(invalid).ok).toBe(false)
     expect(validateLabelSpec(invalid).ok).toBe(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(invalid))
+  })
+
+  it('preserves physical metadata through structured apply and Project v3 serialization', () => {
+    const physicalSpec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay', side: 'front',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        carrier: 'applied_label',
+        artboard: { widthMm: 42, heightMm: 68, background: '#f8f4ea' },
+        substrate: {
+          kind: 'opaque', color: '#f8f4ea', opacity: 0.92,
+          boundary: { shape: 'rounded_rectangle', radiusMm: 2 }, material: 'paper', adhesive: 'acrylic',
+        },
+        placementPolicy: 'block',
+        blueprintAreaId: 'front-blueprint',
+        designBinding: {
+          blueprintRevision: 'lavira-v2', blueprintSha256: 'a'.repeat(64), reviewManifestSha256: 'b'.repeat(64),
+          approvedCrop: { x: 1, y: 2, width: 40, height: 64 },
+        },
+        layers: [{
+          id: 'open-frame', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.8, height: 0.8,
+          pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
+          designMetrics: {
+            boundsMm: { x: 4, y: 6, width: 34, height: 56 }, anchor: 'center',
+          },
+          processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER', requiredMask: 'metalness' }],
+        }],
+      }],
+    }
+
+    const applied = applyStructuredLabelSpec(baseArea, physicalSpec)
+    physicalSpec.areas[0].artboard.widthMm = 99
+    physicalSpec.areas[0].substrate.boundary.radiusMm = 99
+    physicalSpec.areas[0].layers[0].designMetrics.boundsMm.x = 99
+    const project = serializeLabelProject('bottle.glb', applied.areas)
+
+    expect(project.areas[0].canvas).toEqual({ width: 1000, height: 500, aspect: 2 })
+    expect(project.areas[0]).toMatchObject({
+      carrier: 'applied_label',
+      artboard: { widthMm: 42, heightMm: 68, background: '#f8f4ea' },
+      substrate: {
+        kind: 'opaque', color: '#f8f4ea', opacity: 0.92,
+        boundary: { shape: 'rounded_rectangle', radiusMm: 2 }, material: 'paper', adhesive: 'acrylic',
+      },
+      placementPolicy: 'block', blueprintAreaId: 'front-blueprint',
+      designBinding: {
+        blueprintRevision: 'lavira-v2', blueprintSha256: 'a'.repeat(64), reviewManifestSha256: 'b'.repeat(64),
+        approvedCrop: { x: 1, y: 2, width: 40, height: 64 },
+      },
+    })
+    expect(project.areas[0].layers[0]).toMatchObject({
+      kind: 'shape', shape: 'path', pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
+      designMetrics: { boundsMm: { x: 4, y: 6, width: 34, height: 56 }, anchor: 'center' },
+      processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER', requiredMask: 'metalness' }],
+    })
+  })
+
+  it.each(['direct_surface_print', 'in_mold', 'foil_or_ink_only', 'bare'])('rejects substrate for %s', (carrier) => {
+    const invalid = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }, carrier,
+        substrate: { kind: 'opaque', opacity: 1, boundary: { shape: 'rectangle' } },
+        layers: [],
+      }],
+    }
+
+    expect(validateLabelSpec(invalid).ok).toBe(false)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(invalid)).toBe(false)
   })
 
   it('normalizes an old enabled paper spec to applied_label without changing its paper', () => {

@@ -40,12 +40,16 @@ const CRAFT_TYPES = new Set(['foil', 'emboss', 'deboss', 'matte', 'uv', 'stroke'
 const CARRIER_MODES = new Set<string>(layoutBlueprintV1Schema.$defs.carrier.enum)
 const PROCESS_TYPES = new Set<string>(layoutBlueprintV1Schema.$defs.process.properties.process.enum)
 const REQUIRED_MASKS = new Set<string>(layoutBlueprintV1Schema.$defs.process.properties.requiredMask.enum)
-const SHAPE_KINDS = new Set<string>([
+const SHAPE_KINDS = new Set<ShapeKind>([
   'rectangle', 'ellipse', 'triangle', 'diamond', 'polygon', 'star', 'line',
   'wave', 'burst', 'cross', 'bracket', 'dot-grid', 'frame', 'path',
 ])
 const SHAPE_GEOMETRY_NUMBER_FIELDS = ['sides', 'points', 'innerRatio', 'amplitude', 'frequency', 'inset', 'rows', 'columns', 'gap'] as const
 const SHAPE_GEOMETRY_BOOLEAN_FIELDS = ['arrowStart', 'arrowEnd', 'parallel'] as const
+
+function isShapeKind(value: unknown): value is ShapeKind {
+  return typeof value === 'string' && SHAPE_KINDS.has(value as ShapeKind)
+}
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -337,7 +341,7 @@ function normalizeLayer(raw: unknown): LabelLayer {
   if (raw.kind === 'shape') {
     validateCommonLayerFields(raw)
     const shape = Object.prototype.hasOwnProperty.call(raw, 'shape') ? raw.shape : 'rectangle'
-    if (typeof shape !== 'string' || !SHAPE_KINDS.has(shape)) layerError('shape 无效')
+    if (!isShapeKind(shape)) layerError('shape 无效')
     for (const field of ['width', 'height', 'strokeWidth', 'cornerRadius']) requiredFiniteNumber(raw, field)
     requiredString(raw, 'fill', { nonEmpty: true })
     requiredString(raw, 'stroke', { nonEmpty: true })
@@ -353,7 +357,7 @@ function normalizeLayer(raw: unknown): LabelLayer {
     const layer = cloneValue(raw) as unknown as ShapeLayer
     return {
       ...layer,
-      shape: shape as ShapeKind,
+      shape,
       geometry: recordOr(raw.geometry, {}),
       ...(raw.designMetrics === undefined ? {} : { designMetrics: normalizeDesignMetrics(raw.designMetrics) }),
       ...(raw.processes === undefined ? {} : { processes: normalizeProcesses(raw.processes) }),
@@ -494,6 +498,10 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
   } else if (paperInput?.enabled === true) {
     carrier = 'applied_label'
   }
+  const substrate = normalizeSubstrate(raw.substrate)
+  if (substrate !== undefined && carrier !== undefined && carrier !== 'applied_label' && carrier !== 'clear_label') {
+    areaError('substrate', `carrier ${carrier} 不允许 substrate`)
+  }
   let placementPolicy: TargetAspectPolicy | undefined
   if (raw.placementPolicy !== undefined) {
     if (!['fit', 'crop-approved', 'block'].includes(String(raw.placementPolicy))) areaError('placementPolicy', '无效')
@@ -515,7 +523,7 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     paper: resolveLabelPaper(paperInput),
     ...(carrier === undefined ? {} : { carrier }),
     ...(raw.artboard === undefined ? {} : { artboard: normalizeArtboard(raw.artboard) }),
-    ...(raw.substrate === undefined ? {} : { substrate: normalizeSubstrate(raw.substrate) }),
+    ...(substrate === undefined ? {} : { substrate }),
     ...(placementPolicy === undefined ? {} : { placementPolicy }),
     ...(raw.blueprintAreaId === undefined ? {} : { blueprintAreaId: raw.blueprintAreaId as string }),
     ...(raw.designBinding === undefined ? {} : { designBinding: normalizeDesignBinding(raw.designBinding) }),

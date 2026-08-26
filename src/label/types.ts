@@ -130,7 +130,7 @@ export interface ImageLayer extends LayerPhysicalMetadata {
 }
 
 /** First-release shape vocabulary. Rendering algorithms are added separately. */
-export type ShapeKind = 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'polygon' | 'star' | 'line' | 'wave' | 'burst' | 'cross' | 'bracket' | 'dot-grid' | 'frame'
+export type ShapeKind = 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'polygon' | 'star' | 'line' | 'wave' | 'burst' | 'cross' | 'bracket' | 'dot-grid' | 'frame' | 'path'
 
 /** Shape-specific parameters, kept serializable for shared preview/export geometry. */
 export interface ShapeGeometry {

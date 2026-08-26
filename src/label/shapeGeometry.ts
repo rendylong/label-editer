@@ -313,6 +313,9 @@ export function shapeCommands(layer: ShapeLayer): ShapeCommand[] {
   const { width, height } = normalized
   const geometry = normalized.geometry as Required<ShapeGeometry>
   switch (normalized.shape) {
+    // Task 5 adds normalized SVG tracing. Until then, retain path metadata
+    // without inventing native fallback geometry.
+    case 'path': return []
     case 'rectangle': return rectangleCommands(width, height, normalized.cornerRadius)
     case 'ellipse': return ellipseCommands(width, height)
     case 'triangle': return [

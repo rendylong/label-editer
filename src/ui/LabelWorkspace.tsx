@@ -23,6 +23,7 @@ const SHAPE_NAMES: Record<ShapeLayer['shape'], string> = {
   bracket: '括号',
   'dot-grid': '圆点阵列',
   frame: '边框',
+  path: '路径',
 }
 
 function layerMeta(layer: LabelLayer): { type: string; name: string; icon: React.JSX.Element } {
