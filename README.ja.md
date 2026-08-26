@@ -11,16 +11,20 @@ GLB Label Editor は、ブランド、パッケージデザイン、EC コンテ
 ## 1 コマンドで Codex にインストール
 
 ```bash
-npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads/main.tar.gz glb-label-editor-install
+commit="$(node --input-type=module -e 'const response = await fetch("https://api.github.com/repos/rendylong/label-editer/commits/main"); if (!response.ok) throw new Error("GitHub returned " + response.status); process.stdout.write((await response.json()).sha)')" &&
+npx --yes --package="https://github.com/rendylong/label-editer/archive/$commit.tar.gz" glb-label-editor-install
 ```
 
-事前に必要なのは Node.js 22+ と Codex CLI だけです。インストーラーは Node.js 付属の npm を使ってロック済み依存関係と Playwright Chromium をインストールし、エディターをビルドして、実行可能なプラグインを `~/.codex/glb-label-editor` に配置します。その後、`label-editer` marketplace を追加し、`glb-label-editor@label-editer` をインストールして有効化します。
+事前に必要なのは Node.js 22+ と Codex CLI だけです。コマンドは先に `main` を不変の commit に解決してから `npx` を実行するため、新しいリリースで古いインストーラーキャッシュが再利用されません。インストーラーは Node.js 付属の npm を使ってロック済み依存関係と Playwright Chromium をインストールし、エディターをビルドして、実行可能なプラグインを `~/.codex/glb-label-editor` に配置します。その後、`label-editer` marketplace を追加し、`glb-label-editor@label-editer` をインストールして有効化します。
 
 インストールまたは更新後は、新しい Codex セッションを開始して Skill を再読み込みしてください。プラグインの状態は次のコマンドで確認できます。
 
 ```bash
 codex plugin list --json
+codex mcp list --json
 ```
+
+プラグインがインストール済みかつ有効であり、MCP 一覧に `glb-label-editor` が存在しないことを確認してください。
 
 インストール済みローカル CLI ランチャーは `~/.codex/glb-label-editor/plugin/bin/label-cli.mjs` にあります。インストーラーはこのランチャーに対して実際に `schema --json` を実行して検証し、MCP 設定は生成しません。
 

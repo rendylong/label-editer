@@ -1,12 +1,12 @@
 {
   "name": "glb-label-editor",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "glb-label-editor",
-      "version": "0.1.0",
+      "version": "0.3.0",
       "dependencies": {
         "@gltf-transform/core": "^4.4.2",
         "@gltf-transform/extensions": "^4.4.2",

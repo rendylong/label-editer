@@ -222,6 +222,15 @@ function registerWithCodex(installRoot, progress) {
     run('codex', ['plugin', 'remove', PLUGIN_ID, '--json'])
   }
   run('codex', ['plugin', 'add', PLUGIN_ID, '--json'])
+
+  progress('Verifying that no legacy MCP server remains…')
+  const mcpState = runJson('codex', ['mcp', 'list', '--json'])
+  if (!Array.isArray(mcpState)) {
+    throw new Error('codex mcp list returned an invalid response')
+  }
+  if (mcpState.some((entry) => entry?.name === 'glb-label-editor')) {
+    throw new Error('Codex still exposes the legacy glb-label-editor MCP server after installation')
+  }
 }
 
 async function install(options) {

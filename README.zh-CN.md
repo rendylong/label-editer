@@ -11,16 +11,20 @@ GLB Label Editor 帮助品牌、包装设计与电商内容团队，把已有的
 ## 一条命令安装到 Codex
 
 ```bash
-npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads/main.tar.gz glb-label-editor-install
+commit="$(node --input-type=module -e 'const response = await fetch("https://api.github.com/repos/rendylong/label-editer/commits/main"); if (!response.ok) throw new Error("GitHub returned " + response.status); process.stdout.write((await response.json()).sha)')" &&
+npx --yes --package="https://github.com/rendylong/label-editer/archive/$commit.tar.gz" glb-label-editor-install
 ```
 
-只要求预先安装 Node.js 22+ 和 Codex CLI。安装器会通过 Node.js 自带的 npm 安装锁定依赖和 Playwright Chromium、构建编辑器，并将可运行插件安装到 `~/.codex/glb-label-editor`。它随后会添加 `label-editer` marketplace，安装并启用 `glb-label-editor@label-editer`。
+只要求预先安装 Node.js 22+ 和 Codex CLI。命令会先把 `main` 解析为不可变的 commit，再调用 `npx`，避免新版本继续复用旧安装器缓存。安装器会通过 Node.js 自带的 npm 安装锁定依赖和 Playwright Chromium、构建编辑器，并将可运行插件安装到 `~/.codex/glb-label-editor`。它随后会添加 `label-editer` marketplace，安装并启用 `glb-label-editor@label-editer`。
 
 安装或更新插件后，请新建 Codex 会话，使 Skill 重新加载。可以用下面的命令确认插件状态：
 
 ```bash
 codex plugin list --json
+codex mcp list --json
 ```
+
+插件应处于已安装且已启用状态，同时 MCP 列表中不得出现 `glb-label-editor`。
 
 安装后的本地 CLI 启动器位于 `~/.codex/glb-label-editor/plugin/bin/label-cli.mjs`。安装器会实际执行一次 `schema --json` 验证启动器，而不会生成 MCP 配置。
 

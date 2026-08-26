@@ -1,7 +1,7 @@
 {
   "name": "glb-label-editor",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Pure-local Codex plugin for inspecting, designing, live-previewing, and exporting cosmetic labels on GLB packaging",
   "engines": {

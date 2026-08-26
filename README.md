@@ -11,16 +11,20 @@ During production, the plugin automatically opens a live web preview. Each desig
 ## Install in Codex with one command
 
 ```bash
-npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads/main.tar.gz glb-label-editor-install
+commit="$(node --input-type=module -e 'const response = await fetch("https://api.github.com/repos/rendylong/label-editer/commits/main"); if (!response.ok) throw new Error("GitHub returned " + response.status); process.stdout.write((await response.json()).sha)')" &&
+npx --yes --package="https://github.com/rendylong/label-editer/archive/$commit.tar.gz" glb-label-editor-install
 ```
 
-Node.js 22+ and the Codex CLI are the only prerequisites. Using the npm bundled with Node.js, the installer installs locked dependencies and Playwright Chromium, builds the editor, and places the runnable plugin in `~/.codex/glb-label-editor`. It then adds the `label-editer` marketplace and installs and enables `glb-label-editor@label-editer`.
+Node.js 22+ and the Codex CLI are the only prerequisites. The command resolves `main` to an immutable commit before invoking `npx`, so an older cached installer cannot be reused for a newer release. Using the npm bundled with Node.js, the installer installs locked dependencies and Playwright Chromium, builds the editor, and places the runnable plugin in `~/.codex/glb-label-editor`. It then adds the `label-editer` marketplace and installs and enables `glb-label-editor@label-editer`.
 
 After installing or updating the plugin, start a new Codex session so the skills reload. Verify the plugin state with:
 
 ```bash
 codex plugin list --json
+codex mcp list --json
 ```
+
+The plugin must be installed and enabled, and the MCP list must not contain `glb-label-editor`.
 
 The installed local CLI launcher is `~/.codex/glb-label-editor/plugin/bin/label-cli.mjs`. The installer performs a real `schema --json` check against the launcher and does not generate MCP configuration.
 

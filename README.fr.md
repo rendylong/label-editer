@@ -11,16 +11,20 @@ Pendant la production, le plugin ouvre automatiquement un aperçu web en direct.
 ## Installer dans Codex avec une seule commande
 
 ```bash
-npx --yes --package=https://github.com/rendylong/label-editer/archive/refs/heads/main.tar.gz glb-label-editor-install
+commit="$(node --input-type=module -e 'const response = await fetch("https://api.github.com/repos/rendylong/label-editer/commits/main"); if (!response.ok) throw new Error("GitHub returned " + response.status); process.stdout.write((await response.json()).sha)')" &&
+npx --yes --package="https://github.com/rendylong/label-editer/archive/$commit.tar.gz" glb-label-editor-install
 ```
 
-Les seuls prérequis sont Node.js 22+ et Codex CLI. À l’aide du npm fourni avec Node.js, l’installateur installe les dépendances verrouillées et Playwright Chromium, compile l’éditeur, puis place le plugin exécutable dans `~/.codex/glb-label-editor`. Il ajoute ensuite la marketplace `label-editer`, puis installe et active `glb-label-editor@label-editer`.
+Les seuls prérequis sont Node.js 22+ et Codex CLI. La commande résout d’abord `main` vers un commit immuable avant d’exécuter `npx`, ce qui empêche la réutilisation d’un ancien installateur mis en cache pour une nouvelle version. À l’aide du npm fourni avec Node.js, l’installateur installe les dépendances verrouillées et Playwright Chromium, compile l’éditeur, puis place le plugin exécutable dans `~/.codex/glb-label-editor`. Il ajoute ensuite la marketplace `label-editer`, puis installe et active `glb-label-editor@label-editer`.
 
 Après une installation ou une mise à jour, démarrez une nouvelle session Codex afin de recharger les Skills. Vérifiez l’état du plugin avec :
 
 ```bash
 codex plugin list --json
+codex mcp list --json
 ```
+
+Le plugin doit être installé et activé, et la liste MCP ne doit pas contenir `glb-label-editor`.
 
 Le lanceur CLI local installé se trouve dans `~/.codex/glb-label-editor/plugin/bin/label-cli.mjs`. L’installateur exécute réellement `schema --json` avec ce lanceur pour le valider et ne génère aucune configuration MCP.
 

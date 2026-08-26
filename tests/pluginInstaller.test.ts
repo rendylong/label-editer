@@ -28,7 +28,7 @@ async function createPluginSource(root: string): Promise<void> {
 
   await writeFile(path.join(root, '.codex-plugin/plugin.json'), JSON.stringify({
     name: 'glb-label-editor',
-    version: '0.2.0',
+    version: '0.3.0',
     skills: './skills/',
     interface: {
       composerIcon: './assets/icon.png',
@@ -98,6 +98,13 @@ describe('GLB label editor installer', () => {
 
     const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
     const shrinkwrap = JSON.parse(readFileSync(path.join(repoRoot, 'npm-shrinkwrap.json'), 'utf8'))
+    const pluginManifest = JSON.parse(
+      readFileSync(path.join(repoRoot, '.codex-plugin/plugin.json'), 'utf8'),
+    )
+    expect(packageJson.version).toBe('0.3.0')
+    expect(shrinkwrap.version).toBe(packageJson.version)
+    expect(shrinkwrap.packages[''].version).toBe(packageJson.version)
+    expect(pluginManifest.version).toBe(packageJson.version)
     expect(JSON.stringify(shrinkwrap)).not.toContain('registry.npmmirror.com')
     const lockedPaths = Object.keys(shrinkwrap.packages)
     expect(lockedPaths.some((entry) => entry.startsWith('..'))).toBe(false)
@@ -130,6 +137,7 @@ printf 'codex %s\\n' "$*" >> "$FAKE_COMMAND_LOG"
 case "$*" in
   "plugin marketplace list --json") printf '{"marketplaces":[]}\\n' ;;
   "plugin list --json") printf '{"installed":[]}\\n' ;;
+  "mcp list --json") printf '[]\\n' ;;
   *) printf '{}\\n' ;;
 esac
 `)
@@ -218,6 +226,49 @@ esac
     expect(commands).toContain('npm run install:browser')
     expect(commands).toContain(`codex plugin marketplace add ${canonicalInstallRoot} --json`)
     expect(commands).toContain('codex plugin add glb-label-editor@label-editer --json')
-    expect(commands).not.toContain('codex mcp')
+    expect(commands).toContain('codex mcp list --json')
+  })
+
+  it('rejects an installation that Codex still exposes as an MCP server', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'glb-label-installer-mcp-'))
+    const sourceRoot = path.join(root, 'source')
+    const installRoot = path.join(root, 'managed-install')
+    const fakeBin = path.join(root, 'bin')
+    await mkdir(sourceRoot)
+    await mkdir(fakeBin)
+    await createPluginSource(sourceRoot)
+
+    await writeExecutable(path.join(fakeBin, 'npm'), [
+      'case "$*" in',
+      '  *"run build"*) mkdir -p dist; printf \'<main>built</main>\\n\' > dist/index.html ;;',
+      'esac',
+    ].join('\n'))
+    await writeExecutable(path.join(fakeBin, 'codex'), [
+      'case "$*" in',
+      '  "plugin marketplace list --json") printf \'{"marketplaces":[]}\\n\' ;;',
+      '  "plugin list --json") printf \'{"installed":[]}\\n\' ;;',
+      '  "mcp list --json") printf \'[{"name":"glb-label-editor","enabled":true}]\\n\' ;;',
+      '  *) printf \'{}\\n\' ;;',
+      'esac',
+    ].join('\n'))
+
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/install-plugin.mjs'),
+      '--source', sourceRoot,
+      '--install-root', installRoot,
+      '--json',
+    ], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: [fakeBin, process.env.PATH ?? ''].join(':'),
+      },
+    })
+
+    expect(result.status).toBe(1)
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: false,
+      error: 'Codex still exposes the legacy glb-label-editor MCP server after installation',
+    })
   })
 })
