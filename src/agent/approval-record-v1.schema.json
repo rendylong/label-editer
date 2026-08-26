@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://realibox.local/schemas/approval-record-v1.schema.json",
+  "title": "Label Approval Record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "gate", "mode", "scope", "design_revision", "blueprint_sha256", "review_manifest_sha256", "recorded_at"],
+  "properties": {
+    "version": { "const": 1 },
+    "gate": { "enum": ["design", "production"] },
+    "mode": { "enum": ["explicit_approval", "continuous_authorized"] },
+    "scope": { "const": "current_task" },
+    "design_revision": { "$ref": "#/$defs/revision" },
+    "blueprint_sha256": { "$ref": "#/$defs/sha256" },
+    "review_manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "spec_revision": { "$ref": "#/$defs/revision" },
+    "model_fingerprint": { "$ref": "#/$defs/revision" },
+    "area_targets_sha256": { "$ref": "#/$defs/sha256" },
+    "recorded_at": { "type": "string", "format": "date-time", "maxLength": 64 }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+    }
+  }
+}

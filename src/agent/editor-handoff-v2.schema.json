@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://realibox.local/schemas/editor-handoff-v2.schema.json",
+  "title": "Cosmetic Label Editor Handoff v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_version", "status", "source", "approval", "model", "areas", "assets", "production_constraints", "assumptions", "blockers"],
+  "properties": {
+    "handoff_version": { "const": 2 },
+    "status": { "enum": ["awaiting_user_approval", "approved", "continuous_authorized"] },
+    "source": { "$ref": "#/$defs/source" },
+    "approval": { "$ref": "#/$defs/approval" },
+    "model": { "$ref": "#/$defs/model" },
+    "areas": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/area" } },
+    "assets": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/asset" } },
+    "production_constraints": { "$ref": "#/$defs/productionConstraints" },
+    "assumptions": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/boundedString" } },
+    "blockers": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/boundedString" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "revision": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "boundedString": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "carrier": { "enum": ["direct_surface_print", "applied_label", "clear_label", "in_mold", "foil_or_ink_only", "bare"] },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["design_spec", "mockup_html", "blueprint", "design_review_manifest", "blueprint_revision", "blueprint_sha256", "review_manifest_sha256"],
+      "properties": {
+        "design_spec": { "$ref": "#/$defs/path" },
+        "mockup_html": { "$ref": "#/$defs/path" },
+        "blueprint": { "$ref": "#/$defs/path" },
+        "design_review_manifest": { "$ref": "#/$defs/path" },
+        "blueprint_revision": { "$ref": "#/$defs/revision" },
+        "blueprint_sha256": { "$ref": "#/$defs/sha256" },
+        "review_manifest_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "scope", "blueprint_revision", "blueprint_sha256", "review_manifest_sha256"],
+      "properties": {
+        "mode": { "enum": ["explicit_approval", "continuous_authorized"] },
+        "scope": { "const": "current_task" },
+        "blueprint_revision": { "$ref": "#/$defs/revision" },
+        "blueprint_sha256": { "$ref": "#/$defs/sha256" },
+        "review_manifest_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_type"],
+      "properties": {
+        "glb_path": { "$ref": "#/$defs/path" },
+        "package_type": { "enum": ["bottle", "jar", "tube", "compact", "other"] }
+      }
+    },
+    "physicalSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": { "oneOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "const": "unknown" }] },
+        "height": { "oneOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "const": "unknown" }] }
+      }
+    },
+    "area": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "side", "carrier", "placement", "physical_size_mm", "blueprint_area_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "side": { "enum": ["front", "back", "left", "right", "wrap", "top", "bottom", "neck", "custom"] },
+        "carrier": { "$ref": "#/$defs/carrier" },
+        "placement": { "$ref": "#/$defs/boundedString" },
+        "physical_size_mm": { "$ref": "#/$defs/physicalSize" },
+        "blueprint_area_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "mime_type": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "productionConstraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "budget": { "$ref": "#/$defs/boundedString" },
+        "durability": { "$ref": "#/$defs/boundedString" },
+        "process_capabilities": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/boundedString" } },
+        "notes": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/boundedString" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://realibox.local/schemas/design-review-manifest-v1.schema.json",
+  "title": "Label Design Review Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "createdAt", "blueprint", "html", "references", "areas", "artifacts"],
+  "properties": {
+    "version": { "const": 1 },
+    "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+    "blueprint": { "$ref": "#/$defs/revisionBinding" },
+    "html": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256"],
+      "properties": { "sha256": { "$ref": "#/$defs/sha256" } }
+    },
+    "references": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/reference" } },
+    "areas": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/area" } },
+    "artifacts": { "type": "array", "minItems": 1, "maxItems": 512, "items": { "$ref": "#/$defs/artifact" } }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "revision": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
+    "carrier": { "enum": ["direct_surface_print", "applied_label", "clear_label", "in_mold", "foil_or_ink_only", "bare"] },
+    "revisionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["revision", "sha256"],
+      "properties": {
+        "revision": { "$ref": "#/$defs/revision" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "role"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "role": { "const": "visual_evidence" }
+      }
+    },
+    "area": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "side", "carrier"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "side": { "enum": ["front", "back", "left", "right", "wrap", "top", "bottom", "neck", "custom"] },
+        "carrier": { "$ref": "#/$defs/carrier" }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256", "mimeType", "width", "height", "viewKind"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "mimeType": { "enum": ["text/html", "image/png"] },
+        "width": { "type": "integer", "minimum": 1, "maximum": 32768 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 32768 },
+        "viewKind": { "enum": ["mockup-html", "mockup-front", "mockup-back", "mockup-area"] },
+        "areaId": { "$ref": "#/$defs/id" },
+        "carrier": { "$ref": "#/$defs/carrier" }
+      }
+    }
+  }
+}
