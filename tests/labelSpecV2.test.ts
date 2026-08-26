@@ -121,6 +121,55 @@ describe('Label Spec v2', () => {
     })
   })
 
+  it.each([
+    ['clear_label', 'direct_surface_print'],
+    ['applied_label', 'in_mold'],
+  ] as const)('clears inherited %s substrate when applying valid %s', (baseCarrier, carrier) => {
+    const substrateBase: LabelAreaConfig = {
+      ...baseArea,
+      carrier: baseCarrier,
+      substrate: {
+        kind: baseCarrier === 'clear_label' ? 'transparent' : 'opaque',
+        color: baseCarrier === 'clear_label' ? '#ffffff' : '#f8f4ea',
+        opacity: 0.9,
+        boundary: { shape: 'rounded_rectangle', radiusMm: 2 },
+      },
+    }
+    const sourceSpec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }, carrier, layers: [],
+      }],
+    }
+
+    expect(validateLabelSpec(sourceSpec).ok).toBe(true)
+    const applied = applyStructuredLabelSpec(substrateBase, sourceSpec)
+    const project = serializeLabelProject('bottle.glb', applied.areas)
+
+    expect(project.areas[0].carrier).toBe(carrier)
+    expect(project.areas[0].substrate).toBeUndefined()
+  })
+
+  it.each(['applied_label', 'clear_label'] as const)('keeps inherited substrate for %s', (carrier) => {
+    const substrate = {
+      kind: carrier === 'clear_label' ? 'transparent' as const : 'opaque' as const,
+      color: '#f8f4ea', opacity: 0.9, boundary: { shape: 'rounded_rectangle' as const, radiusMm: 2 },
+    }
+    const substrateBase: LabelAreaConfig = { ...baseArea, carrier, substrate }
+    const sourceSpec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }, carrier, layers: [],
+      }],
+    }
+
+    const project = serializeLabelProject('bottle.glb', applyStructuredLabelSpec(substrateBase, sourceSpec).areas)
+
+    expect(project.areas[0].substrate).toEqual(substrate)
+  })
+
   it.each(['direct_surface_print', 'in_mold', 'foil_or_ink_only', 'bare'])('rejects substrate for %s', (carrier) => {
     const invalid = {
       version: 2,
@@ -134,6 +183,7 @@ describe('Label Spec v2', () => {
 
     expect(validateLabelSpec(invalid).ok).toBe(false)
     expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(invalid)).toBe(false)
+    expect(() => applyStructuredLabelSpec(baseArea, invalid)).toThrow(/Label Spec 校验失败/)
   })
 
   it('normalizes an old enabled paper spec to applied_label without changing its paper', () => {

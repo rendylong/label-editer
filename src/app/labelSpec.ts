@@ -142,6 +142,12 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
     const input = record(value, `areas[${index}]`)
     const side = input.side === 'back' ? 'back' : 'front'
     const offset = side === 'back' ? (frontOffset + 0.5) % 1 : frontOffset
+    const inputCarrier = typeof input.carrier === 'string' ? input.carrier as LabelAreaConfig['carrier'] : undefined
+    const effectiveCarrier = inputCarrier ?? baseArea.carrier
+    const substrateForbidden = effectiveCarrier === 'direct_surface_print'
+      || effectiveCarrier === 'in_mold'
+      || effectiveCarrier === 'foil_or_ink_only'
+      || effectiveCarrier === 'bare'
     const next: LabelAreaConfig = {
       ...baseArea,
       id: index === 0 ? baseArea.id : `${baseArea.id}-${idSeed}-${index + 1}`,
@@ -149,7 +155,7 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
       side,
       remap: { ...baseArea.remap, offset },
       paper: input.paper && typeof input.paper === 'object' ? { ...baseArea.paper, ...(input.paper as LabelAreaConfig['paper']) } as LabelAreaConfig['paper'] : baseArea.paper,
-      ...(typeof input.carrier === 'string' ? { carrier: input.carrier as LabelAreaConfig['carrier'] } : {}),
+      ...(inputCarrier === undefined ? {} : { carrier: inputCarrier }),
       ...(input.artboard === undefined ? {} : { artboard: structuredClone(input.artboard) as PhysicalArtboard }),
       ...(input.substrate === undefined ? {} : { substrate: structuredClone(input.substrate) as SubstrateSpec }),
       ...(input.placementPolicy === undefined ? {} : { placementPolicy: input.placementPolicy as TargetAspectPolicy }),
@@ -158,6 +164,9 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
       printSpec: printSpec(input.print, baseArea.printSpec),
       layers: [], undoStack: [], redoStack: [], referenceVisible: false,
     }
+    // Validation above rejects a forbidden carrier with source substrate. Only
+    // remove stale substrate inherited from the editable base during transition.
+    if (substrateForbidden && input.substrate === undefined) delete next.substrate
     if (Array.isArray(input.layers)) next.layers = input.layers.map((layer, layerIndex) => mapLayer(layer, next, layerIndex))
     else warnings.push(`区域「${next.name}」没有 layers，已创建空白区域`)
     return next
