@@ -68,7 +68,7 @@ function physicalSpec() {
 describe('physical design rendering fidelity', () => {
   it('requires every caller to supply the canonical capture canvas contract', () => {
     const raster = { width: 4096, height: 6143 } as HTMLCanvasElement
-    const stage = { find: () => [] as [], draw: () => undefined, toCanvas: () => raster }
+    const stage = { find: () => [] as [], draw: () => undefined, width: () => 4096, height: () => 6144, toCanvas: () => raster }
     const unsafeCapture = labelCanvas.captureDesignCanvas as unknown as (
       candidateStage: typeof stage,
       pixelRatio: number,
@@ -99,6 +99,8 @@ describe('physical design rendering fidelity', () => {
     const stage = {
       find: () => [] as [],
       draw: () => undefined,
+      width: () => 1600,
+      height: () => 2400,
       toCanvas: () => ({ width: 1600, height: 1600 }) as HTMLCanvasElement,
     }
 
@@ -114,6 +116,8 @@ describe('physical design rendering fidelity', () => {
     const stage = {
       find: () => [] as [],
       draw: () => undefined,
+      width: () => 4096,
+      height: () => 6144,
       toCanvas: () => ({ width, height }) as HTMLCanvasElement,
     }
 
@@ -125,9 +129,57 @@ describe('physical design rendering fidelity', () => {
     }))
   })
 
+  it('recovers a canonical Konva one-pixel short capture without changing the stage transform', () => {
+    const short = { width: 4096, height: 6143 } as HTMLCanvasElement
+    const exact = { width: 4096, height: 6144 } as HTMLCanvasElement
+    const calls: Array<{ pixelRatio: number; width?: number; height?: number }> = []
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 400, height: () => 600,
+      toCanvas: (options: { pixelRatio: number; width?: number; height?: number }) => {
+        calls.push(options)
+        return options.width === undefined ? short : exact
+      },
+    }
+
+    expect(labelCanvas.captureDesignCanvas(stage, 10.24, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toBe(exact)
+    expect(calls).toEqual([
+      { pixelRatio: 10.24 },
+      { pixelRatio: 10.24, width: 400, height: 600 },
+    ])
+    expect(stage.width()).toBe(400)
+    expect(stage.height()).toBe(600)
+  })
+
+  it('rejects an arbitrary fake stage/raw mismatch before recovery', () => {
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 1000, height: () => 1000,
+      toCanvas: () => ({ width: 4096, height: 6143 }) as HTMLCanvasElement,
+    }
+
+    expect(() => labelCanvas.captureDesignCanvas(stage, 1, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toThrow(expect.objectContaining({ code: 'RASTER_ASPECT_MISMATCH' }))
+  })
+
+  it('accepts an exact 4096x6144 capture', () => {
+    const raster = { width: 4096, height: 6144 } as HTMLCanvasElement
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 400, height: () => 600, toCanvas: () => raster,
+    }
+
+    expect(labelCanvas.captureDesignCanvas(stage, 10.24, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toBe(raster)
+  })
+
   it('accepts the canonical capture dimensions for a non-integer ideal height', () => {
     const raster = { width: 2048, height: 1032 } as HTMLCanvasElement
-    const stage = { find: () => [] as [], draw: () => undefined, toCanvas: () => raster }
+    const stage = { find: () => [] as [], draw: () => undefined, width: () => 2048, height: () => 1032, toCanvas: () => raster }
 
     expect(labelCanvas.captureDesignCanvas(stage, 1, {
       width: 2048, height: 1032, aspect: 1.9846801867572283,
@@ -656,6 +708,8 @@ describe('3D 渲染细节保真', () => {
     const stage = {
       find: (selector: string) => selector === '.non-export' ? nodes : selector === '.craft-relief' ? reliefNodes : [],
       draw: () => undefined,
+      width: () => 400,
+      height: () => 600,
       toCanvas: ({ pixelRatio }: { pixelRatio: number }) => {
         expect(pixelRatio).toBe(4)
         expect(guideVisible).toBe(false)

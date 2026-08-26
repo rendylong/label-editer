@@ -61,7 +61,9 @@ interface ExportReliefNode {
 interface ExportableStage {
   find(selector: string): ArrayLike<ExportVisibilityNode | ExportReliefNode>
   draw(): unknown
-  toCanvas(options: { pixelRatio: number }): HTMLCanvasElement
+  width(): number
+  height(): number
+  toCanvas(options: { pixelRatio: number; width?: number; height?: number }): HTMLCanvasElement
 }
 
 /**
@@ -81,7 +83,29 @@ export function captureDesignCanvas(
     excluded.forEach((node) => node.visible(false))
     relief.forEach((node) => node.shadowEnabled(false))
     stage.draw()
+    const logicalCapture = {
+      width: Math.round(stage.width() * pixelRatio),
+      height: Math.round(stage.height() * pixelRatio),
+    }
+    assertRasterDimensions(logicalCapture, expectedCanvas)
+
     const captured = stage.toCanvas({ pixelRatio })
+    if (captured.width === expectedCanvas.width && captured.height === expectedCanvas.height) return captured
+
+    const isKonvaOnePixelShort = captured.width <= expectedCanvas.width
+      && captured.height <= expectedCanvas.height
+      && expectedCanvas.width - captured.width <= 1
+      && expectedCanvas.height - captured.height <= 1
+    if (isKonvaOnePixelShort) {
+      const recovered = stage.toCanvas({
+        pixelRatio,
+        width: expectedCanvas.width / pixelRatio,
+        height: expectedCanvas.height / pixelRatio,
+      })
+      assertRasterDimensions(recovered, expectedCanvas)
+      return recovered
+    }
+
     assertRasterDimensions(captured, expectedCanvas)
     return captured
   } finally {
@@ -259,16 +283,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     assertRasterAspect(cfg.canvas)
     const ratio = cfg.canvas.width / (stage.width() || 1)
     if (!isFinite(ratio) || ratio <= 0) return false
-    let color = captureDesignCanvas(stage, ratio, cfg.canvas)
-    // Konva 对非整数显示尺寸使用 floor，2048px 目标偶发得到 2047px，导致
-    // 预览、PNG 文件名和 GLB 纹理声明不一致。统一重采样到画布契约的精确尺寸。
-    if (color.width !== cfg.canvas.width || color.height !== cfg.canvas.height) {
-      const exact = document.createElement('canvas')
-      exact.width = cfg.canvas.width
-      exact.height = cfg.canvas.height
-      exact.getContext('2d')?.drawImage(color, 0, 0, exact.width, exact.height)
-      color = exact
-    }
+    const color = captureDesignCanvas(stage, ratio, cfg.canvas)
     // 全局工艺后处理（颜色画布）
     const cctx = color.getContext('2d')
     if (cctx) {
