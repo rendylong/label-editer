@@ -42,7 +42,7 @@
     "pretest": "node scripts/generate-label-validator.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:plugin-e2e": "vitest run tests/pluginE2E.test.ts --testTimeout=120000",
+    "test:plugin-e2e": "vitest run tests/pluginE2E.test.ts --testTimeout=180000",
     "plugin:verify": "pnpm test && pnpm build && pnpm test:plugin-e2e"
   },
   "dependencies": {

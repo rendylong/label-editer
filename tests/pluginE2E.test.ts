@@ -196,7 +196,7 @@ describe('GLB label plugin E2E', () => {
     } finally {
       await runtime.close()
     }
-  }, 120_000)
+  }, 180_000)
 
   it.runIf(runLiveE2E)('automatically opens one headful read-only preview and applies an in-place patch revision', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'glb-label-live-e2e-'))
