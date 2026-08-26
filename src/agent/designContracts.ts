@@ -340,6 +340,14 @@ function assertUnique(values: string[], label: string, code: DesignContractError
 }
 
 function assertLayerShape(layer: LayoutBlueprintLayer, areaId: string): void {
+  for (const process of layer.processes) {
+    if (process.spotName === 'white_underbase') {
+      throw new DesignContractError(
+        'INVALID_LAYOUT_BLUEPRINT',
+        `white_underbase is reserved for the canonical renderer channel (${areaId}/${layer.id}/spotName)`,
+      )
+    }
+  }
   if (layer.kind === 'text') {
     const hasFont = Boolean(layer.fontAsset) !== Boolean(layer.fontStack)
     if (layer.text === undefined || !layer.language || !layer.writingDirection || !hasFont

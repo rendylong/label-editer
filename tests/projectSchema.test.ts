@@ -118,6 +118,30 @@ afterEach(() => {
 
 describe('label project v3', () => {
   it.each([
+    ['process spotName', (project: Record<string, unknown>) => {
+      const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>
+      layers[0].processes = [{ process: 'screen_print', spotName: 'white_underbase', requiredMask: 'color' }]
+    }],
+    ['print spotColors', (project: Record<string, unknown>) => {
+      const target = (project.areas as Array<Record<string, unknown>>)[0]
+      target.printSpec = {
+        physicalWidthMm: 42, physicalHeightMm: 68, bleedMm: 2, cornerRadiusMm: 1,
+        minTextHeightMm: 1.2, dieCutShape: 'rounded-rectangle', spotColors: ['white_underbase'],
+      }
+    }],
+    ['foil craft spot name', (project: Record<string, unknown>) => {
+      const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>
+      layers[0].craft = [{ type: 'foil', params: { foilSpotName: 'white_underbase' } }]
+    }],
+  ] as const)('rejects the reserved white_underbase id in %s', (_label, mutate) => {
+    const project = projectWithLayers([makeArea().layers[0]])
+    mutate(project)
+
+    expect(() => parseLabelProject(project)).toThrow(/white_underbase.*reserved|reserved.*white_underbase/i)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(project)).toBe(false)
+  })
+
+  it.each([
     ['malformed path syntax', 'M0 0 L', [0, 0, 1, 1], 'pathData'],
     ['unsupported path command', 'M0 0 R1 1', [0, 0, 1, 1], 'pathData'],
     ['coincident-endpoint arc', 'M0 0A1 1 0 0 1 0 0', [0, 0, 1, 1], 'pathData'],
@@ -141,6 +165,17 @@ describe('label project v3', () => {
     expect(parseLabelProject(project).areas[0].layers[1]).toMatchObject({
       kind: 'shape', shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1],
     })
+  })
+
+  it('rejects vector geometry that fails only after renderer dimension normalization', () => {
+    const project = physicalProjectFixture()
+    const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>
+    layers[1] = {
+      ...layers[1], width: 0.5, height: 1,
+      pathData: 'M0 0 L1000000000000 0', pathViewBox: [0, 0, 0.125, 1],
+    }
+
+    expect(() => parseLabelProject(project)).toThrow(/pathData/)
   })
 
   it('accepts valid closed and compound Task 5 paths at the project boundary', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeShapeLayer, shapeCommands, traceShape, type ShapeCommand, type ShapeDrawingContext } from '../src/label/shapeGeometry'
+import { validateVectorPath } from '../src/label/vectorPathValidation'
 import type { ShapeGeometry, ShapeKind, ShapeLayer } from '../src/label/types'
 
 function makeShape(overrides: Partial<ShapeLayer> & { shape?: ShapeKind; geometry?: ShapeGeometry } = {}): ShapeLayer {
@@ -63,6 +64,22 @@ function recordShape(layer: ShapeLayer): unknown[][] {
 }
 
 describe('shape geometry', () => {
+  it.each([
+    [0.5, 1, 'M0 0 L1000000000000 0', [0, 0, 0.125, 1] as [number, number, number, number], false],
+    [0.5, 0.5, 'M0 0 L0.125 1', [0, 0, 0.125, 1] as [number, number, number, number], true],
+  ] as const)('keeps vector validation in parity with renderer-normalized %sx%s geometry', (width, height, pathData, pathViewBox, expectedValid) => {
+    const layer = makeShape({ shape: 'path', width, height, pathData, pathViewBox })
+    const validationSucceeded = validateVectorPath(pathData, pathViewBox, width, height) === undefined
+    let rendererSucceeded = true
+    try {
+      shapeCommands(layer)
+    } catch {
+      rendererSucceeded = false
+    }
+
+    expect(validationSucceeded).toBe(expectedValid)
+    expect(rendererSucceeded).toBe(expectedValid)
+  })
   it.each<ShapeKind>([
     'rectangle', 'ellipse', 'triangle', 'diamond', 'polygon', 'star', 'line',
     'wave', 'burst', 'cross', 'bracket', 'dot-grid', 'frame',

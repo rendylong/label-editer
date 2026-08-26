@@ -70,7 +70,7 @@ function clampedInteger(value: number | undefined, fallback: number, minimum: nu
   return Math.round(clamp(finite(value, fallback), minimum, maximum))
 }
 
-function normalizeDimension(value: number): number {
+export function normalizeShapeDimension(value: number): number {
   const normalized = Math.abs(finite(value, 1))
   return Math.max(1, normalized)
 }
@@ -102,8 +102,8 @@ function normalizeGeometry(geometry: ShapeGeometry | undefined, width: number, h
 
 /** Return a safe copy without changing the project layer supplied by the caller. */
 export function normalizeShapeLayer(layer: ShapeLayer): ShapeLayer {
-  const width = normalizeDimension(layer.width)
-  const height = normalizeDimension(layer.height)
+  const width = normalizeShapeDimension(layer.width)
+  const height = normalizeShapeDimension(layer.height)
   const geometry = normalizeGeometry(layer.geometry, width, height)
   return {
     ...layer,

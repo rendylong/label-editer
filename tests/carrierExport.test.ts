@@ -327,6 +327,33 @@ describe('carrier-aware channel export', () => {
     expect(manifest.areas[0].separations).toEqual([])
   })
 
+  it('does not let a reserved print spot collision survive renderer read failure', () => {
+    const target = {
+      ...area('clear_label', [whiteLayer()]),
+      printSpec: {
+        physicalWidthMm: 8, physicalHeightMm: 8, bleedMm: 0, cornerRadiusMm: 0,
+        minTextHeightMm: 1, dieCutShape: 'rectangle' as const, spotColors: ['white_underbase'],
+      },
+    }
+    const bake = renderWhiteBake(target)
+    const white = bake.whiteUnderbase as unknown as NeutralCanvas
+    vi.spyOn(white.context, 'getImageData').mockImplementation(() => { throw new Error('unreadable') })
+
+    expect(buildPrintManifest(target, bake).separations).not.toContain('white_underbase')
+  })
+
+  it('does not let a reserved foil spot collision recreate a claim after artifact snapshot mutation', async () => {
+    const target = area('clear_label', [whiteLayer({
+      craft: [{ type: 'foil', params: { foilSpotName: 'white_underbase' } }],
+    })])
+    const bake = renderWhiteBake(target)
+    const artifact = createChannelArtifact(target, bake, 'white_underbase')
+    clearWhiteRaster(bake)
+
+    await expect(artifact).resolves.toMatchObject({ channel: 'white_underbase' })
+    expect(buildPrintManifest(target, bake).separations).not.toContain('white_underbase')
+  })
+
   it('verifies current pixels once for a manifest with multiple white contributors', () => {
     const target = area('clear_label', [
       whiteLayer(),

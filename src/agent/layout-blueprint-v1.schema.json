@@ -102,7 +102,7 @@
         "process": {
           "enum": ["screen_print", "pad_print", "digital_print", "offset_print", "white_underbase", "varnish", "hot_stamp_foil", "emboss", "deboss", "in_mold", "batch_code"]
         },
-        "spotName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "spotName": { "type": "string", "minLength": 1, "maxLength": 128, "not": { "const": "white_underbase" } },
         "requiredMask": { "enum": ["color", "metalness", "roughness", "bump", "white_underbase"] }
       }
     },

@@ -18,6 +18,38 @@ const baseArea: LabelAreaConfig = {
 
 describe('Label Spec v2', () => {
   it.each([
+    ['process spotName', (area: Record<string, unknown>) => {
+      area.layers = [{
+        id: 'mark', type: 'shape', shape: 'rectangle', x: 0.5, y: 0.5, width: 0.5, height: 0.5,
+        processes: [{ process: 'screen_print', spotName: 'white_underbase', requiredMask: 'color' }],
+      }]
+    }],
+    ['print spotColors', (area: Record<string, unknown>) => {
+      area.print = {
+        widthMm: 40, heightMm: 60, bleedMm: 2, cornerRadiusMm: 1,
+        minTextHeightMm: 1.2, dieCutShape: 'rounded-rectangle', spotColors: ['white_underbase'],
+      }
+    }],
+    ['foil craft spot name', (area: Record<string, unknown>) => {
+      area.layers = [{
+        id: 'mark', type: 'shape', shape: 'rectangle', x: 0.5, y: 0.5, width: 0.5, height: 0.5,
+        craft: [{ type: 'foil', params: { foilSpotName: 'white_underbase' } }],
+      }]
+    }],
+  ] as const)('rejects the reserved white_underbase id in %s', (_label, mutate) => {
+    const area: Record<string, unknown> = {
+      id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+      range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }, layers: [],
+    }
+    mutate(area)
+    const spec = { version: 2, areas: [area] }
+
+    expect(validateLabelSpec(spec).ok).toBe(false)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(spec)).toBe(false)
+    expect(() => applyStructuredLabelSpec(baseArea, spec)).toThrow(/Label Spec/)
+  })
+
+  it.each([
     ['malformed path syntax', 'M0 0 L', [0, 0, 1, 1], '/pathData'],
     ['unsupported path command', 'M0 0 R1 1', [0, 0, 1, 1], '/pathData'],
     ['coincident-endpoint arc', 'M0 0A1 1 0 0 1 0 0', [0, 0, 1, 1], '/pathData'],
@@ -63,6 +95,23 @@ describe('Label Spec v2', () => {
     expect(applyStructuredLabelSpec(baseArea, spec).areas[0].layers[0]).toMatchObject({
       kind: 'shape', shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1],
     })
+  })
+
+  it('rejects vector geometry that disappears after renderer dimension normalization', () => {
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{
+          id: 'vector', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.5, height: 1,
+          pathData: 'M0 0 L1000000000000 0', pathViewBox: [0, 0, 0.125, 1],
+        }],
+      }],
+    }
+
+    expect(validateLabelSpec(spec).ok).toBe(false)
+    expect(() => applyStructuredLabelSpec(baseArea, spec)).toThrow(/Label Spec/)
   })
 
   it('accepts valid closed and compound Task 5 paths', () => {

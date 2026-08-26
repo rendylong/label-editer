@@ -188,6 +188,25 @@ describe('shared design contracts', () => {
     expect(validateLayoutBlueprint(bare).areas[0].carrier).toBe('bare')
   })
 
+  it('reserves white_underbase for the canonical renderer channel at the blueprint boundary', () => {
+    const blueprint = carrierBlueprint('direct_surface_print')
+    blueprint.areas[0].layers[0].processes = [{
+      process: 'screen_print',
+      spotName: 'white_underbase',
+      requiredMask: 'color',
+    }]
+
+    expect(() => validateLayoutBlueprint(blueprint)).toThrowError(expect.objectContaining({
+      code: 'INVALID_LAYOUT_BLUEPRINT',
+    }))
+
+    blueprint.areas[0].layers[0].processes = [{
+      process: 'white_underbase',
+      requiredMask: 'white_underbase',
+    }]
+    expect(validateLayoutBlueprint(blueprint).version).toBe(1)
+  })
+
   it('requires exactly one coordinate source and globally unique ids', () => {
     const blueprint = carrierBlueprint('direct_surface_print')
     blueprint.areas[0].layers[0].normalizedBounds = { x: 0.1, y: 0.1, width: 0.8, height: 0.2 }

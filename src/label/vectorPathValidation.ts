@@ -1,4 +1,5 @@
 import { traceValidatedSvgPath, validateSvgPathViewBox } from './svgPath'
+import { normalizeShapeDimension } from './shapeGeometry'
 
 export type VectorPathField = 'pathData' | 'pathViewBox'
 
@@ -38,12 +39,14 @@ export function validateVectorPath(
     }
   }
   try {
+    const normalizedWidth = normalizeShapeDimension(width)
+    const normalizedHeight = normalizeShapeDimension(height)
     traceValidatedSvgPath({
       moveTo: () => undefined,
       lineTo: () => undefined,
       bezierCurveTo: () => undefined,
       closePath: () => undefined,
-    }, pathData, pathViewBox, width, height)
+    }, pathData, pathViewBox, normalizedWidth, normalizedHeight)
   } catch (error) {
     return {
       field: 'pathData',

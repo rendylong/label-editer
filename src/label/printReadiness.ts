@@ -155,7 +155,10 @@ export function buildPrintManifest(
 ): PrintManifest {
   if (!area.printSpec && !area.carrier) throw new Error(`贴标区域「${area.name}」尚未设置印刷规格`)
   const spec = area.printSpec
-  const foilNames = area.layers.flatMap((layer) => layer.craft.flatMap((effect) => effect.type === 'foil' && effect.params.foilSpotName ? [effect.params.foilSpotName] : []))
+  const userSeparation = (value: string | undefined): string[] => value && value !== 'white_underbase' ? [value] : []
+  const foilNames = area.layers.flatMap((layer) => layer.craft.flatMap((effect) => (
+    effect.type === 'foil' ? userSeparation(effect.params.foilSpotName) : []
+  )))
   const declaresWhiteUnderbase = area.layers.some((layer) => (layer.processes ?? []).some((process) => (
     process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
   )))
@@ -170,15 +173,15 @@ export function buildPrintManifest(
     return [
       ...(whiteUnderbase ? ['white_underbase'] : []),
       ...(process.requiredMask ? [process.requiredMask] : []),
-      ...(process.spotName ? [process.spotName] : []),
+      ...userSeparation(process.spotName),
     ]
   }))
   const isLegacy = !area.carrier
   const separations = area.carrier === 'bare'
     ? []
     : isLegacy
-      ? ['color', 'metalness', 'roughness', 'bump', ...(spec?.spotColors ?? []), ...foilNames]
-      : [...declaredSeparations, ...(spec?.spotColors ?? []), ...foilNames]
+      ? ['color', 'metalness', 'roughness', 'bump', ...(spec?.spotColors ?? []).flatMap(userSeparation), ...foilNames]
+      : [...declaredSeparations, ...(spec?.spotColors ?? []).flatMap(userSeparation), ...foilNames]
   return {
     areaId: area.id,
     areaName: area.name,

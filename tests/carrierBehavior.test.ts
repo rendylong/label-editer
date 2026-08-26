@@ -222,6 +222,23 @@ describe('canonical carrier rendering and readiness', () => {
     }
   })
 
+  it('blocks runtime vector geometry that renderer dimension normalization cannot draw', () => {
+    const path = {
+      ...decorationLayer(),
+      width: 0.5,
+      height: 1,
+      shape: 'path' as const,
+      pathData: 'M0 0 L1000000000000 0',
+      pathViewBox: [0, 0, 0.125, 1] as [number, number, number, number],
+    }
+    const target = carrierArea('direct_surface_print', { layers: [path] })
+
+    expect(validatePrintReadiness(target)).toContainEqual(expect.objectContaining({
+      severity: 'error', code: 'invalid-vector-path', areaId: target.id,
+      layerId: path.id, field: 'pathData',
+    }))
+  })
+
   it.each([
     ['rectangle', undefined],
     ['rounded_rectangle', undefined],

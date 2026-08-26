@@ -170,7 +170,10 @@ function normalizeProcesses(value: unknown): ProcessIntent[] | undefined {
     const raw = areaRecord(item, `processes[${index}]`)
     assertKnownFields(raw, ['process', 'spotName', 'requiredMask'], `processes[${index}]`)
     if (typeof raw.process !== 'string' || !PROCESS_TYPES.has(raw.process)) areaError(`processes[${index}].process`, '无效')
-    if (raw.spotName !== undefined) nonEmptyString(raw.spotName, `processes[${index}].spotName`, 128)
+    if (raw.spotName !== undefined) {
+      nonEmptyString(raw.spotName, `processes[${index}].spotName`, 128)
+      if (raw.spotName === 'white_underbase') areaError(`processes[${index}].spotName`, 'white_underbase is reserved for the canonical renderer channel')
+    }
     if (raw.requiredMask !== undefined && (typeof raw.requiredMask !== 'string' || !REQUIRED_MASKS.has(raw.requiredMask))) {
       areaError(`processes[${index}].requiredMask`, '无效')
     }
@@ -276,6 +279,7 @@ function validateCraftList(value: unknown, path: string, fail: (message: string)
         if (!['gold', 'silver', 'rose', 'champagne', 'holographic', 'custom'].includes(String(value))) fail(`${path}[${index}].params.foilColor 无效`)
       } else if (key === 'strokeColor' || key === 'foilCustomColor' || key === 'foilSpotName') {
         if (typeof value !== 'string') fail(`${path}[${index}].params.strokeColor 必须是字符串`)
+        if (key === 'foilSpotName' && value === 'white_underbase') fail(`${path}[${index}].params.foilSpotName white_underbase is reserved for the canonical renderer channel`)
       } else if (['gradientAngle', 'highlight', 'depth', 'lightAngle', 'intensity', 'noise', 'gloss', 'strokeWidth'].includes(key)) {
         if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${path}[${index}].params.${key} 必须是有限数字`)
       } else {
@@ -467,6 +471,7 @@ function normalizePrintSpec(value: unknown): LabelPrintSpec | undefined {
   if (bleedMm < 0 || cornerRadiusMm < 0 || minTextHeightMm <= 0) areaError('printSpec', '出血、圆角或最小字高无效')
   if (raw.dieCutShape !== 'rectangle' && raw.dieCutShape !== 'rounded-rectangle' && raw.dieCutShape !== 'custom') areaError('printSpec.dieCutShape', '无效')
   if (!Array.isArray(raw.spotColors) || raw.spotColors.some((color) => typeof color !== 'string' || color.length === 0)) areaError('printSpec.spotColors', '必须是非空字符串数组')
+  if (raw.spotColors.includes('white_underbase')) areaError('printSpec.spotColors', 'white_underbase is reserved for the canonical renderer channel')
   return { physicalWidthMm, physicalHeightMm, bleedMm, cornerRadiusMm, minTextHeightMm, dieCutShape: raw.dieCutShape, spotColors: [...raw.spotColors] }
 }
 

@@ -88,7 +88,7 @@
       "required": ["process"],
       "properties": {
         "process": { "enum": ["screen_print", "pad_print", "digital_print", "offset_print", "white_underbase", "varnish", "hot_stamp_foil", "emboss", "deboss", "in_mold", "batch_code"] },
-        "spotName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "spotName": { "type": "string", "minLength": 1, "maxLength": 128, "not": { "const": "white_underbase" } },
         "requiredMask": { "enum": ["color", "metalness", "roughness", "bump", "white_underbase"] }
       }
     },
@@ -126,7 +126,7 @@
       "properties": {
         "foilColor": { "enum": ["gold", "silver", "rose", "champagne", "holographic", "custom"] },
         "foilCustomColor": { "$ref": "#/$defs/color" },
-        "foilSpotName": { "type": "string" },
+        "foilSpotName": { "type": "string", "not": { "const": "white_underbase" } },
         "gradientAngle": { "$ref": "#/$defs/finiteNumber" },
         "highlight": { "$ref": "#/$defs/finiteNumber" },
         "depth": { "$ref": "#/$defs/finiteNumber" },
@@ -358,7 +358,7 @@
         "cornerRadiusMm": { "type": "number", "minimum": 0 },
         "minTextHeightMm": { "type": "number", "exclusiveMinimum": 0 },
         "dieCutShape": { "enum": ["rectangle", "rounded-rectangle", "custom"] },
-        "spotColors": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        "spotColors": { "type": "array", "items": { "type": "string", "minLength": 1, "not": { "const": "white_underbase" } } }
       }
     },
     "font": {
