@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { normalizeShapeLayer } from '../../label/shapeGeometry'
 import type { LabelLayer, ShapeGeometry, ShapeKind, ShapeLayer } from '../../label/types'
 import { CraftEditor } from '../CraftEditor'
+import { CssColorField } from '../CssColorField'
 import { InspectorSection } from '../InspectorSection'
 import { TransformFields } from './TextInspector'
 
@@ -17,14 +18,14 @@ export function ShapeInspector({ layer, patch }: { layer: ShapeLayer; patch: (pa
   const ratio = layer.width / Math.max(layer.height, 1)
   const hasFill = !['line', 'wave', 'bracket'].includes(layer.shape)
   const transparentFill = layer.fill === 'transparent'
-  const validOpaqueFill = /^#[0-9a-f]{6}$/i.test(layer.fill) ? layer.fill : null
-  const [lastOpaqueFill, setLastOpaqueFill] = useState(validOpaqueFill ?? '#111111')
+  const opaqueFill = transparentFill ? null : layer.fill
+  const [lastOpaqueFill, setLastOpaqueFill] = useState(opaqueFill ?? '#111111')
   useEffect(() => {
-    setLastOpaqueFill(validOpaqueFill ?? '#111111')
+    setLastOpaqueFill(opaqueFill ?? '#111111')
   }, [layer.id])
   useEffect(() => {
-    if (validOpaqueFill) setLastOpaqueFill(validOpaqueFill)
-  }, [validOpaqueFill])
+    if (opaqueFill) setLastOpaqueFill(opaqueFill)
+  }, [opaqueFill])
   const patchGeometry = (value: Partial<ShapeGeometry>): void => patch({ geometry: { ...layer.geometry, ...value } })
   const numberGeometry = (key: keyof ShapeGeometry, label: string, min: number, max: number, step = 1): React.JSX.Element => (
     <label>{label}<input type="number" min={min} max={max} step={step} value={String(geometry[key])} onChange={(event) => patchGeometry({ [key]: +event.target.value })} /></label>
@@ -56,9 +57,10 @@ export function ShapeInspector({ layer, patch }: { layer: ShapeLayer; patch: (pa
         {hasFill && <>
           <label className="inline-toggle"><span>无填色（透明）</span><input aria-label="无填色（透明）" type="checkbox" checked={transparentFill} onChange={(event) => patch({ fill: event.target.checked ? 'transparent' : lastOpaqueFill })} /></label>
           {transparentFill && <span className="field-status" role="status">当前填色：透明</span>}
-          <label>填色颜色<input aria-label="填色颜色" type="color" value={lastOpaqueFill} disabled={transparentFill} hidden={transparentFill} onChange={(event) => { setLastOpaqueFill(event.target.value); patch({ fill: event.target.value }) }} /></label>
+          <CssColorField label="填色颜色" ariaLabel="填色颜色" value={layer.fill} onChange={(fill) => { if (fill && fill !== 'transparent') setLastOpaqueFill(fill); patch({ fill }) }} />
         </>}
-        <div className="row2"><label>描边<input type="color" value={layer.stroke} onChange={(event) => patch({ stroke: event.target.value })} /></label><label>描边宽度<input type="number" min={0} max={100} value={layer.strokeWidth} onChange={(event) => patch({ strokeWidth: Math.max(0, +event.target.value || 0) })} /></label></div>
+        <CssColorField label="描边" ariaLabel="描边颜色" value={layer.stroke} onChange={(stroke) => patch({ stroke })} />
+        <label>描边宽度<input type="number" min={0} max={100} value={layer.strokeWidth} onChange={(event) => patch({ strokeWidth: Math.max(0, +event.target.value || 0) })} /></label>
         {(layer.shape === 'rectangle' || layer.shape === 'frame') && <label>圆角<input type="number" min={0} value={layer.cornerRadius} onChange={(event) => patch({ cornerRadius: Math.max(0, +event.target.value || 0) })} /></label>}
       </div>
     </InspectorSection>

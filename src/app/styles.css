@@ -1268,6 +1268,23 @@ body,
   background: none;
   cursor: pointer;
 }
+.css-color-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px 32px;
+  gap: 6px;
+  align-items: center;
+}
+.css-color-preview {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.css-color-controls input[type='color'] {
+  width: 32px;
+  height: 28px;
+  padding: 2px;
+}
 .file-label {
   font-size: 11px;
   color: var(--color-text-secondary);

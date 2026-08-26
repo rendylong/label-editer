@@ -151,7 +151,7 @@ describe('sidebar rendered accessibility semantics', () => {
     expect(upload).not.toBeNull()
   })
 
-  it('keeps the native color value valid but hidden when shape fill is explicitly transparent', () => {
+  it('keeps transparent exact in the authoritative field and a valid native picker fallback', () => {
     const target = {
       ...createLayerFromPreset('container-outer-frame', { ...area(), paper: { enabled: false, color: '#ffffff', opacity: 1 }, undoStack: [], redoStack: [] }),
       fill: 'transparent',
@@ -159,9 +159,11 @@ describe('sidebar rendered accessibility semantics', () => {
 
     const document = documentFor(createElement(ShapeInspector, { layer: target, patch: vi.fn() }))
     const fill = document.querySelector<HTMLInputElement>('input[aria-label="填色颜色"]')
+    const picker = document.querySelector<HTMLInputElement>('input[aria-label="填色颜色取色器"]')
 
-    expect(fill?.getAttribute('value')).toMatch(/^#[0-9a-f]{6}$/i)
-    expect(fill?.hasAttribute('hidden')).toBe(true)
-    expect(fill?.hasAttribute('disabled')).toBe(true)
+    expect(fill?.getAttribute('value')).toBe('transparent')
+    expect(fill?.hasAttribute('hidden')).toBe(false)
+    expect(fill?.hasAttribute('disabled')).toBe(false)
+    expect(picker?.getAttribute('value')).toMatch(/^#[0-9a-f]{6}$/i)
   })
 })

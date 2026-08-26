@@ -105,6 +105,16 @@ async function chooseFreshUpload(dom: JSDOM, file: File): Promise<void> {
   await act(async () => { input.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
 }
 
+async function editTextInput(dom: JSDOM, input: HTMLInputElement, value: string): Promise<void> {
+  input.focus()
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')?.set
+  setter?.call(input, value)
+  await act(async () => {
+    input.dispatchEvent(new dom.window.InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }))
+    input.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
+  })
+}
+
 describe('inspector section semantics', () => {
   beforeEach(() => useUiStore.setState(useUiStore.getInitialState(), true))
 
@@ -182,8 +192,10 @@ describe('shape fill semantics', () => {
 
       expect(transparentToggle.checked).toBe(true)
       expect(dom.window.document.querySelector('[role="status"]')?.textContent).toBe('当前填色：透明')
-      expect(colorInput.disabled).toBe(true)
-      expect(colorInput.hidden).toBe(true)
+      expect(colorInput.type).toBe('text')
+      expect(colorInput.value).toBe('transparent')
+      expect(colorInput.disabled).toBe(false)
+      expect(colorInput.hidden).toBe(false)
 
       await act(async () => { transparentToggle.click(); await tick() })
       expect(patches.at(-1)).toEqual({ fill: '#111111' })
@@ -205,10 +217,71 @@ describe('shape fill semantics', () => {
       await act(async () => { opaqueToggle.click(); await tick() })
       expect(patches.at(-1)).toEqual({ fill: 'transparent' })
       colorInput = dom.window.document.querySelector<HTMLInputElement>('input[aria-label="填色颜色"]')!
-      expect(colorInput.hidden).toBe(true)
+      expect(colorInput.value).toBe('transparent')
+      expect(colorInput.hidden).toBe(false)
 
       await act(async () => { opaqueToggle.click(); await tick() })
       expect(patches.at(-1)).toEqual({ fill: '#c7bfa9' })
+    })
+  })
+})
+
+describe('CSS color inspector controls', () => {
+  it('shows exact rgba and named values without mutating text or shape layers on mount', async () => {
+    const textPatch = vi.fn()
+    const shapePatch = vi.fn()
+    const text = { ...textLayer('css-text', 10), color: 'rgba(125, 63, 42, 0.5)' }
+    const shape: ShapeLayer = {
+      id: 'css-shape', kind: 'shape', shape: 'rectangle', width: 80, height: 40,
+      fill: 'rebeccapurple', stroke: 'rgba(10, 20, 30, 0.25)', strokeWidth: 2, cornerRadius: 4,
+      x: 20, y: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, craft: [],
+    }
+
+    await withMountedDom(async ({ dom, root, tick }) => {
+      await act(async () => root.render(createElement('div', null,
+        createElement(TextInspector, {
+          area: area([text]), layer: text, patch: textPatch, commitUploadedFont: vi.fn(),
+        }),
+        createElement(ShapeInspector, { layer: shape, patch: shapePatch }),
+      )))
+      await act(async () => { await tick() })
+
+      expect(dom.window.document.querySelector<HTMLInputElement>('input[aria-label="文字颜色"]')?.value).toBe('rgba(125, 63, 42, 0.5)')
+      expect(dom.window.document.querySelector<HTMLInputElement>('input[aria-label="填色颜色"]')?.value).toBe('rebeccapurple')
+      expect(dom.window.document.querySelector<HTMLInputElement>('input[aria-label="描边颜色"]')?.value).toBe('rgba(10, 20, 30, 0.25)')
+      expect(textPatch).not.toHaveBeenCalled()
+      expect(shapePatch).not.toHaveBeenCalled()
+    })
+  })
+
+  it('commits exact CSS strings only after authoritative text edits', async () => {
+    const textPatch = vi.fn()
+    const shapePatch = vi.fn()
+    const text = { ...textLayer('css-text', 10), color: 'rgba(125, 63, 42, 0.5)' }
+    const shape: ShapeLayer = {
+      id: 'css-shape', kind: 'shape', shape: 'rectangle', width: 80, height: 40,
+      fill: 'rebeccapurple', stroke: 'rgba(10, 20, 30, 0.25)', strokeWidth: 2, cornerRadius: 4,
+      x: 20, y: 20, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, craft: [],
+    }
+
+    await withMountedDom(async ({ dom, root }) => {
+      await act(async () => root.render(createElement('div', null,
+        createElement(TextInspector, {
+          area: area([text]), layer: text, patch: textPatch, commitUploadedFont: vi.fn(),
+        }),
+        createElement(ShapeInspector, { layer: shape, patch: shapePatch }),
+      )))
+      const textColor = dom.window.document.querySelector<HTMLInputElement>('input[aria-label="文字颜色"]')!
+      const fillColor = dom.window.document.querySelector<HTMLInputElement>('input[aria-label="填色颜色"]')!
+      const strokeColor = dom.window.document.querySelector<HTMLInputElement>('input[aria-label="描边颜色"]')!
+
+      await editTextInput(dom, textColor, 'color(display-p3 0.8 0.2 0.1)')
+      await editTextInput(dom, fillColor, 'light-dark(white, black)')
+      await editTextInput(dom, strokeColor, 'hsl(20 70% 40% / 0.75)')
+
+      expect(textPatch).toHaveBeenLastCalledWith({ color: 'color(display-p3 0.8 0.2 0.1)' })
+      expect(shapePatch).toHaveBeenCalledWith({ fill: 'light-dark(white, black)' })
+      expect(shapePatch).toHaveBeenLastCalledWith({ stroke: 'hsl(20 70% 40% / 0.75)' })
     })
   })
 })

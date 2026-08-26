@@ -7,6 +7,7 @@ import type { LabelAreaConfig, LabelLayer, TextLayer } from '../../label/types'
 import { BASIC_PALETTE } from '../../label/types'
 import { flashToast } from '../../state/stores'
 import { CraftEditor } from '../CraftEditor'
+import { CssColorField } from '../CssColorField'
 import { FontBrowser, fontVariantSupport } from '../FontBrowser'
 import { InspectorSection } from '../InspectorSection'
 
@@ -90,7 +91,7 @@ export function TextInspector({ area, layer, patch, uploadFont = uploadFontFile,
         </div>
       </InspectorSection>
       <InspectorSection objectType="text" sectionId="appearance" title="外观">
-        <div className="props"><label>颜色<div className="swatches">{BASIC_PALETTE.map((color) => <button type="button" key={color} className={`swatch ${layer.color === color ? 'active' : ''}`} style={{ background: color }} onClick={() => patch({ color })} title={color} />)}<input type="color" value={layer.color} onChange={(event) => patch({ color: event.target.value })} title="取色器" /></div></label></div>
+        <div className="props"><CssColorField label="颜色" ariaLabel="文字颜色" value={layer.color} onChange={(color) => patch({ color })} palette={BASIC_PALETTE} /></div>
       </InspectorSection>
       <InspectorSection objectType="text" sectionId="transform" title="变换">
         <TransformFields layer={layer} patch={patch} />
