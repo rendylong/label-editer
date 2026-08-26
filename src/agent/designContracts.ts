@@ -5,6 +5,7 @@ import designReviewManifestV1Schema from './design-review-manifest-v1.schema.jso
 import editorHandoffV2Schema from './editor-handoff-v2.schema.json'
 import layoutBlueprintV1Schema from './layout-blueprint-v1.schema.json'
 import reviewManifestV1Schema from './review-manifest-v1.schema.json'
+import { isStrictRfc3339DateTime, validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
 
 export type CarrierMode =
   | 'direct_surface_print'
@@ -273,33 +274,10 @@ const LEGACY_CARRIERS: Record<string, CarrierMode> = {
   bare_no_label: 'bare',
 }
 
-function isLeapYear(year: number): boolean {
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-}
-
-function isStrictIsoDateTime(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value)
-  if (!match) return false
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offsetHourText, offsetMinuteText] = match
-  const year = Number(yearText)
-  const month = Number(monthText)
-  const day = Number(dayText)
-  const hour = Number(hourText)
-  const minute = Number(minuteText)
-  const second = Number(secondText)
-  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText)
-  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText)
-  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  return month >= 1 && month <= 12
-    && day >= 1 && day <= daysInMonth[month - 1]
-    && hour <= 23 && minute <= 59 && second <= 59
-    && offsetHour <= 23 && offsetMinute <= 59
-}
-
 const ajv = new Ajv2020({ allErrors: true, strict: true })
 ajv.addFormat('date-time', {
   type: 'string',
-  validate: isStrictIsoDateTime,
+  validate: isStrictRfc3339DateTime,
 })
 
 const validateBlueprintSchema = ajv.compile(layoutBlueprintV1Schema) as ValidateFunction<LayoutBlueprintV1>
@@ -339,7 +317,7 @@ function assertUnique(values: string[], label: string, code: DesignContractError
   }
 }
 
-function assertLayerShape(layer: LayoutBlueprintLayer, areaId: string): void {
+function assertLayerShape(layer: LayoutBlueprintLayer, areaId: string, assetsById: Map<string, LayoutBlueprintV1['assets'][number]>): void {
   for (const process of layer.processes) {
     if (process.spotName === 'white_underbase') {
       throw new DesignContractError(
@@ -356,9 +334,20 @@ function assertLayerShape(layer: LayoutBlueprintLayer, areaId: string): void {
       || !layer.alignment || !layer.wrapPolicy || layer.maxLines === undefined || !layer.color) {
       throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${areaId}/${layer.id} is missing required typography fields`)
     }
+    if (layer.fontAsset && !['font/woff', 'font/woff2'].includes(assetsById.get(layer.fontAsset)?.mimeType ?? '')) {
+      throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${areaId}/${layer.id} fontAsset must reference WOFF or WOFF2`)
+    }
+    for (const family of layer.fontStack ?? []) {
+      if (!/^[\p{L}\p{N} ._-]+$/u.test(family)) {
+        throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${areaId}/${layer.id} fontStack contains an unsafe font family`)
+      }
+    }
   }
   if (layer.kind === 'image' && !layer.assetId) {
     throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Image layer ${areaId}/${layer.id} requires assetId`)
+  }
+  if (layer.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(assetsById.get(layer.assetId ?? '')?.mimeType ?? '')) {
+    throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Image layer ${areaId}/${layer.id} assetId must reference a supported image`)
   }
   if (layer.kind === 'shape') {
     if (!layer.shape) throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Shape layer ${areaId}/${layer.id} requires shape`)
@@ -375,10 +364,10 @@ function assertLayerShape(layer: LayoutBlueprintLayer, areaId: string): void {
 }
 
 function assertCarrierInvariants(area: LayoutBlueprintArea): void {
-  if (area.carrier === 'applied_label' && (!area.substrate || !area.substrate.boundary)) {
+  if (area.carrier === 'applied_label' && (!area.substrate || area.substrate.kind !== 'opaque' || area.substrate.opacity <= 0 || !area.substrate.boundary)) {
     throw new DesignContractError(
       'INVALID_LAYOUT_BLUEPRINT',
-      `applied_label area ${area.id} requires a substrate with boundary`,
+      `applied_label area ${area.id} requires an opaque substrate with nonzero opacity and boundary`,
     )
   }
   if (area.carrier === 'clear_label') {
@@ -434,7 +423,8 @@ export function validateLayoutBlueprint(value: unknown): LayoutBlueprintV1 {
   assertSchema(value, validateBlueprintSchema, 'INVALID_LAYOUT_BLUEPRINT', 'Layout blueprint')
   assertUnique(value.areas.map((area) => area.id), 'area id', 'INVALID_LAYOUT_BLUEPRINT')
   assertUnique(value.assets.map((asset) => asset.id), 'asset id', 'INVALID_LAYOUT_BLUEPRINT')
-  const assetIds = new Set(value.assets.map((asset) => asset.id))
+  const assetsById = new Map(value.assets.map((asset) => [asset.id, asset]))
+  const assetIds = new Set(assetsById.keys())
   const layerIds: string[] = []
   const layersById = new Map<string, LayoutBlueprintLayer>()
   for (const area of value.areas) {
@@ -442,7 +432,7 @@ export function validateLayoutBlueprint(value: unknown): LayoutBlueprintV1 {
     for (const layer of area.layers) {
       layerIds.push(layer.id)
       layersById.set(layer.id, layer)
-      assertLayerShape(layer, area.id)
+      assertLayerShape(layer, area.id, assetsById)
       if (layer.assetId && !assetIds.has(layer.assetId)) {
         throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Unknown asset id ${layer.assetId} on ${area.id}/${layer.id}`)
       }
@@ -514,62 +504,19 @@ export function validateApprovalRecord(value: unknown): ApprovalRecordV1 {
   return structuredClone(value)
 }
 
-function assertManifestIdentity(
-  value: {
-    areas: ManifestArea[]
-    artifacts: Array<{ id: string; path: string; viewKind: string; areaId?: string; carrier?: CarrierMode }>
-  },
-  code: 'INVALID_DESIGN_REVIEW_MANIFEST' | 'INVALID_REVIEW_MANIFEST',
-): void {
-  assertUnique(value.areas.map((area) => area.id), 'area id', code)
-  assertUnique(value.artifacts.map((artifact) => artifact.id), 'artifact id', code)
-  assertUnique(value.artifacts.map((artifact) => artifact.path), 'artifact path', code)
-  const areas = new Map(value.areas.map((area) => [area.id, area]))
-  const evidenceByArea = new Map<string, Set<string>>()
-  const areaScopedViewKinds = code === 'INVALID_DESIGN_REVIEW_MANIFEST'
-    ? new Set(['mockup-area'])
-    : new Set(['flat-artwork', 'surface-face'])
-  for (const artifact of value.artifacts) {
-    if (areaScopedViewKinds.has(artifact.viewKind) && (!artifact.areaId || !artifact.carrier)) {
-      throw new DesignContractError(code, `Area-scoped artifact ${artifact.id} requires areaId and carrier`)
-    }
-    if (!artifact.areaId) continue
-    const area = areas.get(artifact.areaId)
-    if (!area) throw new DesignContractError(code, `Artifact ${artifact.id} references unknown area id: ${artifact.areaId}`)
-    if (artifact.carrier && artifact.carrier !== area.carrier) {
-      throw new DesignContractError(code, `Artifact ${artifact.id} carrier does not match area ${artifact.areaId}`)
-    }
-    if (areaScopedViewKinds.has(artifact.viewKind)) {
-      const evidence = evidenceByArea.get(artifact.areaId) ?? new Set<string>()
-      evidence.add(artifact.viewKind)
-      evidenceByArea.set(artifact.areaId, evidence)
-    }
-  }
-  for (const area of value.areas) {
-    if (area.carrier === 'bare') continue
-    const evidence = evidenceByArea.get(area.id) ?? new Set<string>()
-    if (code === 'INVALID_DESIGN_REVIEW_MANIFEST') {
-      if (evidence.size === 0) {
-        throw new DesignContractError(code, `Area ${area.id} is missing required design-review evidence`)
-      }
-      continue
-    }
-    const missing = ['flat-artwork', 'surface-face'].filter((viewKind) => !evidence.has(viewKind))
-    if (missing.length > 0) {
-      throw new DesignContractError(code, `Area ${area.id} is missing required evidence: ${missing.join(', ')}`)
-    }
-  }
-}
-
 export function validateDesignReviewManifest(value: unknown): DesignReviewManifestV1 {
   assertSchema(value, validateDesignManifestSchema, 'INVALID_DESIGN_REVIEW_MANIFEST', 'Design review manifest')
-  assertManifestIdentity(value, 'INVALID_DESIGN_REVIEW_MANIFEST')
+  try { validateManifestSemantics(value, 'design') } catch (error) {
+    throw new DesignContractError('INVALID_DESIGN_REVIEW_MANIFEST', error instanceof Error ? error.message : String(error))
+  }
   return structuredClone(value)
 }
 
 export function validateReviewManifest(value: unknown): ReviewManifestV1 {
   assertSchema(value, validateProductionManifestSchema, 'INVALID_REVIEW_MANIFEST', 'Review manifest')
-  assertManifestIdentity(value, 'INVALID_REVIEW_MANIFEST')
+  try { validateManifestSemantics(value, 'production') } catch (error) {
+    throw new DesignContractError('INVALID_REVIEW_MANIFEST', error instanceof Error ? error.message : String(error))
+  }
   return structuredClone(value)
 }
 

@@ -230,6 +230,23 @@ describe('carrier-aware channel export', () => {
     expect(buildPrintManifest(target, bake).separations).toEqual(['white_underbase', 'WHITE'])
   })
 
+  it('exposes a typed renderer-authorized white fact that arbitrary separation strings cannot mint', () => {
+    const target = area('clear_label', [whiteLayer({
+      craft: [{ type: 'foil', params: { foilSpotName: 'white_underbase' } }],
+    })])
+    const proven = renderWhiteBake(target)
+    const injected = { color: canvas(1), whiteUnderbase: canvas(5) }
+
+    expect(buildPrintManifest(target, proven)).toMatchObject({
+      whiteUnderbaseAuthorized: true,
+      separations: ['white_underbase', 'WHITE'],
+    })
+    expect(buildPrintManifest(target, injected)).toMatchObject({
+      whiteUnderbaseAuthorized: false,
+      separations: [],
+    })
+  })
+
   it('reverifies artifact consumption after a manifest consumer mutates the source raster', async () => {
     const target = area('clear_label', [whiteLayer()])
     const bake = renderWhiteBake(target)

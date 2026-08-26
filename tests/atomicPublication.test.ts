@@ -10,6 +10,15 @@ import { publishAtomically } from '../scripts/lib/files.mjs'
 import { renderDesignReview } from '../scripts/lib/design-review.mjs'
 
 const temporaryDirectories: string[] = []
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+
+function dimensionedPng(width: number, height: number): Buffer {
+  const bytes = Buffer.from(PNG)
+  bytes.writeUInt32BE(width, 16)
+  bytes.writeUInt32BE(height, 20)
+  return bytes
+}
+
 const filesModuleUrl = pathToFileURL(path.resolve(import.meta.dirname, '../scripts/lib/files.mjs')).href
 const childPublisher = String.raw`
   import { open, rename, rm } from 'node:fs/promises'
@@ -221,10 +230,9 @@ describe('atomic directory publication recovery', () => {
         { id: 'back', side: 'back', carrier: 'bare', artboard: { widthMm: 40, heightMm: 60, background: 'transparent' }, placementIntent: 'Back', layers: [] },
       ],
     }))
-    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
     const capture = async ({ width, height }: { width: number; height: number }) => ({
-      front: { bytes: png, width, height },
-      back: { bytes: png, width, height },
+      front: { bytes: dimensionedPng(width, height), width, height },
+      back: { bytes: dimensionedPng(width, height), width, height },
       areas: {},
     })
 

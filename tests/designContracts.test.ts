@@ -172,6 +172,17 @@ describe('shared design contracts', () => {
     }
     expect(validateLayoutBlueprint(applied).version).toBe(1)
 
+    applied.areas[0].substrate = {
+      kind: 'transparent', opacity: 0.2,
+      boundary: { shape: 'rectangle' },
+    }
+    expect(() => validateLayoutBlueprint(applied)).toThrow(/applied_label.*opaque/i)
+    applied.areas[0].substrate = {
+      kind: 'opaque', color: '#ffffff', opacity: 0,
+      boundary: { shape: 'rectangle' },
+    }
+    expect(() => validateLayoutBlueprint(applied)).toThrow(/applied_label.*opacity/i)
+
     const clear = carrierBlueprint('clear_label')
     clear.areas[0].substrate = {
       kind: 'transparent', opacity: 0,
@@ -329,6 +340,16 @@ describe('shared design contracts', () => {
     const reviewManifest = productionReviewManifest()
     reviewManifest.createdAt = '2026-02-31T12:00:00Z'
     expect(() => validateReviewManifest(reviewManifest)).toThrow(/schema/i)
+  })
+
+  it('rejects out-of-range RFC3339 timezone offsets in the shared manifest contract', () => {
+    const designManifest = designReviewManifest()
+    designManifest.createdAt = '2026-08-27T00:00:00+99:99'
+    expect(() => validateDesignReviewManifest(designManifest)).toThrow(/schema|date-time|RFC3339/i)
+
+    const reviewManifest = productionReviewManifest()
+    reviewManifest.createdAt = '2026-08-27T00:00:00+24:00'
+    expect(() => validateReviewManifest(reviewManifest)).toThrow(/schema|date-time|RFC3339/i)
   })
 
   it('allows global front/back mockups while requiring scoped evidence for every design area', () => {

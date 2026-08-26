@@ -67,6 +67,10 @@ describe('shape geometry', () => {
   it.each([
     [0.5, 1, 'M0 0 L1000000000000 0', [0, 0, 0.125, 1] as [number, number, number, number], false],
     [0.5, 0.5, 'M0 0 L0.125 1', [0, 0, 0.125, 1] as [number, number, number, number], true],
+    [40, 60, 'M0 0 L1 1', [0, 0, 0, 1] as [number, number, number, number], false],
+    [40, 60, 'M0 0 L1 1', [0, 0, 1e19, 1] as [number, number, number, number], false],
+    [40, 60, 'M0 0 A1 1 0 0 1 0 0', [0, 0, 1, 1] as [number, number, number, number], false],
+    [40, 60, 'M0 0 A1 1 0 0 1 1 1', [0, 0, 1, 1] as [number, number, number, number], true],
   ] as const)('keeps vector validation in parity with renderer-normalized %sx%s geometry', (width, height, pathData, pathViewBox, expectedValid) => {
     const layer = makeShape({ shape: 'path', width, height, pathData, pathViewBox })
     const validationSucceeded = validateVectorPath(pathData, pathViewBox, width, height) === undefined

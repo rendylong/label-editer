@@ -6,30 +6,13 @@ import { chromium } from 'playwright'
 import designReviewManifestSchema from '../../src/agent/design-review-manifest-v1.schema.json' with { type: 'json' }
 import layoutBlueprintSchema from '../../src/agent/layout-blueprint-v1.schema.json' with { type: 'json' }
 import { publishAtomically, sanitizeArtifactName, sha256Bytes } from './files.mjs'
+import { isStrictRfc3339DateTime, validateManifestSemantics } from './design-manifest-core.mjs'
+import { traceValidatedSvgPath } from './svg-path-core.mjs'
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024
-const ALLOWED_PATH_COMMANDS = new Set('MmLlHhVvCcQqAaZz')
-const PATH_PARAMETER_COUNTS = { M: 2, L: 2, H: 1, V: 1, C: 6, Q: 4, A: 7 }
-const MAX_PATH_COMMANDS = 4096
-const NUMBER_TOKEN = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
-const TOKEN_PATTERN = /[A-Za-z]|[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/g
-
-function isLeapYear(year) {
-  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-}
-
-function validDateTime(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.exec(value)
-  if (!match) return false
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match
-  const year = Number(yearText); const month = Number(monthText); const day = Number(dayText)
-  const days = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1]
-    && Number(hourText) <= 23 && Number(minuteText) <= 59 && Number(secondText) <= 59
-}
 
 const ajv = new Ajv2020({ allErrors: true, strict: true })
-ajv.addFormat('date-time', { type: 'string', validate: validDateTime })
+ajv.addFormat('date-time', { type: 'string', validate: isStrictRfc3339DateTime })
 const validateBlueprintSchema = ajv.compile(layoutBlueprintSchema)
 const validateManifestSchema = ajv.compile(designReviewManifestSchema)
 
@@ -68,99 +51,16 @@ function assertSafeColor(value, field) {
   if (!safe) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} contains unsafe CSS`)
 }
 
-function validatePathData(pathData, viewBox, field) {
-  if (typeof pathData !== 'string' || pathData.length === 0 || pathData.length > 131072) {
-    throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} must be a bounded SVG path`)
-  }
-  const tokens = pathData.match(TOKEN_PATTERN) ?? []
-  const remainder = pathData.replace(TOKEN_PATTERN, '').replace(/[\s,]+/g, '')
-  const malformedSeparator = /^\s*,/.test(pathData) || /,\s*,/.test(pathData) || /,\s*$/.test(pathData)
-    || /[A-Za-z]\s*,/.test(pathData) || /,\s*[A-Za-z]/.test(pathData)
-  if (remainder || malformedSeparator || tokens.length === 0 || !['M', 'm'].includes(tokens[0])) {
-    throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} has invalid SVG path syntax`)
-  }
-  for (const token of tokens) {
-    if (/^[A-Za-z]$/.test(token)) {
-      if (!ALLOWED_PATH_COMMANDS.has(token)) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} uses unsupported SVG command ${token}`)
-    } else if (!NUMBER_TOKEN.test(token) || !Number.isFinite(Number(token)) || Math.abs(Number(token)) > 1e9) {
-      throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} contains an unsafe coordinate`)
-    }
-  }
-  let index = 0
-  let activeCommand
-  let emittedCommands = 0
-  let currentX = 0
-  let currentY = 0
-  let subpathX = 0
-  let subpathY = 0
-  const fail = (message) => { throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} ${message}`) }
-  const emit = () => {
-    emittedCommands += 1
-    if (emittedCommands > MAX_PATH_COMMANDS) fail(`emits more than ${MAX_PATH_COMMANDS} commands`)
-  }
-  while (index < tokens.length) {
-    if (/^[A-Za-z]$/.test(tokens[index])) {
-      activeCommand = tokens[index]
-      index += 1
-      if (!ALLOWED_PATH_COMMANDS.has(activeCommand)) fail(`uses unsupported SVG command ${activeCommand}`)
-      if (activeCommand.toUpperCase() === 'Z') {
-        if (emittedCommands === 0) fail('must begin with M or m')
-        emit()
-        currentX = subpathX
-        currentY = subpathY
-        activeCommand = undefined
-        continue
-      }
-    }
-    if (!activeCommand) fail('has parameters without a preceding command')
-    if (emittedCommands === 0 && activeCommand.toUpperCase() !== 'M') fail('must begin with M or m')
-    const upper = activeCommand.toUpperCase()
-    const parameterCount = PATH_PARAMETER_COUNTS[upper]
-    const relative = activeCommand === activeCommand.toLowerCase()
-    let emittedForCommand = 0
-    while (index < tokens.length && !/^[A-Za-z]$/.test(tokens[index])) {
-      const values = tokens.slice(index, index + parameterCount)
-      if (values.length !== parameterCount || values.some((value) => /^[A-Za-z]$/.test(value))) fail(`${activeCommand} has incomplete parameters`)
-      index += parameterCount
-      const numbers = values.map(Number)
-      const x = (value) => relative ? currentX + value : value
-      const y = (value) => relative ? currentY + value : value
-      const safeDerived = (...derived) => {
-        if (derived.some((value) => !Number.isFinite(value) || Math.abs(value) > 1e9)) fail('contains an unsafe derived coordinate')
-      }
-      if (upper === 'M' || upper === 'L') {
-        const endpointX = x(numbers[0]); const endpointY = y(numbers[1])
-        safeDerived(endpointX, endpointY)
-        currentX = endpointX; currentY = endpointY
-        if (upper === 'M' && emittedForCommand === 0) { subpathX = currentX; subpathY = currentY }
-      } else if (upper === 'H') { const endpointX = x(numbers[0]); safeDerived(endpointX); currentX = endpointX }
-      else if (upper === 'V') { const endpointY = y(numbers[0]); safeDerived(endpointY); currentY = endpointY }
-      else if (upper === 'C') {
-        const derived = [x(numbers[0]), y(numbers[1]), x(numbers[2]), y(numbers[3]), x(numbers[4]), y(numbers[5])]
-        safeDerived(...derived); currentX = derived[4]; currentY = derived[5]
-      }
-      else if (upper === 'Q') {
-        const derived = [x(numbers[0]), y(numbers[1]), x(numbers[2]), y(numbers[3])]
-        safeDerived(...derived); currentX = derived[2]; currentY = derived[3]
-      }
-      else if (upper === 'A') {
-        if (!(numbers[0] > 0) || !(numbers[1] > 0)) fail('arc radii must be positive')
-        if (!['0', '1'].includes(values[3]) || !['0', '1'].includes(values[4])) fail('arc flags must be 0 or 1')
-        const endpointX = x(numbers[5]); const endpointY = y(numbers[6])
-        safeDerived(endpointX, endpointY)
-        if (endpointX === currentX && endpointY === currentY) fail('arc endpoints must differ')
-        currentX = endpointX; currentY = endpointY
-      }
-      emit()
-      emittedForCommand += 1
-    }
-    if (emittedForCommand === 0) fail(`${activeCommand} requires parameters`)
-  }
-  if (viewBox) {
-    if (!Array.isArray(viewBox) || viewBox.length !== 4 || viewBox.some((value) => typeof value !== 'number' || !Number.isFinite(value))
-      || viewBox[2] <= 0 || viewBox[3] <= 0 || viewBox.some((value) => Math.abs(value) > 1e9)) {
-      throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} has an unsafe viewBox`)
-    }
+function validatePathData(pathData, viewBox, width, height, field) {
+  try {
+    traceValidatedSvgPath({
+      moveTo: () => undefined,
+      lineTo: () => undefined,
+      bezierCurveTo: () => undefined,
+      closePath: () => undefined,
+    }, pathData, viewBox, width, height)
+  } catch (error) {
+    throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} is not a supported bounded SVG path: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -172,14 +72,15 @@ function validateBlueprintSemantics(blueprint) {
   if (front.length !== 1 || back.length !== 1) {
     throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', 'Blueprint requires exactly one unambiguous front area and one back area')
   }
-  const assetIds = new Set(blueprint.assets.map((asset) => asset.id))
+  const assetsById = new Map(blueprint.assets.map((asset) => [asset.id, asset]))
+  const assetIds = new Set(assetsById.keys())
   const layerIds = []
   const layersById = new Map()
   for (const area of blueprint.areas) {
     assertSafeColor(area.artboard.background, `${area.id}.artboard.background`)
     if (area.carrier === 'bare' && area.layers.length > 0) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `bare area ${area.id} must have no decorative content`)
-    if (area.carrier === 'applied_label' && (!area.substrate || !area.substrate.boundary)) {
-      throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `applied_label area ${area.id} requires a substrate boundary`)
+    if (area.carrier === 'applied_label' && (!area.substrate || area.substrate.kind !== 'opaque' || area.substrate.opacity <= 0 || !area.substrate.boundary)) {
+      throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `applied_label area ${area.id} requires an opaque nonzero substrate boundary`)
     }
     if (area.carrier === 'clear_label' && (!area.substrate || area.substrate.kind !== 'transparent' || !area.substrate.boundary || area.substrate.opacity >= 1)) {
       throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `clear_label area ${area.id} requires a transparent film boundary`)
@@ -189,7 +90,11 @@ function validateBlueprintSemantics(blueprint) {
     }
     if (area.substrate) {
       assertSafeColor(area.substrate.color, `${area.id}.substrate.color`)
-      if (area.substrate.boundary?.shape === 'custom') validatePathData(area.substrate.boundary.pathData, undefined, `${area.id}.substrate.boundary.pathData`)
+      if (area.substrate.boundary?.shape === 'custom') {
+        const width = area.artboard.widthMm * 100
+        const height = area.artboard.heightMm * 100
+        validatePathData(area.substrate.boundary.pathData, [0, 0, width, height], width, height, `${area.id}.substrate.boundary.pathData`)
+      }
     }
     for (const layer of area.layers) {
       layerIds.push(layer.id)
@@ -209,8 +114,19 @@ function validateBlueprintSemantics(blueprint) {
           || layer.lineHeight === undefined || !layer.alignment || !layer.wrapPolicy || layer.maxLines === undefined || !layer.color) {
           throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${area.id}/${layer.id} is missing required typography fields`)
         }
+        if (layer.fontAsset && !['font/woff', 'font/woff2'].includes(assetsById.get(layer.fontAsset)?.mimeType)) {
+          throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${area.id}/${layer.id} fontAsset must reference WOFF or WOFF2`)
+        }
+        for (const family of layer.fontStack ?? []) {
+          if (!/^[\p{L}\p{N} ._-]+$/u.test(family)) {
+            throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${area.id}/${layer.id} fontStack contains an unsafe font family`)
+          }
+        }
       }
       if (layer.kind === 'image' && !layer.assetId) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Image layer ${area.id}/${layer.id} requires assetId`)
+      if (layer.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(assetsById.get(layer.assetId)?.mimeType)) {
+        throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Image layer ${area.id}/${layer.id} assetId must reference a supported image`)
+      }
       if (layer.kind === 'shape' && !layer.shape) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Shape layer ${area.id}/${layer.id} requires shape`)
       if (layer.kind === 'shape' && layer.shape === 'path' && (!layer.pathData || !layer.pathViewBox)) {
         throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Path layer ${area.id}/${layer.id} requires pathData and pathViewBox`)
@@ -219,7 +135,13 @@ function validateBlueprintSemantics(blueprint) {
         throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Flattened fallback for ${area.id}/${layer.id} must be explicitly accepted`)
       }
       for (const [name, color] of [['color', layer.color], ['fill', layer.fill], ['stroke', layer.stroke]]) assertSafeColor(color, `${area.id}/${layer.id}.${name}`)
-      if (layer.kind === 'shape' && layer.shape === 'path') validatePathData(layer.pathData, layer.pathViewBox, `${area.id}/${layer.id}.pathData`)
+      if (layer.kind === 'shape' && layer.shape === 'path') {
+        const bounds = layer.boundsMm ?? {
+          width: layer.normalizedBounds.width * area.artboard.widthMm,
+          height: layer.normalizedBounds.height * area.artboard.heightMm,
+        }
+        validatePathData(layer.pathData, layer.pathViewBox, bounds.width * 100, bounds.height * 100, `${area.id}/${layer.id}.pathData`)
+      }
       if (layer.kind === 'shape' && !['rectangle', 'rounded_rectangle', 'ellipse', 'line', 'polygon', 'path'].includes(layer.shape)) {
         throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Unsupported shape ${layer.shape} on ${area.id}/${layer.id}`)
       }
@@ -263,7 +185,7 @@ function cssNumber(value) {
 }
 
 function cssFontStack(fontStack) {
-  return (fontStack ?? ['sans-serif']).map((font) => `'${String(font).replace(/[\\']/g, '')}'`).join(',')
+  return (fontStack ?? ['sans-serif']).map((font) => `'${font}'`).join(',')
 }
 
 function layerBounds(layer, area, pxPerMm) {
@@ -276,12 +198,10 @@ function layerBounds(layer, area, pxPerMm) {
   return Object.fromEntries(Object.entries(bounds).map(([key, value]) => [key, value * pxPerMm]))
 }
 
-function anchorTransform(anchor) {
-  if (anchor === 'top_center') return 'translateX(-50%)'
-  if (anchor === 'center') return 'translate(-50%,-50%)'
-  if (anchor === 'baseline_left') return 'translateY(-100%)'
-  if (anchor === 'baseline_center') return 'translate(-50%,-100%)'
-  return ''
+function anchorOrigin(anchor, bounds) {
+  if (anchor === 'top_center' || anchor === 'baseline_center') return `${cssNumber(bounds.width / 2)}px 0px`
+  if (anchor === 'center') return `${cssNumber(bounds.width / 2)}px ${cssNumber(bounds.height / 2)}px`
+  return '0px 0px'
 }
 
 function renderShape(layer, bounds, pxPerMm) {
@@ -303,8 +223,8 @@ function renderShape(layer, bounds, pxPerMm) {
 function renderLayer(layer, area, options) {
   if (!layer.visible || layer.opacity <= 0) return ''
   const bounds = layerBounds(layer, area, options.pxPerMm)
-  const transforms = [anchorTransform(layer.anchor), layer.rotation ? `rotate(${cssNumber(layer.rotation)}deg)` : ''].filter(Boolean).join(' ')
-  const style = `left:${cssNumber(bounds.x)}px;top:${cssNumber(bounds.y)}px;width:${cssNumber(bounds.width)}px;height:${cssNumber(bounds.height)}px;opacity:${cssNumber(layer.opacity)};z-index:${layer.zIndex};${transforms ? `transform:${transforms};` : ''}`
+  const transform = layer.rotation ? `rotate(${cssNumber(layer.rotation)}deg)` : ''
+  const style = `left:${cssNumber(bounds.x)}px;top:${cssNumber(bounds.y)}px;width:${cssNumber(bounds.width)}px;height:${cssNumber(bounds.height)}px;opacity:${cssNumber(layer.opacity)};z-index:${layer.zIndex};transform-origin:${anchorOrigin(layer.anchor, bounds)};${transform ? `transform:${transform};` : ''}`
   let content = ''
   if (layer.kind === 'text') {
     const fontFamily = layer.fontAsset ? `'review-font-${layer.fontAsset}'` : cssFontStack(layer.fontStack)
@@ -313,14 +233,14 @@ function renderLayer(layer, area, options) {
       : layer.wrapPolicy === 'character'
         ? 'white-space:pre-wrap;overflow-wrap:anywhere;'
         : 'white-space:pre-wrap;overflow-wrap:normal;'
-    const textStyle = `font-family:${fontFamily};font-size:${cssNumber(layer.fontSizeMm * options.pxPerMm)}px;font-weight:${attr(layer.fontWeight)};letter-spacing:${cssNumber(layer.letterSpacingEm)}em;line-height:${cssNumber(layer.lineHeight)};text-align:${layer.alignment === 'justify' ? 'justify' : layer.alignment};color:${attr(layer.color)};direction:${layer.writingDirection === 'rtl' ? 'rtl' : 'ltr'};${wrapping}`
-    content = `<div class="text-geometry"${layer.fontAsset ? ` data-font-family="review-font-${attr(layer.fontAsset)}"` : ''} style="${textStyle}">${escapeHtml(layer.text)}</div>`
+    const textStyle = `font-family:${fontFamily};font-size:${cssNumber(layer.fontSizeMm * options.pxPerMm)}px;font-weight:${layer.fontWeight};letter-spacing:${cssNumber(layer.letterSpacingEm)}em;line-height:${cssNumber(layer.lineHeight)};text-align:${layer.alignment === 'justify' ? 'justify' : layer.alignment};color:${layer.color};max-height:${cssNumber(layer.lineHeight * layer.maxLines)}em;overflow:hidden;${wrapping}`
+    content = `<div class="text-geometry" lang="${attr(layer.language)}" dir="${attr(layer.writingDirection)}" data-wrap-policy="${attr(layer.wrapPolicy)}" data-max-lines="${attr(layer.maxLines)}"${layer.fontAsset ? ` data-font-family="review-font-${attr(layer.fontAsset)}"` : ''} style="${attr(textStyle)}">${escapeHtml(layer.text)}</div>`
   } else if (layer.kind === 'image') {
     const asset = options.assets.get(layer.assetId)
     const objectFit = layer.fit === 'stretch' ? 'fill' : (layer.fit ?? 'contain')
     content = asset ? `<img alt="" src="${attr(asset.dataUrl)}" style="object-fit:${objectFit}">` : ''
   } else content = renderShape(layer, bounds, options.pxPerMm)
-  return `<div class="art-layer" data-layer-id="${attr(layer.id)}" data-kind="${layer.kind}" style="${style}">${content}</div>`
+  return `<div class="art-layer" data-layer-id="${attr(layer.id)}" data-kind="${layer.kind}" style="${attr(style)}">${content}</div>`
 }
 
 function boundaryStyle(area, pxPerMm) {
@@ -373,7 +293,7 @@ export function renderBlueprintHtml(blueprint, options) {
     return [`@font-face{font-family:'review-font-${asset.id}';src:url('${resolved.dataUrl}') format('${format}')}`]
   }).join('')
   return `<!doctype html><html lang="en" data-blueprint-revision="${revision}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Label design review ${revision}</title><style>
-${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute;transform-origin:center}.art-layer img,.shape-geometry,.text-geometry{display:block;width:100%;height:100%}.text-geometry{overflow:hidden}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{border-color:rgba(70,110,130,.18)}
+${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry,.text-geometry{display:block;width:100%;height:100%}.text-geometry{overflow:hidden}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{border-color:rgba(70,110,130,.18)}
 </style></head><body>${renderView('front', front, options, validated.revision)}${renderView('back', back, options, validated.revision)}</body></html>`
 }
 
@@ -391,16 +311,87 @@ function safeRelativePath(value, label) {
 }
 
 function pngDimensions(bytes) {
-  if (bytes.length < 24 || !Buffer.from(bytes.subarray(0, 8)).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return undefined
-  return { width: Buffer.from(bytes).readUInt32BE(16), height: Buffer.from(bytes).readUInt32BE(20) }
+  const data = Buffer.from(bytes)
+  if (data.length < 24 || !data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    || data.readUInt32BE(8) !== 13 || data.subarray(12, 16).toString('ascii') !== 'IHDR') return undefined
+  const width = data.readUInt32BE(16); const height = data.readUInt32BE(20)
+  return width > 0 && height > 0 ? { width, height } : undefined
+}
+
+function jpegDimensions(bytes) {
+  const data = Buffer.from(bytes)
+  if (data.length < 4 || data[0] !== 0xff || data[1] !== 0xd8) return undefined
+  let offset = 2
+  while (offset < data.length) {
+    while (offset < data.length && data[offset] === 0xff) offset += 1
+    if (offset >= data.length) return undefined
+    const marker = data[offset++]
+    if (marker === 0xd9) return undefined
+    if (marker === 0x00 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue
+    if (offset + 2 > data.length) return undefined
+    const length = data.readUInt16BE(offset)
+    if (length < 2 || offset + length > data.length) return undefined
+    if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+      if (length < 7) return undefined
+      const height = data.readUInt16BE(offset + 3); const width = data.readUInt16BE(offset + 5)
+      return width > 0 && height > 0 ? { width, height } : undefined
+    }
+    offset += length
+  }
+  return undefined
+}
+
+function webpDimensions(bytes) {
+  const data = Buffer.from(bytes)
+  if (data.length < 20 || data.subarray(0, 4).toString('ascii') !== 'RIFF' || data.subarray(8, 12).toString('ascii') !== 'WEBP'
+    || data.readUInt32LE(4) + 8 !== data.length) return undefined
+  let offset = 12
+  while (offset + 8 <= data.length) {
+    const kind = data.subarray(offset, offset + 4).toString('ascii')
+    const size = data.readUInt32LE(offset + 4); const start = offset + 8; const end = start + size
+    if (end > data.length) return undefined
+    if (kind === 'VP8X') {
+      if (size !== 10) return undefined
+      return { width: data.readUIntLE(start + 4, 3) + 1, height: data.readUIntLE(start + 7, 3) + 1 }
+    }
+    if (kind === 'VP8 ' && size >= 10 && data[start + 3] === 0x9d && data[start + 4] === 0x01 && data[start + 5] === 0x2a) {
+      return { width: data.readUInt16LE(start + 6) & 0x3fff, height: data.readUInt16LE(start + 8) & 0x3fff }
+    }
+    if (kind === 'VP8L' && size >= 5 && data[start] === 0x2f) {
+      const packed = data.readUInt32LE(start + 1)
+      return { width: (packed & 0x3fff) + 1, height: ((packed >>> 14) & 0x3fff) + 1 }
+    }
+    offset = end + (size % 2)
+  }
+  return undefined
+}
+
+function imageDimensions(bytes, mimeType) {
+  if (mimeType === 'image/png') return pngDimensions(bytes)
+  if (mimeType === 'image/jpeg') return jpegDimensions(bytes)
+  if (mimeType === 'image/webp') return webpDimensions(bytes)
+  return undefined
+}
+
+function validFontContainer(bytes, mimeType) {
+  const data = Buffer.from(bytes)
+  if (mimeType === 'font/woff') {
+    if (data.length < 44 || data.subarray(0, 4).toString('ascii') !== 'wOFF' || data.readUInt32BE(8) !== data.length
+      || data.readUInt16BE(12) === 0 || data.readUInt16BE(14) !== 0) return false
+    return 44 + data.readUInt16BE(12) * 20 <= data.length && data.readUInt32BE(16) > 0
+  }
+  if (mimeType === 'font/woff2') {
+    if (data.length < 48 || data.subarray(0, 4).toString('ascii') !== 'wOF2' || data.readUInt32BE(8) !== data.length
+      || data.readUInt16BE(12) === 0 || data.readUInt16BE(14) !== 0 || data.readUInt32BE(16) === 0) return false
+    const compressedSize = data.readUInt32BE(20)
+    return compressedSize > 0 && compressedSize <= data.length - 48
+  }
+  return false
 }
 
 function verifyMagic(bytes, mimeType) {
-  if (mimeType === 'image/png') return Boolean(pngDimensions(bytes))
-  if (mimeType === 'image/jpeg') return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9
-  if (mimeType === 'image/webp') return Buffer.from(bytes.subarray(0, 4)).toString() === 'RIFF' && Buffer.from(bytes.subarray(8, 12)).toString() === 'WEBP'
-  if (mimeType === 'font/woff') return Buffer.from(bytes.subarray(0, 4)).toString() === 'wOFF'
-  if (mimeType === 'font/woff2') return Buffer.from(bytes.subarray(0, 4)).toString() === 'wOF2'
+  if (mimeType.startsWith('image/')) return Boolean(imageDimensions(bytes, mimeType))
+  if (mimeType === 'font/woff' || mimeType === 'font/woff2') return validFontContainer(bytes, mimeType)
   return false
 }
 
@@ -417,7 +408,7 @@ async function resolveLocalFiles(blueprint, blueprintPath, referencePaths) {
     const digest = sha256Bytes(bytes)
     if (digest !== asset.sha256) throw new DesignReviewError('DIGEST_MISMATCH', `Asset ${asset.id} digest mismatch`)
     if (!verifyMagic(bytes, asset.mimeType)) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Asset ${asset.id} MIME/magic mismatch`)
-    const dimensions = asset.mimeType === 'image/png' ? pngDimensions(bytes) : undefined
+    const dimensions = imageDimensions(bytes, asset.mimeType)
     if (dimensions && ((asset.width && asset.width !== dimensions.width) || (asset.height && asset.height !== dimensions.height))) {
       throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Asset ${asset.id} dimensions mismatch`)
     }
@@ -439,7 +430,8 @@ function assertDimension(value, label) {
 }
 
 function assertCapture(entry, width, height, label) {
-  if (!entry || !(entry.bytes instanceof Uint8Array || Buffer.isBuffer(entry.bytes)) || entry.width !== width || entry.height !== height || !pngDimensions(entry.bytes)) {
+  const dimensions = entry && (entry.bytes instanceof Uint8Array || Buffer.isBuffer(entry.bytes)) ? pngDimensions(entry.bytes) : undefined
+  if (!entry || !dimensions || entry.width !== width || entry.height !== height || dimensions.width !== width || dimensions.height !== height) {
     throw new DesignReviewError('BROWSER_NOT_READY', `${label} capture returned wrong dimensions or invalid PNG bytes`)
   }
 }
@@ -469,7 +461,9 @@ export async function captureDesignReview({ html, blueprint, width, height, pxPe
       }))
       for (const text of document.querySelectorAll('[data-font-family]')) {
         const family = text.getAttribute('data-font-family')
-        if (!family || !document.fonts.check(`12px "${family}"`)) throw new Error(`Declared font failed to load: ${family ?? 'unknown'}`)
+        const matchingFaces = [...document.fonts].filter((face) => face.family.replace(/^['"]|['"]$/g, '') === family)
+        if (!family || matchingFaces.length === 0 || matchingFaces.some((face) => face.status !== 'loaded')
+          || !document.fonts.check(`12px "${family}"`)) throw new Error(`Declared font failed to load: ${family ?? 'unknown'}`)
       }
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       document.body.classList.add('capture-clean')
@@ -512,9 +506,8 @@ export function buildDesignReviewManifest({ blueprint, blueprintSha256, htmlSha2
     artifacts: structuredClone(artifacts),
   }
   if (!validateManifestSchema(manifest)) throw schemaError('INVALID_DESIGN_REVIEW_MANIFEST', 'Design review manifest', validateManifestSchema)
-  const evidenceAreas = new Set(manifest.artifacts.filter((artifact) => artifact.viewKind === 'mockup-area').map((artifact) => artifact.areaId))
-  for (const area of manifest.areas) {
-    if (area.carrier !== 'bare' && !evidenceAreas.has(area.id)) throw new DesignReviewError('INVALID_DESIGN_REVIEW_MANIFEST', `Area ${area.id} is missing mockup-area evidence`)
+  try { validateManifestSemantics(manifest, 'design') } catch (error) {
+    throw new DesignReviewError('INVALID_DESIGN_REVIEW_MANIFEST', error instanceof Error ? error.message : String(error))
   }
   return manifest
 }

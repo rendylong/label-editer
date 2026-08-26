@@ -33,6 +33,8 @@ export interface PrintManifest {
   dimensionsMm: { width: number; height: number; bleed: number; cornerRadius: number } | null
   dieCutShape: string | null
   minimumTextHeightMm: number | null
+  /** Canonical renderer proof; user separation strings can never authorize this fact. */
+  whiteUnderbaseAuthorized: boolean
   separations: string[]
   issues: PrintReadinessIssue[]
 }
@@ -191,6 +193,7 @@ export function buildPrintManifest(
       : null,
     dieCutShape: spec?.dieCutShape ?? null,
     minimumTextHeightMm: spec?.minTextHeightMm ?? null,
+    whiteUnderbaseAuthorized: rendererProvesCurrentWhiteUnderbase,
     separations: [...new Set(separations)],
     issues: validatePrintReadiness(area),
   }

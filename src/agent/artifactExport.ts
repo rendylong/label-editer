@@ -131,7 +131,7 @@ async function createAreaPublication(
         ? bake
         : { ...bake, whiteUnderbase: undefined })
       manifests.push(manifest)
-      if (whiteUnderbaseArtifact && manifest.separations.includes('white_underbase')) artifacts.push(whiteUnderbaseArtifact)
+      if (whiteUnderbaseArtifact && manifest.whiteUnderbaseAuthorized) artifacts.push(whiteUnderbaseArtifact)
     } else if (whiteUnderbaseArtifact) artifacts.push(whiteUnderbaseArtifact)
   }
   return { artifacts, manifests }
