@@ -122,16 +122,11 @@ describe('plugin skill bundle', () => {
       'qc-model-front-right',
       'qc-model-back-left',
     ])
-    for (const artifact of [
-      'qc-area-<area-id>-face',
-      'qc-area-<area-id>-craft',
-      'qc-area-<area-id>-metalness',
-      'qc-area-<area-id>-roughness',
-      'qc-area-<area-id>-bump',
-    ]) {
-      expect(evidenceSection).toContain(`\`${artifact}\``)
-    }
-    expect(evidenceSection).toContain('every PBR artifact included by the manifest')
+    expect(evidenceSection).toContain('`manifest.areas[].artifactIds`')
+    expect(evidenceSection).toContain('`manifest.artifacts[].id`')
+    expect(evidenceSection).toContain('`areaId`, `viewId`, `channel`, and `reason`')
+    expect(evidenceSection).toContain('every required PBR artifact declared by `requiredChannels`')
+    expect(evidenceSection).not.toContain('qc-area-<area-id>')
 
     expectTextInOrder(qcSection, [
       'Any blocking `fail`',
@@ -164,6 +159,7 @@ describe('plugin skill bundle', () => {
     ]) {
       expect(rubric).toContain(`## ${heading}`)
     }
+    expect(markdownSection(rubric, 'Target and labeled surface')).toContain('Only apply side-specific checks when the manifest area declares `side`')
 
     for (const requirement of [
       'Evidence integrity and revision',
@@ -176,6 +172,20 @@ describe('plugin skill bundle', () => {
     ]) {
       expect(rubric).toContain(requirement)
     }
+  })
+
+  it('documents manifest-authoritative QC paths for opaque area ids', async () => {
+    const [english, chinese] = await Promise.all([
+      readFile(path.join(repoRoot, 'README.md'), 'utf8'),
+      readFile(path.join(repoRoot, 'README.zh-CN.md'), 'utf8'),
+    ])
+
+    expect(english).toContain('area-<derived-area-token>')
+    expect(chinese).toContain('area-<derived-area-token>')
+    expect(english).toContain('manifest.areas[].artifactIds')
+    expect(chinese).toContain('manifest.areas[].artifactIds')
+    expect(english).not.toContain('area-<area-id>-face.png')
+    expect(chinese).not.toContain('area-<area-id>-face.png')
   })
 
   it('forbids validation-only acceptance and stale or destructive QC evidence', async () => {

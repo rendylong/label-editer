@@ -1,5 +1,5 @@
 import type { LabelAreaConfig, CraftType } from '../label/types'
-import type { QcChannel, QcCustomView, QcViewRequest, QcVector3 } from './contracts'
+import type { QcChannel, QcCustomView, QcDiagnosticChannel, QcViewRequest, QcVector3 } from './contracts'
 
 const MODEL_VIEWS = [
   ['model-front', [0, 0, 1]],
@@ -10,7 +10,7 @@ const MODEL_VIEWS = [
   ['model-back-left', [-1, 0, -1]],
 ] as const
 
-const CRAFT_CHANNELS: Record<CraftType, QcChannel[]> = {
+const CRAFT_CHANNELS: Record<CraftType, QcDiagnosticChannel[]> = {
   foil: ['metalness', 'roughness'],
   emboss: ['bump'],
   deboss: ['bump'],
@@ -20,42 +20,62 @@ const CRAFT_CHANNELS: Record<CraftType, QcChannel[]> = {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
-const CRAFT_CHANNEL_ORDER: QcChannel[] = ['metalness', 'roughness', 'bump']
+const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+const CRAFT_CHANNEL_ORDER: QcDiagnosticChannel[] = ['metalness', 'roughness', 'bump']
 
-function stableAreaHash(areaId: string): string {
-  let hash = 2166136261
-  for (let index = 0; index < areaId.length; index += 1) {
+function invalidUsage(message: string): never {
+  const error = new Error(message) as Error & { code: 'INVALID_USAGE' }
+  error.code = 'INVALID_USAGE'
+  throw error
+}
+
+function stableAreaHash(areaId: string, seed: number, reverse = false): string {
+  let hash = seed
+  for (let offset = 0; offset < areaId.length; offset += 1) {
+    const index = reverse ? areaId.length - 1 - offset : offset
     hash ^= areaId.charCodeAt(index)
     hash = Math.imul(hash, 16777619)
   }
   return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
+function assertOpaqueAreaId(areaId: unknown): asserts areaId is string {
+  if (typeof areaId !== 'string' || areaId.length === 0) invalidUsage('Area id must be a non-empty string')
+}
+
+/** Deterministic ASCII token for paths/view ids; the canonical area id stays opaque. */
+export function qcAreaToken(areaId: string): string {
+  assertOpaqueAreaId(areaId)
+  if (areaId.length <= 48 && SAFE_TOKEN_PATTERN.test(areaId)) return areaId
+  const stem = areaId.normalize('NFKC')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[-._]+|[-._]+$/g, '')
+    .slice(0, 31) || 'area'
+  const fingerprint = `${stableAreaHash(areaId, 2166136261)}${stableAreaHash(areaId, 0x9e3779b9, true)}`
+  return `${stem}-${fingerprint}`
+}
+
 function areaViewId(areaId: string, suffix: string): string {
-  const plain = `area-${areaId}-${suffix}`
-  if (plain.length <= 80) return plain
-  const hash = stableAreaHash(areaId)
-  const prefixLength = 80 - `area--${hash}-${suffix}`.length
-  return `area-${areaId.slice(0, Math.max(1, prefixLength))}-${hash}-${suffix}`
+  return `area-${qcAreaToken(areaId)}-${suffix}`
 }
 
 function assertValidId(id: string, label: string): void {
-  if (!ID_PATTERN.test(id)) throw new Error(`Invalid ${label} id: ${id}`)
+  if (!ID_PATTERN.test(id)) invalidUsage(`Invalid ${label} id: ${id}`)
 }
 
 function assertDirection(direction: readonly number[], label: string): asserts direction is QcVector3 {
   if (direction.length !== 3 || direction.some((value) => !Number.isFinite(value))) {
-    throw new Error(`Invalid ${label} direction`)
+    invalidUsage(`Invalid ${label} direction`)
   }
-  if (direction.every((value) => value === 0)) throw new Error(`Invalid ${label} direction: zero vector`)
+  if (direction.every((value) => value === 0)) invalidUsage(`Invalid ${label} direction: zero vector`)
 }
 
-export function craftChannelsForArea(area: LabelAreaConfig): QcChannel[] {
+export function craftChannelsForArea(area: LabelAreaConfig): QcDiagnosticChannel[] {
   const crafts = [
     ...area.layers.flatMap((layer) => layer.craft ?? []),
     ...(area.globalCraft?.craft ?? []),
   ]
-  const required = new Set<QcChannel>()
+  const required = new Set<QcDiagnosticChannel>()
   for (const craft of crafts) {
     for (const channel of CRAFT_CHANNELS[craft.type]) required.add(channel)
   }
@@ -69,22 +89,27 @@ export function buildQcCapturePlan(input: {
   areas: LabelAreaConfig[]
   customViews: QcCustomView[]
 }): QcViewRequest[] {
-  if (input.preset !== 'qc-standard') throw new Error(`Unsupported QC preset: ${input.preset}`)
+  if (input.preset !== 'qc-standard') invalidUsage(`Unsupported QC preset: ${input.preset}`)
   if (!Number.isInteger(input.width) || input.width < 1 || input.width > 4096
     || !Number.isInteger(input.height) || input.height < 1 || input.height > 4096) {
-    throw new Error('QC capture dimensions must be finite and positive')
+    invalidUsage('QC capture dimensions must be finite and positive')
   }
   const areaIds = new Set<string>()
+  const areaTokens = new Map<string, string>()
   for (const area of input.areas) {
-    assertValidId(area.id, 'area')
-    if (areaIds.has(area.id)) throw new Error(`Duplicate area id: ${area.id}`)
+    assertOpaqueAreaId(area.id)
+    if (areaIds.has(area.id)) invalidUsage(`Duplicate area id: ${area.id}`)
     areaIds.add(area.id)
+    const token = qcAreaToken(area.id)
+    const existing = areaTokens.get(token)
+    if (existing !== undefined && existing !== area.id) invalidUsage(`QC area token collision: ${existing} / ${area.id}`)
+    areaTokens.set(token, area.id)
   }
   const ids = new Set<string>()
   const plan: QcViewRequest[] = []
   const add = (view: QcViewRequest) => {
     assertValidId(view.id, 'view')
-    if (ids.has(view.id)) throw new Error(`Duplicate QC view id: ${view.id}`)
+    if (ids.has(view.id)) invalidUsage(`Duplicate QC view id: ${view.id}`)
     ids.add(view.id)
     plan.push(view)
   }
@@ -101,16 +126,16 @@ export function buildQcCapturePlan(input: {
       add({ id, target, framing: 'fit-area', pose, channel: 'color', width: input.width, height: input.height, areaId: area.id, reason })
     }
     for (const channel of craftChannelsForArea(area)) {
-      add({ id: areaViewId(area.id, channel), target, framing: 'fit-area', pose: { kind: 'area-craft' }, channel, width: input.width, height: input.height, areaId: area.id, reason: `Area ${channel} craft channel` })
+      add({ id: areaViewId(area.id, channel), target, framing: 'fit-area', pose: { kind: 'area-face' }, channel, width: input.width, height: input.height, areaId: area.id, reason: `Area ${channel} craft channel` })
     }
   }
   for (const custom of input.customViews) {
     assertValidId(custom.id, 'custom view')
     assertDirection(custom.direction, `custom view ${custom.id}`)
     const isModel = custom.target === 'model'
-    if (custom.framing === 'fit-area' && isModel) throw new Error(`fit-area custom view must target an area: ${custom.id}`)
-    if (!isModel && !areaIds.has(custom.target)) throw new Error(`Custom view targets missing area: ${custom.target}`)
-    if (custom.framing === 'fit-model' && !isModel) throw new Error(`fit-model custom view must target model: ${custom.id}`)
+    if (custom.framing === 'fit-area' && isModel) invalidUsage(`fit-area custom view must target an area: ${custom.id}`)
+    if (!isModel && !areaIds.has(custom.target)) invalidUsage(`Custom view targets missing area: ${custom.target}`)
+    if (custom.framing === 'fit-model' && !isModel) invalidUsage(`fit-model custom view must target model: ${custom.id}`)
     add({ id: custom.id, target: isModel ? { kind: 'model' } : { kind: 'area', areaId: custom.target }, framing: custom.framing, pose: { kind: 'direction', direction: [...custom.direction] }, channel: custom.channel, width: input.width, height: input.height, ...(isModel ? {} : { areaId: custom.target }), reason: 'Custom QC view' })
   }
   return plan

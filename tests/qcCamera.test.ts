@@ -201,7 +201,7 @@ describe('QC camera math', () => {
   ])('rejects an invalid camera direction', (direction) => {
     const frame = { center: new THREE.Vector3(), size: new THREE.Vector3(1, 1, 1) }
     expect(() => cameraForFrame(frame, direction, { fov: 45, aspect: 1, margin: 1.15 }))
-      .toThrow('INVALID_USAGE')
+      .toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
   })
 
   it('captures an area-face camera and restores every mutated scene state after success', async () => {
@@ -301,7 +301,7 @@ describe('QC camera math', () => {
       id: 'area-front-craft',
       pose: { kind: 'area-craft' },
       channel: 'bump',
-    })).rejects.toThrow('forced PNG rejection')
+    })).rejects.toMatchObject({ code: 'REBUILD_FAILED', message: expect.stringContaining('forced PNG rejection') })
 
     expect(captureState(internals)).toEqual(before)
   })
@@ -315,7 +315,10 @@ describe('QC camera math', () => {
       ...AREA_FACE_REQUEST,
       target: { kind: 'area', areaId: 'missing.area-42' },
       areaId: 'missing.area-42',
-    })).rejects.toThrow('missing.area-42')
+    })).rejects.toMatchObject({
+      code: 'MODEL_TARGET_NOT_FOUND',
+      message: expect.stringContaining('missing.area-42'),
+    })
     expect(encodePng).not.toHaveBeenCalled()
   })
 })

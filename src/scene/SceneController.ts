@@ -17,10 +17,16 @@ import type { RemapParams, LabelAreaRange } from '../label/types'
 import { surfaceToUV, uvToSurface, areaBoxPoints, areaControlPoints, type UV } from '../glb/areaMath'
 import { offsetOverlayPositions } from '../glb/overlayGeometry'
 import { LatestAsyncResourceOwner } from './LatestAsyncResourceOwner'
-import type { QcCameraMetadata, QcViewRequest } from '../agent/contracts'
+import type { AgentErrorCode, QcCameraMetadata, QcViewRequest } from '../agent/contracts'
 import { cameraForFrame, surfaceFrameForGeometry, type QcTargetFrame } from './qcCamera'
 
 type PngEncoder = (canvas: HTMLCanvasElement) => Promise<Blob>
+
+function qcCaptureError(code: AgentErrorCode, message: string): Error & { code: AgentErrorCode } {
+  const error = new Error(message) as Error & { code: AgentErrorCode }
+  error.code = code
+  return error
+}
 
 export interface LoadedSceneResource {
   scene: THREE.Group
@@ -487,13 +493,13 @@ export class SceneController {
   }
 
   async captureQcPng(request: QcViewRequest): Promise<{ blob: Blob; camera: QcCameraMetadata }> {
-    if (this.disposed || this.failed) throw new Error('3D preview is not ready')
+    if (this.disposed || this.failed) throw qcCaptureError('BROWSER_NOT_READY', '3D preview is not ready')
     const target = request.target.kind === 'model'
       ? this.model
       : this.labelMeshes.get(request.target.areaId)
     if (!target) {
-      if (request.target.kind === 'area') throw new Error(`QC area is not ready: ${request.target.areaId}`)
-      throw new Error('QC model is not ready')
+      if (request.target.kind === 'area') throw qcCaptureError('MODEL_TARGET_NOT_FOUND', `QC area is not ready: ${request.target.areaId}`)
+      throw qcCaptureError('MODEL_TARGET_NOT_FOUND', 'QC model is not ready')
     }
     target.updateWorldMatrix(true, true)
 
@@ -501,12 +507,19 @@ export class SceneController {
     if (request.target.kind === 'area') {
       const mesh = target as THREE.Mesh
       if (!(mesh.geometry instanceof THREE.BufferGeometry)) {
-        throw new Error(`QC area has no capture geometry: ${request.target.areaId}`)
+        throw qcCaptureError('MODEL_TARGET_NOT_FOUND', `QC area has no capture geometry: ${request.target.areaId}`)
       }
-      frame = surfaceFrameForGeometry(mesh.geometry, mesh.matrixWorld)
+      try {
+        frame = surfaceFrameForGeometry(mesh.geometry, mesh.matrixWorld)
+      } catch (error) {
+        throw qcCaptureError(
+          'MODEL_TARGET_NOT_FOUND',
+          `QC area has no usable capture surface: ${request.target.areaId} (${error instanceof Error ? error.message : String(error)})`,
+        )
+      }
     } else {
       const bounds = new THREE.Box3().setFromObject(target)
-      if (bounds.isEmpty()) throw new Error('QC model has no capture geometry')
+      if (bounds.isEmpty()) throw qcCaptureError('MODEL_TARGET_NOT_FOUND', 'QC model has no capture geometry')
       frame = {
         center: bounds.getCenter(new THREE.Vector3()),
         size: bounds.getSize(new THREE.Vector3()),
@@ -517,7 +530,7 @@ export class SceneController {
     if (request.pose.kind === 'direction') {
       direction = new THREE.Vector3(...request.pose.direction)
     } else {
-      if (!frame.normal) throw new Error(`QC pose ${request.pose.kind} requires an area target`)
+      if (!frame.normal) throw qcCaptureError('INVALID_USAGE', `QC pose ${request.pose.kind} requires an area target`)
       direction = frame.normal.clone()
       if (request.pose.kind === 'area-craft') {
         const worldUp = new THREE.Vector3(0, 1, 0)
@@ -575,7 +588,14 @@ export class SceneController {
         up: qcCamera.up.toArray(),
         fov: this.camera.fov,
       }
-      const blob = await this.renderPng(captureSize.width, captureSize.height)
+      let blob: Blob
+      try {
+        blob = await this.renderPng(captureSize.width, captureSize.height)
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error) throw error
+        const code = this.disposed || this.failed ? 'BROWSER_NOT_READY' : 'REBUILD_FAILED'
+        throw qcCaptureError(code, `QC renderer or PNG encoding failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
       return { blob, camera }
     } finally {
       this.camera.position.copy(previous.position)

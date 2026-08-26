@@ -2,13 +2,14 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
-import { buildQcManifest, parseQcCameraConfig, qcArtifactRelativePath, validateQcManifest } from '../scripts/lib/qc-output.mjs'
+import { buildQcManifest, parseQcCameraConfig, qcAreaToken, qcArtifactRelativePath, validateQcManifest } from '../scripts/lib/qc-output.mjs'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
 import { inspectProject, revisionOf } from '../scripts/lib/project-control.mjs'
 
 const PNG_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 const DIGEST = (character: string) => `sha256:${character.repeat(64)}`
 const fixturePath = path.resolve(import.meta.dirname, 'fixtures/specs/perfume-front-back-v2.json')
+const opaqueFixturePath = path.resolve(import.meta.dirname, 'fixtures/specs/qc-opaque-area-ids-v2.json')
 
 async function fixture() {
   return JSON.parse(await readFile(fixturePath, 'utf8'))
@@ -21,21 +22,28 @@ function camera() {
   }
 }
 
-function view(id: string, areaId?: string, channel: 'color' | 'metalness' = 'color') {
+const MODEL_VIEW_IDS = [
+  'model-front', 'model-back', 'model-left', 'model-right',
+  'model-front-right', 'model-back-left',
+] as const
+
+function view(id: string, areaId?: string, channel: 'color' | 'metalness' | 'roughness' | 'bump' = 'color') {
   return {
     id,
     target: areaId ? { kind: 'area', areaId } : { kind: 'model' },
     framing: areaId ? 'fit-area' : 'fit-model',
-    pose: areaId ? { kind: id.endsWith('-face') ? 'area-face' : 'area-craft' } : { kind: 'direction', direction: [0, 0, 1] },
+    pose: areaId
+      ? { kind: channel === 'color' && id.endsWith('-craft') ? 'area-craft' : 'area-face' }
+      : { kind: 'direction', direction: [0, 0, 1] },
     channel,
     width: 1440,
     height: 1440,
     ...(areaId ? { areaId } : {}),
-    reason: 'QC evidence',
+    reason: channel === 'color' ? 'QC evidence' : `Area ${channel} craft channel`,
   }
 }
 
-function descriptor(id: string, viewId: string, areaId?: string, channel: 'color' | 'metalness' = 'color') {
+function descriptor(id: string, viewId: string, areaId?: string, channel: 'color' | 'metalness' | 'roughness' | 'bump' = 'color') {
   return {
     id,
     fileName: `${viewId}.png`,
@@ -50,15 +58,22 @@ function descriptor(id: string, viewId: string, areaId?: string, channel: 'color
 }
 
 function inputFor(spec: Record<string, unknown>) {
-  const frontFace = view('area-front-face', 'front')
-  const frontCraft = view('area-front-craft', 'front')
-  const backFace = view('area-back-face', 'back')
-  const backCraft = view('area-back-craft', 'back')
+  const specAreas = (spec as { areas: Array<{ id: string; side?: 'front' | 'back' }> }).areas
+  const areaEntries = specAreas.flatMap((area) => {
+    const token = qcAreaToken(area.id)
+    const face = view(`area-${token}-face`, area.id)
+    const craft = view(`area-${token}-craft`, area.id)
+    return [
+      [face, descriptor(`qc-${face.id}`, face.id, area.id)],
+      [craft, descriptor(`qc-${craft.id}`, craft.id, area.id)],
+    ] as const
+  })
   const entries = [
-    [frontFace, descriptor('qc-area-front-face', frontFace.id, 'front')],
-    [frontCraft, descriptor('qc-area-front-craft', frontCraft.id, 'front')],
-    [backFace, descriptor('qc-area-back-face', backFace.id, 'back')],
-    [backCraft, descriptor('qc-area-back-craft', backCraft.id, 'back')],
+    ...MODEL_VIEW_IDS.map((id) => {
+      const request = view(id)
+      return [request, descriptor(`qc-${id}`, id)] as const
+    }),
+    ...areaEntries,
   ] as const
   return {
     createdAt: '2026-08-25T00:00:00.000Z',
@@ -71,10 +86,15 @@ function inputFor(spec: Record<string, unknown>) {
     evidence: {
       preset: 'qc-standard',
       views: entries.map(([request, artifact]) => ({ artifact, view: request, camera: camera() })),
-      areas: [
-        { areaId: 'front', meshIndex: 7, nodeName: 'Bottle', side: 'front', surfaceMode: 'overlay', viewIds: ['area-front-face', 'area-front-craft'] },
-        { areaId: 'back', meshIndex: 7, nodeName: 'Bottle', side: 'back', surfaceMode: 'overlay', viewIds: ['area-back-face', 'area-back-craft'] },
-      ],
+      areas: specAreas.map((area) => {
+        const token = qcAreaToken(area.id)
+        return {
+          areaId: area.id, meshIndex: 7, nodeName: 'Bottle',
+          ...(area.side === undefined ? {} : { side: area.side }),
+          surfaceMode: 'overlay', requiredChannels: [],
+          viewIds: [`area-${token}-face`, `area-${token}-craft`],
+        }
+      }),
       validation: { ready: true, issues: [] },
     },
     artifacts: entries.map(([, item]) => ({ ...item, bytes: PNG_BYTES })),
@@ -85,10 +105,6 @@ describe('QC output manifest', () => {
   it('binds relative PNG evidence to the canonical input revision', async () => {
     const spec = await fixture()
     const input = inputFor(spec)
-    const modelRequest = view('model-front')
-    const modelDescriptor = descriptor('qc-model-front', modelRequest.id)
-    input.evidence.views.push({ artifact: modelDescriptor, view: modelRequest, camera: camera() })
-    input.artifacts.push({ ...modelDescriptor, bytes: PNG_BYTES })
 
     const manifest = buildQcManifest(input)
 
@@ -106,9 +122,11 @@ describe('QC output manifest', () => {
   it('retains exact dimensions, hashes, channels, and camera metadata', async () => {
     const manifest = buildQcManifest(inputFor(await fixture()))
 
-    expect(manifest.artifacts[0]).toMatchObject({
+    const frontFace = manifest.artifacts.find((artifact: { id: string }) => artifact.id === 'qc-area-front-face')
+    expect(frontFace).toMatchObject({
       sha256: DIGEST('a'), mimeType: 'image/png', byteLength: PNG_BYTES.byteLength,
       width: 1440, height: 1440, areaId: 'front', channel: 'color',
+      viewId: 'area-front-face', reason: 'QC evidence',
       view: { kind: 'area-face', framing: 'fit-area', target: 'front' },
       camera: camera(),
     })
@@ -116,6 +134,64 @@ describe('QC output manifest', () => {
       expect.objectContaining({ id: 'front', meshIndex: 7, stableSelector: 'mesh:7', artifactIds: ['qc-area-front-face', 'qc-area-front-craft'] }),
       expect.objectContaining({ id: 'back', meshIndex: 7, stableSelector: 'mesh:7', artifactIds: ['qc-area-back-face', 'qc-area-back-craft'] }),
     ])
+    expect(validateQcManifest(manifest)).toEqual(manifest)
+  })
+
+  it.each(MODEL_VIEW_IDS)('rejects a missing required %s artifact during independent validation', async (viewId) => {
+    const manifest = buildQcManifest(inputFor(await fixture()))
+    manifest.artifacts = manifest.artifacts.filter((artifact: { viewId: string }) => artifact.viewId !== viewId)
+
+    expect(() => validateQcManifest(manifest)).toThrow()
+  })
+
+  it.each(['metalness', 'roughness', 'bump'] as const)('rejects a missing declared %s artifact even when area membership is edited consistently', async (channel) => {
+    const input = inputFor(await fixture())
+    const area = input.evidence.areas[0]
+    const request = view(`area-front-${channel}`, 'front', channel)
+    const artifact = descriptor(`qc-${request.id}`, request.id, 'front', channel)
+    input.evidence.views.push({ artifact, view: request, camera: camera() })
+    input.artifacts.push({ ...artifact, bytes: PNG_BYTES })
+    ;(area as { requiredChannels: Array<'metalness' | 'roughness' | 'bump'> }).requiredChannels = [channel]
+    area.viewIds.push(request.id)
+    const manifest = buildQcManifest(input)
+    const artifactId = `qc-${request.id}`
+    manifest.artifacts = manifest.artifacts.filter((candidate: { id: string }) => candidate.id !== artifactId)
+    manifest.areas[0].artifactIds = manifest.areas[0].artifactIds.filter((id: string) => id !== artifactId)
+
+    expect(() => validateQcManifest(manifest)).toThrow()
+  })
+
+  it('rejects undeclared extra face-on PBR evidence', async () => {
+    const input = inputFor(await fixture())
+    const request = view('area-front-metalness', 'front', 'metalness')
+    const artifact = descriptor('qc-area-front-metalness', request.id, 'front', 'metalness')
+    input.evidence.views.push({ artifact, view: request, camera: camera() })
+    input.artifacts.push({ ...artifact, bytes: PNG_BYTES })
+    input.evidence.areas[0].viewIds.push(request.id)
+
+    expect(() => buildQcManifest(input)).toThrow()
+  })
+
+  it('keeps side optional in built and independently validated manifests', async () => {
+    const input = inputFor(await fixture())
+    for (const area of input.evidence.areas) delete (area as { side?: string }).side
+
+    const manifest = buildQcManifest(input)
+
+    expect(manifest.areas.every((area: { side?: string }) => !Object.hasOwn(area, 'side'))).toBe(true)
+    expect(validateQcManifest(manifest)).toEqual(manifest)
+  })
+
+  it('round-trips the long, Unicode, and token-collision compatibility fixture without narrowing area ids', async () => {
+    const spec = JSON.parse(await readFile(opaqueFixturePath, 'utf8'))
+    const manifest = buildQcManifest(inputFor(spec))
+
+    expect(manifest.areas.map((area: { id: string }) => area.id)).toEqual(spec.areas.map((area: { id: string }) => area.id))
+    expect(manifest.areas.every((area: { side?: string }) => !Object.hasOwn(area, 'side'))).toBe(true)
+    const areaPaths = manifest.artifacts.filter((artifact: { areaId?: string }) => artifact.areaId !== undefined)
+      .map((artifact: { path: string }) => artifact.path)
+    expect(new Set(areaPaths).size).toBe(areaPaths.length)
+    expect(areaPaths.every((value: string) => /^areas\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.png$/.test(value))).toBe(true)
     expect(validateQcManifest(manifest)).toEqual(manifest)
   })
 
@@ -182,11 +258,16 @@ describe('QC output manifest', () => {
   it.each([
     ['disconnected area artifact ids', (manifest: ReturnType<typeof buildQcManifest>) => { manifest.areas[0].artifactIds.pop() }],
     ['artifact area id with no manifest area', (manifest: ReturnType<typeof buildQcManifest>) => {
-      manifest.artifacts[0].areaId = 'missing'
-      manifest.artifacts[0].view.target = 'missing'
+      const artifact = manifest.artifacts.find((candidate: { areaId?: string }) => candidate.areaId !== undefined)!
+      artifact.areaId = 'missing'
+      artifact.view.target = 'missing'
     }],
-    ['area artifact targeted at the model', (manifest: ReturnType<typeof buildQcManifest>) => { manifest.artifacts[0].view.target = 'model' }],
-    ['area artifact using model framing', (manifest: ReturnType<typeof buildQcManifest>) => { manifest.artifacts[0].view.framing = 'fit-model' }],
+    ['area artifact targeted at the model', (manifest: ReturnType<typeof buildQcManifest>) => {
+      manifest.artifacts.find((candidate: { areaId?: string }) => candidate.areaId !== undefined)!.view.target = 'model'
+    }],
+    ['area artifact using model framing', (manifest: ReturnType<typeof buildQcManifest>) => {
+      manifest.artifacts.find((candidate: { areaId?: string }) => candidate.areaId !== undefined)!.view.framing = 'fit-model'
+    }],
   ])('rejects %s in independent validation', async (_label, alter) => {
     const manifest = buildQcManifest(inputFor(await fixture()))
     alter(manifest)
@@ -206,10 +287,6 @@ describe('QC output manifest', () => {
     }],
   ])('rejects a model artifact with %s', async (_label, alter) => {
     const input = inputFor(await fixture())
-    const request = view('model-front')
-    const artifact = descriptor('qc-model-front', request.id)
-    input.evidence.views.push({ artifact, view: request, camera: camera() })
-    input.artifacts.push({ ...artifact, bytes: PNG_BYTES })
     const manifest = buildQcManifest(input)
     alter(manifest)
 
@@ -278,6 +355,16 @@ describe('QC output manifest', () => {
     expect(qcArtifactRelativePath({ view: view('area-front-face', 'front') })).toBe('areas/front/area-front-face.png')
   })
 
+  it('derives distinct ASCII publication paths while preserving opaque area targets', () => {
+    const areaIds = [`opaque-${'a'.repeat(180)}`, '正面 标签／α', 'front/label', 'front\\label']
+    const paths = areaIds.map((areaId, index) => qcArtifactRelativePath({
+      view: view(`opaque-view-${index}`, areaId),
+    }))
+
+    expect(new Set(paths).size).toBe(paths.length)
+    expect(paths.every((value) => /^areas\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.png$/.test(value))).toBe(true)
+  })
+
   it('parses only exact, compatible custom camera views', () => {
     const views = [
       { id: 'pump-top', direction: [0.4, 1, 0.4], target: 'model', framing: 'fit-model', channel: 'color' },
@@ -290,6 +377,13 @@ describe('QC output manifest', () => {
     ]) {
       expect(() => parseQcCameraConfig(value)).toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
     }
+  })
+
+  it('accepts an opaque known area id as a custom camera target', () => {
+    const areaId = '正面 标签／α'
+    const views = [{ id: 'unicode-detail', direction: [0, 0, 1], target: areaId, framing: 'fit-area', channel: 'color' }]
+
+    expect(parseQcCameraConfig({ version: 1, views }, { areaIds: [areaId] })).toEqual(views)
   })
 
   it.each([

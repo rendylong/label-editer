@@ -10,6 +10,8 @@ import { createOperations } from '../scripts/lib/operations.mjs'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
 import { publishAtomically } from '../scripts/lib/files.mjs'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
+import { qcAreaToken } from '../scripts/lib/qc-output.mjs'
+// @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
 import { revisionOf } from '../scripts/lib/project-control.mjs'
 
 const temporaryDirectories: string[] = []
@@ -51,19 +53,24 @@ function projectV3(): Record<string, any> {
 const PNG_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 const PNG_SHA256 = createHash('sha256').update(PNG_BYTES).digest('hex')
 
-function qcView(id: string, areaId?: string) {
+const QC_MODEL_VIEW_IDS = [
+  'model-front', 'model-back', 'model-left', 'model-right',
+  'model-front-right', 'model-back-left',
+] as const
+
+function qcView(id: string, areaId?: string, channel: 'color' | 'metalness' | 'roughness' | 'bump' = 'color') {
   return {
     id,
     target: areaId ? { kind: 'area', areaId } : { kind: 'model' },
     framing: areaId ? 'fit-area' : 'fit-model',
     pose: areaId
-      ? { kind: id.endsWith('-face') ? 'area-face' : 'area-craft' }
+      ? { kind: channel === 'color' && id.endsWith('-craft') ? 'area-craft' : 'area-face' }
       : { kind: 'direction', direction: [0, 0, 1] },
-    channel: 'color',
+    channel,
     width: 1440,
     height: 1440,
     ...(areaId ? { areaId } : {}),
-    reason: 'QC evidence',
+    reason: channel === 'color' ? 'QC evidence' : `Area ${channel} craft channel`,
   }
 }
 
@@ -87,12 +94,20 @@ function qcRuntime(options: {
   storedArtifactSet?: 'exact' | 'missing' | 'extra'
   browserErrors?: string[]
   areaIds?: string[]
+  includeSide?: boolean
+  requiredChannelsByArea?: Record<string, Array<'metalness' | 'roughness' | 'bump'>>
 } = {}) {
   const areaIds = options.areaIds ?? ['front', 'back']
-  const views = [qcView('model-front'), ...areaIds.flatMap((areaId) => [
-    qcView(`area-${areaId}-face`, areaId),
-    qcView(`area-${areaId}-craft`, areaId),
-  ])]
+  const requiredChannelsByArea = options.requiredChannelsByArea
+    ?? Object.fromEntries(areaIds.map((areaId) => [areaId, areaId === 'front' ? ['metalness', 'roughness'] : []]))
+  const views = [
+    ...QC_MODEL_VIEW_IDS.map((id) => qcView(id)),
+    ...areaIds.flatMap((areaId) => [
+      qcView(`area-${qcAreaToken(areaId)}-face`, areaId),
+      qcView(`area-${qcAreaToken(areaId)}-craft`, areaId),
+      ...(requiredChannelsByArea[areaId] ?? []).map((channel) => qcView(`area-${qcAreaToken(areaId)}-${channel}`, areaId, channel)),
+    ]),
+  ]
   const descriptors = views.map(qcDescriptor)
   const bridgeCalls: Array<{ method: string, input: unknown }> = []
   const publications: Array<{ sessionId: string, outputDir: string, artifacts: any[], force: boolean }> = []
@@ -136,8 +151,10 @@ function qcRuntime(options: {
               },
             })),
             areas: areaIds.map((areaId) => ({
-              areaId, meshIndex: 7, nodeName: 'Bottle', side: areaId === 'back' ? 'back' : 'front',
-              surfaceMode: 'overlay', viewIds: [`area-${areaId}-face`, `area-${areaId}-craft`],
+              areaId, meshIndex: 7, nodeName: 'Bottle',
+              ...(options.includeSide === false ? {} : { side: areaId === 'back' ? 'back' : 'front' }),
+              surfaceMode: 'overlay', requiredChannels: requiredChannelsByArea[areaId] ?? [],
+              viewIds: views.filter((view) => view.areaId === areaId).map((view) => view.id),
             })),
             validation: { ready: true, issues: [] },
           },
@@ -249,11 +266,14 @@ describe('label-cli protocol', () => {
       sessionId: 'qc-session', outputDir: resolvedOutputDir, force: true,
     })
     expect(harness.publications[0].artifacts.map((artifact) => artifact.id)).toEqual([
-      'qc-model-front', 'qc-area-front-face', 'qc-area-front-craft',
+      ...QC_MODEL_VIEW_IDS.map((id) => `qc-${id}`),
+      'qc-area-front-face', 'qc-area-front-craft', 'qc-area-front-metalness', 'qc-area-front-roughness',
       'qc-area-back-face', 'qc-area-back-craft', 'qc-manifest',
     ])
     expect(harness.publications[0].artifacts.map((artifact) => artifact.relativePath)).toEqual([
-      'model/model-front.png', 'areas/front/area-front-face.png', 'areas/front/area-front-craft.png',
+      ...QC_MODEL_VIEW_IDS.map((id) => `model/${id}.png`),
+      'areas/front/area-front-face.png', 'areas/front/area-front-craft.png',
+      'areas/front/area-front-metalness.png', 'areas/front/area-front-roughness.png',
       'areas/back/area-back-face.png', 'areas/back/area-back-craft.png', 'qc-manifest.json',
     ])
     expect(harness.publications[0].artifacts.some((artifact) => [
@@ -261,6 +281,14 @@ describe('label-cli protocol', () => {
     ].includes(artifact.id))).toBe(false)
     await expect(readFile(path.join(outputDir, 'old-evidence.txt'))).rejects.toThrow()
     expect(await readFile(path.join(outputDir, 'qc-manifest.json'), 'utf8')).toContain(`"revision": "${revisionOf(spec)}"`)
+    const qcManifest = JSON.parse(await readFile(path.join(outputDir, 'qc-manifest.json'), 'utf8'))
+    expect(qcManifest.areas.find((area: { id: string }) => area.id === 'front')).toMatchObject({
+      requiredChannels: ['metalness', 'roughness'],
+    })
+    expect(qcManifest.artifacts.filter((artifact: { channel: string }) => artifact.channel !== 'color')).toEqual([
+      expect.objectContaining({ viewId: 'area-front-metalness', reason: 'Area metalness craft channel', view: expect.objectContaining({ kind: 'area-face' }) }),
+      expect.objectContaining({ viewId: 'area-front-roughness', reason: 'Area roughness craft channel', view: expect.objectContaining({ kind: 'area-face' }) }),
+    ])
     expect((await readdir(directory)).some((name) => name.startsWith('.qc-output.'))).toBe(false)
     if (!result.ok) throw new Error(result.error.message)
     expect(result.data).toMatchObject({
@@ -362,6 +390,58 @@ describe('label-cli protocol', () => {
     expect(manifest.input).toMatchObject({ kind: 'label-project-v3', revision: revisionOf(project) })
     if (!result.ok) throw new Error(result.error.message)
     expect(result.data.revision).toBe(revisionOf(project))
+  })
+
+  it.each(['label-spec-v2', 'label-project-v3'] as const)('runs QC for a side-less %s document', async (kind) => {
+    const directory = await temporaryDirectory()
+    const input = kind === 'label-spec-v2' ? await fixture() : projectV3()
+    for (const area of input.areas) delete area.side
+    const areaIds = input.areas.map((area: { id: string }) => area.id)
+    const inputPath = path.join(directory, kind === 'label-spec-v2' ? 'spec.json' : 'project.lbl.json')
+    const glbPath = path.join(directory, 'model.glb')
+    const outputDir = path.join(directory, 'qc-output')
+    await writeFile(inputPath, JSON.stringify(input))
+    await writeFile(glbPath, 'glb')
+    const harness = qcRuntime({ areaIds, includeSide: false })
+    harness.runtime.allowedRoots = [directory]
+
+    const result = await createOperations(harness.runtime).qc({ inputPath, glbPath, outputDir })
+
+    expect(result.ok).toBe(true)
+    expect(harness.publications).toHaveLength(1)
+    const manifestArtifact = harness.publications[0].artifacts.at(-1)
+    const manifest = JSON.parse(Buffer.from(manifestArtifact.bytes).toString('utf8'))
+    expect(manifest.input.kind).toBe(kind)
+    expect(manifest.areas.every((area: { side?: string }) => !Object.hasOwn(area, 'side'))).toBe(true)
+  })
+
+  it('runs QC with long and Unicode area ids and an opaque custom-camera target', async () => {
+    const directory = await temporaryDirectory()
+    const input = JSON.parse(await readFile(path.resolve(import.meta.dirname, 'fixtures/specs/qc-opaque-area-ids-v2.json'), 'utf8'))
+    const areaIds = input.areas.map((area: { id: string }) => area.id)
+    const target = areaIds[1]
+    const customViews = [{
+      id: 'unicode-detail', direction: [0, 0, 1], target,
+      framing: 'fit-area', channel: 'color',
+    }]
+    const inputPath = path.join(directory, 'opaque-spec.json')
+    const cameraConfigPath = path.join(directory, 'cameras.json')
+    const glbPath = path.join(directory, 'model.glb')
+    const outputDir = path.join(directory, 'qc-output')
+    await writeFile(inputPath, JSON.stringify(input))
+    await writeFile(cameraConfigPath, JSON.stringify({ version: 1, views: customViews }))
+    await writeFile(glbPath, 'glb')
+    const harness = qcRuntime({ areaIds, includeSide: false, requiredChannelsByArea: {} })
+    harness.runtime.allowedRoots = [directory]
+
+    const result = await createOperations(harness.runtime).qc({ inputPath, glbPath, outputDir, cameraConfigPath })
+
+    expect(result.ok).toBe(true)
+    expect(harness.bridgeCalls.at(-1)?.input).toMatchObject({ customViews })
+    const manifest = JSON.parse(Buffer.from(harness.publications[0].artifacts.at(-1).bytes).toString('utf8'))
+    expect(manifest.areas.map((area: { id: string }) => area.id)).toEqual(areaIds)
+    expect(manifest.artifacts.filter((artifact: { areaId?: string }) => artifact.areaId !== undefined)
+      .every((artifact: { path: string }) => /^areas\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.png$/.test(artifact.path))).toBe(true)
   })
 
   it('leaves no output or staging directory when the browser QC batch fails', async () => {
@@ -476,6 +556,30 @@ describe('label-cli protocol', () => {
     })
     expect(code).toBe(4)
     expect(output).toHaveLength(1)
+  })
+
+  it.each([
+    ['INVALID_USAGE', 2],
+    ['MODEL_TARGET_NOT_FOUND', 5],
+    ['BROWSER_NOT_READY', 6],
+    ['REBUILD_FAILED', 7],
+  ] as const)('preserves QC %s envelopes as exit code %s', async (errorCode, expectedExitCode) => {
+    const stdout: string[] = []
+    const code = await runCli([
+      'qc', 'spec.json', '--glb', 'model.glb', '--output', 'qc-output', '--json',
+    ], {
+      operations: {
+        qc: async () => ({
+          ok: false, operation: 'render_label_qc',
+          error: { code: errorCode, message: 'classified failure' }, warnings: [],
+        }),
+      },
+      stdout: (value: string) => stdout.push(value),
+      stderr: () => undefined,
+    })
+
+    expect(code).toBe(expectedExitCode)
+    expect(JSON.parse(stdout[0])).toMatchObject({ error: { code: errorCode } })
   })
 
   it('rejects missing apply options before invoking an operation', async () => {

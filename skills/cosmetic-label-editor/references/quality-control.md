@@ -10,8 +10,9 @@ Before scoring visual quality:
 2. Enforce the equality gate: `qc-manifest.json.input.revision` must exactly equal the current `project` revision.
 3. Require the complete `qc-standard` evidence set and verify that every required artifact id resolves to the manifest's relative PNG path. A missing file, missing hash, duplicate id, unsafe path, unreadable image, incomplete area, or stale revision is a blocking `fail`; do not infer a verdict from partial evidence.
 4. Require these model artifacts: `qc-model-front`, `qc-model-back`, `qc-model-left`, `qc-model-right`, `qc-model-front-right`, and `qc-model-back-left`.
-5. For every label area `<area-id>`, require `qc-area-<area-id>-face` and `qc-area-<area-id>-craft`, plus every PBR artifact included by the manifest: `qc-area-<area-id>-metalness`, `qc-area-<area-id>-roughness`, and/or `qc-area-<area-id>-bump`.
-6. Confirm the manifest covers every label area in the current project. Passing one area is insufficient.
+5. For every entry in `manifest.areas`, read `manifest.areas[].artifactIds` and resolve each value by exact equality against `manifest.artifacts[].id`. Use each resolved artifact's `areaId`, `viewId`, `channel`, and `reason` metadata to identify the single face-on color view, single oblique craft color view, and every required PBR artifact declared by `requiredChannels`.
+6. Treat manifest ids and paths as authoritative. Area ids are opaque canonical values and may be long or Unicode; never reconstruct an artifact id, view id, or path by interpolating an area id.
+7. Confirm the manifest covers every label area in the current project. Passing one area is insufficient.
 
 Every check cites one or more evidence artifact ids from the same immutable QC round. Compare the 2D composition, 3D render, and channel output for the same current revision; none of those views substitutes for another.
 
@@ -50,7 +51,7 @@ Every failed check includes its category, area id and layer id when applicable, 
 ## Target and labeled surface
 
 - Confirm each label is attached to the intended package component and stable mesh, not a cap, pump, neck ring, interior shell, or similarly shaped wrong part.
-- Confirm every declared front, back, side, wrap, neck, or seal area appears on the semantically correct surface.
+- Only apply side-specific checks when the manifest area declares `side`; then confirm the declared front or back identity appears on the semantically correct surface. A side-less area is still checked for its target, placement, and surface attachment without inventing a side.
 - Inspect face-on and oblique evidence for floating, intersection, visible z-fighting, or failure to follow the intended surface.
 - Treat a wrong target, wrong side, or visible surface attachment defect as `fail`.
 
@@ -86,8 +87,8 @@ Every failed check includes its category, area id and layer id when applicable, 
 
 ## Craft and material rendering
 
-- Inspect `qc-area-<area-id>-craft` for the intended foil, metallic, spot UV, gloss, matte, emboss, deboss, or texture highlight/relief response.
-- Inspect every included metalness, roughness, and bump artifact. The contribution must be non-empty, restricted to the intended layer/shape, and consistent with the oblique color evidence.
+- Resolve the area's color artifact whose view kind is `area-craft` and inspect it for the intended foil, metallic, spot UV, gloss, matte, emboss, deboss, or texture highlight/relief response.
+- Resolve every metalness, roughness, and bump artifact declared by the area's `requiredChannels`. These diagnostics must use the face-on `area-face` view; their contribution must be non-empty, restricted to the intended layer/shape, and consistent with the oblique color evidence.
 - Check that masks neither disappear nor cover the whole label accidentally and that the package material/transparency remains intact outside the label.
 - Missing craft, craft on the wrong region, an empty required channel, or material corruption is `fail`.
 

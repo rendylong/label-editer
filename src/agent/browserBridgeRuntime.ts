@@ -13,7 +13,7 @@ import { createAgentBridge, type AgentBridgeBootstrap } from './bridge'
 import { captureAgentPreview, captureAgentQcView } from './previewCapture'
 import { inspectModel } from './modelInspection'
 import { validateLabelSpec, type LabelSpecAreaV2, type LabelSpecV2 } from './labelSpecSchema'
-import { buildQcCapturePlan } from './qcCapturePlan'
+import { buildQcCapturePlan, craftChannelsForArea } from './qcCapturePlan'
 import { resolveTarget } from './targetResolver'
 import { applyPreparedAreaTransaction } from './transactionalApply'
 import type {
@@ -187,6 +187,7 @@ function qcAreaEvidence(areas: LabelAreaConfig[], views: QcViewResult[]): QcArea
     nodeName: area.nodeName,
     ...(area.side ? { side: area.side } : {}),
     surfaceMode: area.surfaceMode ?? 'overlay',
+    requiredChannels: craftChannelsForArea(area),
     viewIds: views.filter((result) => result.view.areaId === area.id).map((result) => result.view.id),
   }))
 }

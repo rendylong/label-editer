@@ -158,6 +158,18 @@ describe('GLB label plugin E2E', () => {
     const qcManifest = JSON.parse(await readFile(path.join(qcOutput, 'qc-manifest.json'), 'utf8'))
     expect(qcManifest.input.revision).toBe(revisionOf(currentSpec))
     expect(qcManifest.artifacts.filter((item: { channel: string }) => item.channel === 'color').length).toBeGreaterThanOrEqual(10)
+    expect(qcManifest.artifacts.filter((item: { areaId?: string }) => item.areaId === undefined).map((item: { viewId: string }) => item.viewId)).toEqual([
+      'model-front', 'model-back', 'model-left', 'model-right',
+      'model-front-right', 'model-back-left',
+    ])
+    expect(qcManifest.artifacts.filter((item: { channel: string }) => item.channel !== 'color')
+      .every((item: { view: { kind: string }; reason: string }) => item.view.kind === 'area-face' && item.reason.length > 0)).toBe(true)
+    expect(qcManifest.artifacts.filter((item: { channel: string; view: { kind: string } }) => item.channel === 'color' && item.view.kind === 'area-craft')).toHaveLength(2)
+    for (const area of qcManifest.areas) {
+      expect(area.artifactIds).toEqual(qcManifest.artifacts
+        .filter((artifact: { areaId?: string }) => artifact.areaId === area.id)
+        .map((artifact: { id: string }) => artifact.id))
+    }
     for (const artifact of qcManifest.artifacts) {
       const png = await readFile(path.join(qcOutput, artifact.path))
       expect(png.subarray(0, 8), artifact.path).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))

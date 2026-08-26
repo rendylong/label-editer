@@ -45,6 +45,41 @@ describe('QC capture plan', () => {
     expect(views.every((view) => view.id.length <= 80)).toBe(true)
   })
 
+  it('preserves long and Unicode area ids while deriving safe unique view tokens', () => {
+    const areaIds = [
+      `opaque-${'a'.repeat(180)}`,
+      '正面 标签／α',
+      'front/label',
+      'front\\label',
+    ]
+    const plan = buildQcCapturePlan({
+      preset: 'qc-standard', width: 1440, height: 1440,
+      areas: areaIds.map((id) => area(id)), customViews: [],
+    })
+    const areaViews = plan.filter((view) => view.areaId !== undefined)
+
+    expect(new Set(areaViews.map((view) => view.id)).size).toBe(areaViews.length)
+    expect(areaViews.every((view) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(view.id))).toBe(true)
+    for (const areaId of areaIds) {
+      expect(areaViews.filter((view) => view.areaId === areaId)).toHaveLength(2)
+      expect(areaViews.filter((view) => view.areaId === areaId).every((view) => view.target.kind === 'area' && view.target.areaId === areaId)).toBe(true)
+    }
+  })
+
+  it('allows a safe custom view id to target a known opaque area id', () => {
+    const areaId = '正面 标签／α'
+    const plan = buildQcCapturePlan({
+      preset: 'qc-standard', width: 1440, height: 1440,
+      areas: [area(areaId)],
+      customViews: [{ id: 'unicode-detail', direction: [0, 0, 1], target: areaId, framing: 'fit-area', channel: 'color' }],
+    })
+
+    expect(plan.at(-1)).toMatchObject({
+      id: 'unicode-detail', areaId,
+      target: { kind: 'area', areaId },
+    })
+  })
+
   it('keeps six model views and two color close-ups for every area', () => {
     const plan = buildQcCapturePlan({
       preset: 'qc-standard', width: 1440, height: 1440,
@@ -71,6 +106,13 @@ describe('QC capture plan', () => {
       ['area-front-metalness', 'metalness'],
       ['area-front-roughness', 'roughness'],
       ['area-front-bump', 'bump'],
+    ])
+    expect(plan.filter((view) => view.areaId === 'front').map((view) => [view.channel, view.pose.kind])).toEqual([
+      ['color', 'area-face'],
+      ['color', 'area-craft'],
+      ['metalness', 'area-face'],
+      ['roughness', 'area-face'],
+      ['bump', 'area-face'],
     ])
   })
 

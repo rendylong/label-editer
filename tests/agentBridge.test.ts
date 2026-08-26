@@ -150,6 +150,8 @@ describe('browser Agent Bridge guard', () => {
     expect(received).toEqual([qcViewRequest])
     expect(result.camera).toEqual(cameraMetadata)
     dispose()
-    await expect(captureAgentQcView(qcViewRequest)).rejects.toThrow(/not ready/i)
+    await expect(captureAgentQcView(qcViewRequest)).rejects.toMatchObject({
+      code: 'BROWSER_NOT_READY', message: expect.stringMatching(/not ready/i),
+    })
   })
 })

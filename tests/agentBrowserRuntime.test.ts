@@ -152,11 +152,13 @@ describe('browser Agent QC runtime', () => {
       up: [0, 1, 0], fov: 45,
     }
     const events: string[] = []
+    const requests: Array<{ id: string; channel: string; pose: { kind: string } }> = []
     const uploads: Array<Record<string, string | undefined>> = []
     disposeCapture = registerAgentPreviewCapture({
       preview: async () => pngBlob('preview'),
       qc: async (request) => {
         events.push(`capture:${request.id}`)
+        requests.push(request)
         return { blob: pngBlob(request.id), camera }
       },
     })
@@ -205,6 +207,7 @@ describe('browser Agent QC runtime', () => {
         areas: [{
           areaId: 'front-label', meshIndex: 7, nodeName: 'Bottle_Label',
           side: 'front', surfaceMode: 'replace',
+          requiredChannels: ['metalness', 'roughness', 'bump'],
           viewIds: [
             'area-front-label-face', 'area-front-label-craft',
             'area-front-label-metalness', 'area-front-label-roughness',
@@ -216,6 +219,11 @@ describe('browser Agent QC runtime', () => {
     if (!result.ok) throw new Error('Expected successful QC result')
     expect(result.data.views.map((view) => view.artifact.id)).toEqual(requestIds.map((id) => `qc-${id}`))
     expect(result.data.views.at(-1)?.camera).toEqual(camera)
+    expect(requests.filter((request) => request.channel !== 'color').map((request) => [request.channel, request.pose.kind])).toEqual([
+      ['metalness', 'area-face'],
+      ['roughness', 'area-face'],
+      ['bump', 'area-face'],
+    ])
   })
 
   it('waits for the post-activation bake replacement before snapshotting guarded QC state', async () => {
@@ -315,6 +323,26 @@ describe('browser Agent QC runtime', () => {
 
     await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderQcEvidence({ width })).resolves.toMatchObject({
+      ok: false,
+      operation: 'render_qc_evidence',
+      error: { code: 'INVALID_USAGE' },
+    })
+  })
+
+  it('classifies invalid capture planning as INVALID_USAGE before capture', async () => {
+    installOwner()
+    disposeCapture = registerAgentPreviewCapture({
+      preview: async () => new Blob(['preview']),
+      qc: async () => { throw new Error('capture must not start') },
+    })
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderQcEvidence({
+        customViews: [{
+          id: '../escape', direction: [1, 0, 0], target: 'model',
+          framing: 'fit-model', channel: 'color',
+        }],
+      })).resolves.toMatchObject({
       ok: false,
       operation: 'render_qc_evidence',
       error: { code: 'INVALID_USAGE' },

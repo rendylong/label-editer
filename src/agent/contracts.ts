@@ -52,6 +52,7 @@ export interface ArtifactDescriptor {
 }
 
 export type QcChannel = 'color' | 'metalness' | 'roughness' | 'bump'
+export type QcDiagnosticChannel = Exclude<QcChannel, 'color'>
 export type QcVector3 = [number, number, number]
 
 export type QcTarget =
@@ -110,6 +111,7 @@ export interface QcAreaEvidence {
   nodeName: string
   side?: 'front' | 'back'
   surfaceMode: 'overlay' | 'replace'
+  requiredChannels: QcDiagnosticChannel[]
   viewIds: string[]
 }
 

@@ -141,16 +141,16 @@ label-qc/
 │   │   ├── model-front-right.png
 │   │   └── model-back-left.png
 │   ├── areas/
-│   │   └── <area-id>/
-│   │       ├── area-<area-id>-face.png
-│   │       ├── area-<area-id>-craft.png
-│   │       └── area-<area-id>-<metalness|roughness|bump>.png
+│   │   └── <derived-area-token>/
+│   │       ├── area-<derived-area-token>-face.png
+│   │       ├── area-<derived-area-token>-craft.png
+│   │       └── area-<derived-area-token>-<metalness|roughness|bump>.png
 │   └── qc-manifest.json
 ├── round-1/
 └── ...
 ```
 
-Every round contains six whole-model views and two color close-ups for every label area. Metalness, roughness, and bump images are included only when the area's craft uses those channels. `qc-manifest.json` binds the evidence to the canonical input revision and model fingerprint, and records each area's stable target plus every artifact's relative path, SHA-256, dimensions, channel, framing, and camera metadata. It is evidence metadata, not a visual pass/fail verdict.
+Every round contains six whole-model views and two color close-ups for every label area. Only the color craft view is oblique; required Metalness, Roughness, and Bump diagnostics are face-on. Canonical area ids remain opaque and may be long or Unicode, while filenames use separate deterministic ASCII tokens. Never reconstruct a filename from an area id: resolve `manifest.areas[].artifactIds` against `manifest.artifacts[].id`. `qc-manifest.json` binds the evidence to the canonical input revision and model fingerprint, records each area's stable target and `requiredChannels`, and preserves every artifact's `viewId`, inclusion `reason`, relative path, SHA-256, dimensions, channel, framing, and camera metadata. It is evidence metadata, not a visual pass/fail verdict.
 
 Before inspecting images, the Agent compares `qc-manifest.json.input.revision` with a fresh `project` result for the working file. It then reviews every model, area, craft, and included channel image. A blocking defect, incomplete evidence set, or revision mismatch triggers a revision-safe patch, waits for the live preview to report the new ready revision, validates again, and captures the next immutable round. The Agent may make at most three repair rounds after `round-0`; it does not apply/export or confirm delivery while a blocking check remains. Non-blocking warnings remain visible in the final handoff, and rendered craft still requires physical supplier proof.
 

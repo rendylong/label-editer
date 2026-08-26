@@ -9,7 +9,9 @@ export interface QcTargetFrame {
 const NORMAL_EPSILON = 1e-8
 
 function invalidUsage(message: string): never {
-  throw new Error(`INVALID_USAGE: ${message}`)
+  const error = new Error(message) as Error & { code: 'INVALID_USAGE' }
+  error.code = 'INVALID_USAGE'
+  throw error
 }
 
 function triangleNormal(

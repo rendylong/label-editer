@@ -141,16 +141,16 @@ label-qc/
 │   │   ├── model-front-right.png
 │   │   └── model-back-left.png
 │   ├── areas/
-│   │   └── <area-id>/
-│   │       ├── area-<area-id>-face.png
-│   │       ├── area-<area-id>-craft.png
-│   │       └── area-<area-id>-<metalness|roughness|bump>.png
+│   │   └── <derived-area-token>/
+│   │       ├── area-<derived-area-token>-face.png
+│   │       ├── area-<derived-area-token>-craft.png
+│   │       └── area-<derived-area-token>-<metalness|roughness|bump>.png
 │   └── qc-manifest.json
 ├── round-1/
 └── ...
 ```
 
-每轮固定包含六张整模视图，以及每个贴标区域的两张彩色近景。只有区域工艺实际使用相应通道时，才会加入 Metalness、Roughness 或 Bump 图。`qc-manifest.json` 将证据绑定到规范化的输入 revision 和模型 fingerprint，并记录每个区域的稳定目标，以及各文件的相对路径、SHA-256、尺寸、通道、取景方式和相机信息。它是证据元数据，不代替视觉通过/失败结论。
+每轮固定包含六张整模视图，以及每个贴标区域的两张彩色近景。只有彩色 craft 视图采用斜角；所需的 Metalness、Roughness 与 Bump 诊断图均采用正视角。规范 area id 按不透明值原样保留，可以很长或包含 Unicode；文件名使用独立、确定性的 ASCII token。不要根据 area id 重建文件名，而应将 `manifest.areas[].artifactIds` 与 `manifest.artifacts[].id` 精确关联。`qc-manifest.json` 将证据绑定到规范化的输入 revision 和模型 fingerprint，记录每个区域的稳定目标与 `requiredChannels`，并保留每个文件的 `viewId`、纳入 `reason`、相对路径、SHA-256、尺寸、通道、取景方式和相机信息。它是证据元数据，不代替视觉通过/失败结论。
 
 查看图片前，Agent 会将 `qc-manifest.json.input.revision` 与 working 文件最新的 `project` 结果比较，然后检查所有整模、区域、工艺近景与已包含的通道图。如果发现阻塞缺陷、证据不完整或 revision 不一致，Agent 会执行 revision-safe patch，等待实时预览报告新 revision 已 ready，再重新校验并写入下一轮不可变目录。`round-0` 之后最多允许三轮自动修复；仍有阻塞项时不得 apply/export 或确认交付。非阻塞 warning 必须保留在最终交接中，渲染工艺仍需要供应商实物打样确认。
 
