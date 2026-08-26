@@ -249,6 +249,7 @@ function resolvedTextDirection(layer: TextLayer): CanvasDirection {
 }
 
 interface ImageBits {
+  src: string
   original: HTMLImageElement
   preview: HTMLCanvasElement
 }
@@ -289,11 +290,19 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
   // 图片图层位图缓存
   useEffect(() => {
     let alive = true
-    const jobs = layers
-      .filter((layer): layer is ImageLayer => layer.kind === 'image')
+    const imageLayers = layers.filter((layer): layer is ImageLayer => layer.kind === 'image')
+    setImgBits((previous) => {
+      const current = new Map<string, ImageBits>()
+      for (const layer of imageLayers) {
+        const bits = previous.get(layer.id)
+        if (bits?.src === layer.src) current.set(layer.id, bits)
+      }
+      return current
+    })
+    const jobs = imageLayers
       .map(async (layer) => {
         try {
-          return { layer, image: await loadImg(layer.src) }
+          return { layer, src: layer.src, image: await loadImg(layer.src) }
         } catch {
           return null
         }
@@ -304,6 +313,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       for (const readyImage of readyImages) {
         if (!readyImage) continue
         m.set(readyImage.layer.id, {
+          src: readyImage.src,
           original: readyImage.image,
           preview: renderCraftedImage(readyImage.image, readyImage.layer),
         })
@@ -344,9 +354,9 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         drawTextShape(ctx, layer, gray, fontCssFor(layer.fontFamily, cfg.fonts), mode)
       }
       else if (layer.kind === 'image') {
-        const image = imgBits.get(layer.id)?.original
-        if (!image) return false
-        drawImageMaskShape(ctx, layer, image, gray)
+        const bits = imgBits.get(layer.id)
+        if (!bits || bits.src !== layer.src) return false
+        drawImageMaskShape(ctx, layer, bits.original, gray)
       } else drawShapeMask(ctx, layer, gray, mode)
       return true
     }
@@ -602,7 +612,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                   ) : layer.kind === 'image' ? (
                     (() => {
                       const bits = imgBits.get(layer.id)
-                      return bits ? (
+                      return bits?.src === layer.src ? (
                         <KImage
                           name={relief ? 'craft-relief' : undefined}
                           image={bits.preview}

@@ -343,3 +343,97 @@ Tests       1 passed | 1 skipped (2)
 - Confirmed all positive finite custom-path bounds, including sub-unit extents, fit the full intended artboard.
 
 All carrier/readiness results remain unverified production prompts. This fix does not certify physical ink opacity, white-ink performance, adhesion, registration, abrasion, film, foil, die cutting, in-mold compatibility, tooling, supplier capability, press readiness, or any GLB shader simulation of white ink.
+
+## Fix round 3
+
+### Review findings and RED evidence
+
+The third review found three remaining white-underbase lifecycle gaps: callback success was treated as pixel content, same-id image layers could reuse the previous source bitmap during synchronous export, and a malformed path draw could escape before the new bake replaced a stale white channel.
+
+Primary RED command:
+
+```text
+pnpm vitest run tests/carrierMask.test.ts tests/carrierExport.test.ts tests/labelImageReadiness.test.ts tests/bakeLifecycle.test.ts
+Test Files  3 failed | 1 passed (4)
+Tests       6 failed | 29 passed (35)
+```
+
+This proved black-only/off-artboard/transparent draws were retained, a structurally declared area could publish an arbitrary injected canvas, the old opaque image remained available after `src` changed, and a path draw exception escaped instead of completing the rebake.
+
+An additional preview-path RED isolated the unsupported SVG helper failure:
+
+```text
+pnpm vitest run tests/carrierMask.test.ts
+Test Files  1 failed (1)
+Tests       1 failed | 19 passed (20)
+```
+
+### Implemented corrections
+
+| Finding | Correction |
+| --- | --- |
+| Pixel truth and artifact trust | The renderer now scans the completed white-underbase raster in bounded chunks of at most 256K pixels. Only a canvas containing at least one non-black, non-transparent pixel is added to a module-private runtime `WeakSet`. Null/unreadable/tainted data fails closed. Artifact and manifest paths require both current renderable process intent and the renderer-issued canvas brand; arbitrary injected canvases are ignored. |
+| Image source identity | Cached image bits now carry their exact `src`. Stale entries are removed immediately when image-layer dependencies change, and both preview and synchronous mask bake compare the cached identity with the current store layer before drawing. An opaque-to-transparent same-id source change is blocked before the new load settles; the transparent source remains separation-free after load, and a later current opaque source produces a new proven channel. |
+| Malformed/unsupported path | Mask callback errors are isolated and fail closed. Any failed or partially drawn white channel is discarded after pixel verification, allowing `setBake` to advance and replace prior output. Shared shape partitioning also catches unsupported path tracing for preview/mask helpers and returns non-rendering partitions rather than aborting the render. Existing schema/readiness validation remains authoritative where it already recognizes invalid geometry. |
+
+### Pixel and lifecycle proof
+
+- Black-only callback, fully transparent image simulation, and off-artboard draw all return no white-underbase channel.
+- A real selective white pixel survives and receives renderer proof.
+- `getImageData` failure/taint returns no channel and no brand.
+- A visible structural declaration paired with an injected unproven canvas produces neither artifact nor manifest separation.
+- A valid white path bake followed by a partially drawn throwing malformed path completes at a newer bake version, clears the old white channel, omits its separation, and rejects direct artifact creation.
+- A source identity change followed by export-triggered synchronous bake cannot reuse the previous opaque bitmap.
+
+### Final verification
+
+Focused GREEN:
+
+```text
+pnpm vitest run tests/carrierMask.test.ts tests/carrierExport.test.ts tests/labelImageReadiness.test.ts tests/bakeLifecycle.test.ts
+Test Files  4 passed (4)
+Tests       37 passed (37)
+```
+
+Affected integration suite:
+
+```text
+pnpm vitest run tests/carrierMask.test.ts tests/carrierExport.test.ts tests/carrierBehavior.test.ts tests/artifactExport.test.ts tests/labelImageReadiness.test.ts tests/bakeLifecycle.test.ts tests/renderingFidelity.test.ts tests/craft.test.ts tests/shapeGeometry.test.ts tests/svgPath.test.ts tests/exportReadiness.test.ts tests/agentBrowserRuntime.test.ts tests/projectSchema.test.ts tests/exportOverlay.test.ts tests/sceneTexture.test.ts tests/rebuildWorkerProtocol.test.ts tests/capabilityGaps.test.ts
+Test Files  17 passed (17)
+Tests       325 passed (325)
+```
+
+Full suite:
+
+```text
+pnpm test
+Test Files  71 passed (71)
+Tests       900 passed | 1 skipped (901)
+```
+
+Production build:
+
+```text
+pnpm build
+PASS — TypeScript and Vite production build completed.
+```
+
+Vite emitted the existing browser externalization, mixed static/dynamic import, and large-chunk warnings; no build error occurred.
+
+Dedicated plugin browser E2E:
+
+```text
+pnpm test:plugin-e2e
+Test Files  1 passed (1)
+Tests       1 passed | 1 skipped (2)
+```
+
+### Fix-round self-review and certification boundary
+
+- Confirmed proof originates only from the production renderer after completed-raster inspection; current intent and proof are both required downstream.
+- Confirmed exact pixel inspection is chunk-bounded for 4096-class canvases and fails closed on unreadable data.
+- Confirmed stale image state is guarded by `src` identity even if a synchronous export callback runs with an older React closure but reads the new store layer.
+- Confirmed malformed path rendering cannot preserve a prior white channel or publish a partially drawn separation.
+- Confirmed prior round replace-PBR, provenance, one-sided packing, boundary, and optional-channel compatibility behavior remains covered by full-suite and plugin E2E tests.
+
+All readiness and separation results remain digital, unverified production evidence. This fix does not certify physical white-ink coverage/opacity, adhesion, registration, abrasion, film, foil, die cutting, in-mold compatibility, tooling, supplier capability, press readiness, or GLB shader simulation of white ink.

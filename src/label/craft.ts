@@ -7,7 +7,7 @@ import type { CraftEffect, CraftType, ImageLayer, LabelAreaConfig, LabelLayer, S
 import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
 import { resolveCarrierSurface } from './paper'
-import { canRenderMaskLayer, isRenderableWhiteUnderbaseLayer } from './whiteUnderbase'
+import { canRenderMaskLayer, isRenderableWhiteUnderbaseLayer, proveRenderedWhiteUnderbase } from './whiteUnderbase'
 
 export type CraftScope = 'layer' | 'global'
 export type MaskChannel = 'metalness' | 'roughness' | 'bump'
@@ -226,7 +226,11 @@ function partitionShapeCommands(commands: readonly ShapeCommand[]): ShapeCommand
 }
 
 function shapeCommandPartitions(layer: ShapeLayer): ShapeCommandPartitions {
-  return partitionShapeCommands(shapeCommands(layer))
+  try {
+    return partitionShapeCommands(shapeCommands(layer))
+  } catch {
+    return { closed: [], open: [] }
+  }
 }
 
 export function shapeUsesOpenStroke(layer: ShapeLayer): boolean {
@@ -845,9 +849,16 @@ export function renderCarrierMasks(
 ): CarrierMaskResult {
   const surface = resolveCarrierSurface(area)
   if (!surface.renderDecoration) return {}
+  const safeDrawLayer = (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode): boolean => {
+    try {
+      return drawLayer(ctx, layer, gray, mode) !== false
+    } catch {
+      return false
+    }
+  }
   const substrateBacked = surface.carrier === 'legacy' || surface.substrateVisible
   const result: CarrierMaskResult = substrateBacked
-    ? renderMasks(width, height, drawLayer, area.layers, area.globalCraft.craft)
+    ? renderMasks(width, height, safeDrawLayer, area.layers, area.globalCraft.craft)
     : {}
   if (substrateBacked) {
     const underbaseLayers = area.layers.filter(isRenderableWhiteUnderbaseLayer)
@@ -858,11 +869,15 @@ export function renderCarrierMasks(
       const context = whiteUnderbase.getContext('2d')!
       context.fillStyle = 'rgb(0,0,0)'
       context.fillRect(0, 0, width, height)
-      let hasContent = false
+      let drawFailed = false
       for (const layer of underbaseLayers) {
-        if (drawLayer(context, layer, 255, 'fill') !== false) hasContent = true
+        try {
+          if (drawLayer(context, layer, 255, 'fill') === false) drawFailed = true
+        } catch {
+          drawFailed = true
+        }
       }
-      if (hasContent) result.whiteUnderbase = whiteUnderbase
+      if (!drawFailed && proveRenderedWhiteUnderbase(whiteUnderbase)) result.whiteUnderbase = whiteUnderbase
     }
     return result
   }
@@ -910,7 +925,7 @@ export function renderCarrierMasks(
     contexts.set(channel, context)
   }
 
-  let whiteUnderbaseHasContent = false
+  let whiteUnderbaseDrawFailed = false
   for (const layer of area.layers) {
     if (!canRenderMaskLayer(layer)) continue
     for (const process of layer.processes ?? []) {
@@ -920,18 +935,26 @@ export function renderCarrierMasks(
           ? process.requiredMask
           : undefined
       if (channel) {
-        const didDraw = drawLayer(contexts.get(channel)!, layer, channel === 'roughness' ? 0 : 255, 'fill') !== false
-        if (channel === 'whiteUnderbase' && didDraw) whiteUnderbaseHasContent = true
+        const context = contexts.get(channel)!
+        if (channel === 'whiteUnderbase') {
+          try {
+            if (drawLayer(context, layer, 255, 'fill') === false) whiteUnderbaseDrawFailed = true
+          } catch {
+            whiteUnderbaseDrawFailed = true
+          }
+        } else {
+          safeDrawLayer(context, layer, channel === 'roughness' ? 0 : 255, 'fill')
+        }
       }
     }
     for (const contribution of layerMaskContributions(layer)) {
       const context = contexts.get(contribution.channel)
-      if (context) drawLayer(context, layer, contribution.tone, contribution.mode)
+      if (context) safeDrawLayer(context, layer, contribution.tone, contribution.mode)
     }
     const matte = layer.craft.find((effect) => effect.type === 'matte')
     const roughness = contexts.get('roughness')
     const bump = contexts.get('bump')
-    if (matte && roughness && bump) applyLayerMatteSurface(width, height, drawLayer, layer, matte, roughness, bump)
+    if (matte && roughness && bump) applyLayerMatteSurface(width, height, safeDrawLayer, layer, matte, roughness, bump)
   }
   for (const effect of area.globalCraft.craft) {
     const roughness = contexts.get('roughness')
@@ -943,6 +966,8 @@ export function renderCarrierMasks(
       roughness.fillRect(0, 0, width, height)
     }
   }
-  if (result.whiteUnderbase && !whiteUnderbaseHasContent) delete result.whiteUnderbase
+  if (result.whiteUnderbase && (whiteUnderbaseDrawFailed || !proveRenderedWhiteUnderbase(result.whiteUnderbase))) {
+    delete result.whiteUnderbase
+  }
   return result
 }

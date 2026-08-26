@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { renderCarrierMasks } from '../src/label/craft'
+import { createChannelArtifact } from '../src/agent/artifactExport'
+import { genericShapePaintProps, renderCarrierMasks, shapeUsesOpenStroke } from '../src/label/craft'
+import { buildPrintManifest } from '../src/label/printReadiness'
 import type { LabelAreaConfig, LabelLayer } from '../src/label/types'
+import { useLabelStore } from '../src/state/stores'
 
 function channels(value: string): [number, number, number] {
   const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value)
@@ -152,6 +155,53 @@ describe('carrier mask raster production', () => {
     expect(masks).not.toHaveProperty('whiteUnderbase')
   })
 
+  it.each([
+    ['black-only callback', (_context: CanvasRenderingContext2D): boolean => true],
+    ['transparent image draw', (_context: CanvasRenderingContext2D): boolean => true],
+    ['off-artboard draw', (context: CanvasRenderingContext2D): boolean => {
+      context.fillStyle = 'rgb(255,255,255)'
+      context.fillRect(8, 8, 1, 1)
+      return true
+    }],
+  ] as const)('rejects %s when the completed raster has no selective pixels', (_name, draw) => {
+    const masks = renderCarrierMasks(2, 2, draw, area('clear_label', layer({
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+    })))
+
+    expect(masks).not.toHaveProperty('whiteUnderbase')
+  })
+
+  it('retains and proves a completed white-underbase raster with actual white pixels', () => {
+    const masks = renderCarrierMasks(2, 2, drawLayer, area('clear_label', layer({
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+    })))
+
+    expect(pixel(masks.whiteUnderbase, 0, 0)).toEqual([255, 255, 255])
+  })
+
+  it('fails closed when white-underbase pixels are unreadable', () => {
+    globalThis.document = {
+      createElement: () => {
+        const canvas = new PixelCanvas()
+        const context = canvas.getContext('2d')!
+        context.getImageData = () => { throw new Error('tainted') }
+        return canvas
+      },
+    } as unknown as Document
+    const masks = renderCarrierMasks(2, 2, drawLayer, area('clear_label', layer({
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+    })))
+
+    expect(masks).not.toHaveProperty('whiteUnderbase')
+  })
+
+  it('keeps unsupported path geometry non-rendering in preview helpers instead of throwing', () => {
+    const malformed = layer({ shape: 'path', pathData: 'M0 0 L', pathViewBox: [0, 0, 1, 1] })
+
+    expect(() => genericShapePaintProps(malformed as Extract<LabelLayer, { kind: 'shape' }>, undefined)).not.toThrow()
+    expect(() => shapeUsesOpenStroke(malformed as Extract<LabelLayer, { kind: 'shape' }>)).not.toThrow()
+  })
+
   it('clears a stale white-underbase channel on the next non-rendering rebake', () => {
     const declared = layer({
       processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
@@ -161,6 +211,39 @@ describe('carrier mask raster production', () => {
 
     expect(first).toHaveProperty('whiteUnderbase')
     expect(second).not.toHaveProperty('whiteUnderbase')
+  })
+
+  it('fails closed on a malformed path draw, updates the bake, and removes prior white output', async () => {
+    useLabelStore.setState(useLabelStore.getInitialState(), true)
+    const target = area('clear_label', layer({
+      shape: 'path', pathData: 'M0 0H1V1H0Z', pathViewBox: [0, 0, 1, 1],
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase', spotName: 'WHITE' }],
+    }))
+    useLabelStore.getState().addArea(target)
+    const color = new PixelCanvas()
+    color.width = 2
+    color.height = 2
+    const valid = renderCarrierMasks(2, 2, drawLayer, target)
+    useLabelStore.getState().setBake(target.id, {
+      color: color as unknown as HTMLCanvasElement, ...valid, spec: target.canvas, version: 1,
+    })
+    target.layers[0] = { ...target.layers[0], pathData: 'M0 0 L' } as LabelLayer
+    const malformedDraw = (context: CanvasRenderingContext2D): boolean => {
+      context.fillStyle = 'rgb(255,255,255)'
+      context.fillRect(0, 0, 1, 1)
+      throw new Error('unsupported path')
+    }
+
+    let current: ReturnType<typeof renderCarrierMasks> | undefined
+    expect(() => { current = renderCarrierMasks(2, 2, malformedDraw, target) }).not.toThrow()
+    useLabelStore.getState().setBake(target.id, {
+      color: color as unknown as HTMLCanvasElement, ...current, spec: target.canvas, version: 2,
+    })
+    const bake = useLabelStore.getState().bakeMap[target.id]
+    expect(bake.version).toBe(2)
+    expect(bake).not.toHaveProperty('whiteUnderbase')
+    expect(buildPrintManifest(target, bake).separations).not.toContain('white_underbase')
+    await expect(createChannelArtifact(target, bake, 'white_underbase')).rejects.toThrow(/没有 white_underbase 烘焙通道/)
   })
 
   it('never bakes decorative or process masks for bare', () => {

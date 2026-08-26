@@ -18,22 +18,49 @@ vi.mock('../src/glb/textures', () => external)
 
 import { prepareAllAreas } from '../src/app/areaExporter'
 import { createAreaChannelArtifacts } from '../src/agent/artifactExport'
+import { renderCarrierMasks } from '../src/label/craft'
 import { buildPrintManifest } from '../src/label/printReadiness'
 
 class NeutralContext {
   fillStyle: string | CanvasGradient | CanvasPattern = '#000000'
   tone: number | undefined
+  private pixels = new Uint8ClampedArray()
 
-  fillRect(): void {
+  constructor(private readonly canvas: NeutralCanvas) {}
+
+  fillRect(x: number, y: number, width: number, height: number): void {
     const match = /rgb\((\d+),(\d+),(\d+)\)/.exec(String(this.fillStyle))
     this.tone = match ? Number(match[1]) : this.fillStyle === '#ffffff' ? 255 : 0
+    if (this.pixels.length !== this.canvas.width * this.canvas.height * 4) {
+      this.pixels = new Uint8ClampedArray(this.canvas.width * this.canvas.height * 4)
+    }
+    for (let py = Math.max(0, y); py < Math.min(this.canvas.height, y + height); py += 1) {
+      for (let px = Math.max(0, x); px < Math.min(this.canvas.width, x + width); px += 1) {
+        const offset = (py * this.canvas.width + px) * 4
+        this.pixels[offset] = this.tone
+        this.pixels[offset + 1] = this.tone
+        this.pixels[offset + 2] = this.tone
+        this.pixels[offset + 3] = 255
+      }
+    }
+  }
+
+  getImageData(x: number, y: number, width: number, height: number): ImageData {
+    const data = new Uint8ClampedArray(width * height * 4)
+    for (let py = 0; py < height; py += 1) {
+      for (let px = 0; px < width; px += 1) {
+        const source = ((y + py) * this.canvas.width + x + px) * 4
+        data.set(this.pixels.slice(source, source + 4), (py * width + px) * 4)
+      }
+    }
+    return { data, width, height, colorSpace: 'srgb' } as ImageData
   }
 }
 
 class NeutralCanvas {
   width = 0
   height = 0
-  readonly context = new NeutralContext()
+  readonly context = new NeutralContext(this)
 
   getContext(): NeutralContext {
     return this.context
@@ -126,9 +153,23 @@ describe('carrier-aware channel export', () => {
     expect(buildPrintManifest(target, { color: canvas(1), whiteUnderbase: canvas(5) }).separations).not.toContain('white_underbase')
   })
 
-  it('publishes a real declared selective white-underbase artifact and keeps manifest in lockstep', async () => {
+  it('rejects an injected unproven white-underbase canvas despite a current declaration', async () => {
     const target = area('clear_label', [whiteLayer()])
     const bake = { color: canvas(1), whiteUnderbase: canvas(5) }
+    const artifacts = await createAreaChannelArtifacts([target], { front: bake })
+
+    expect(artifacts.map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(target, bake).separations).toEqual([])
+  })
+
+  it('publishes only a renderer-proven selective white-underbase artifact and keeps manifest in lockstep', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const masks = renderCarrierMasks(8, 8, (context, _layer, gray) => {
+      context.fillStyle = `rgb(${gray},${gray},${gray})`
+      context.fillRect(0, 0, 4, 4)
+      return true
+    }, target)
+    const bake = { color: canvas(1), ...masks }
     const artifacts = await createAreaChannelArtifacts([target], { front: bake })
 
     expect(artifacts.map((artifact) => [artifact.id, artifact.fileName, artifact.channel])).toEqual([

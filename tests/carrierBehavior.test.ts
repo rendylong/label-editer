@@ -273,7 +273,7 @@ describe('canonical carrier rendering and readiness', () => {
     }))
   })
 
-  it('lists white underbase only when a real baked separation channel exists', () => {
+  it('does not list white underbase from an unproven injected separation canvas', () => {
     const area = carrierArea('clear_label', {
       substrate: clearSubstrate,
       processes: [{ process: 'white_underbase', spotName: 'WHITE', requiredMask: 'white_underbase' }],
@@ -282,6 +282,6 @@ describe('canonical carrier rendering and readiness', () => {
     const whiteUnderbase = { width: 400, height: 600 } as HTMLCanvasElement
 
     expect(buildPrintManifest(area).separations).not.toContain('white_underbase')
-    expect(buildPrintManifest(area, { color, whiteUnderbase }).separations).toEqual(['white_underbase', 'WHITE'])
+    expect(buildPrintManifest(area, { color, whiteUnderbase }).separations).toEqual([])
   })
 })

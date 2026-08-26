@@ -2,7 +2,7 @@ import type { LabelAreaConfig } from './types'
 import type { BakeInput } from '../app/exportTypes'
 import { carrierReadinessChecks, type CarrierReadinessCode } from './exportReadiness'
 import { resolveCarrierBoundary, resolveCarrierSurface } from './paper'
-import { isRenderableWhiteUnderbaseLayer } from './whiteUnderbase'
+import { isRenderableWhiteUnderbaseLayer, isRendererProvenWhiteUnderbase } from './whiteUnderbase'
 
 export type CarrierInvariantIssueCode =
   | 'carrier-forbidden-substrate'
@@ -141,7 +141,7 @@ export function buildPrintManifest(area: LabelAreaConfig, bake?: BakeInput): Pri
   const foilNames = area.layers.flatMap((layer) => layer.craft.flatMap((effect) => effect.type === 'foil' && effect.params.foilSpotName ? [effect.params.foilSpotName] : []))
   const declaredSeparations = area.layers.flatMap((layer) => (layer.processes ?? []).flatMap((process) => {
     const whiteUnderbase = process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
-    if (whiteUnderbase && (!bake?.whiteUnderbase || !isRenderableWhiteUnderbaseLayer(layer))) return []
+    if (whiteUnderbase && (!isRendererProvenWhiteUnderbase(bake?.whiteUnderbase) || !isRenderableWhiteUnderbaseLayer(layer))) return []
     return [
       ...(process.requiredMask ? [process.requiredMask] : []),
       ...(process.spotName ? [process.spotName] : []),
