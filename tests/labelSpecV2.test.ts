@@ -20,6 +20,9 @@ describe('Label Spec v2', () => {
   it.each([
     ['malformed path syntax', 'M0 0 L', [0, 0, 1, 1], '/pathData'],
     ['unsupported path command', 'M0 0 R1 1', [0, 0, 1, 1], '/pathData'],
+    ['coincident-endpoint arc', 'M0 0A1 1 0 0 1 0 0', [0, 0, 1, 1], '/pathData'],
+    ['unsafe mapped coordinates', 'M-1000000000000 0L1 1', [1000000000000, 0, 1, 1], '/pathData'],
+    ['huge finite viewBox', 'M0 0L1 1', [10000000000000, 0, 1, 1], '/pathViewBox'],
     ['zero-width viewBox', 'M0 0L1 1', [0, 0, 0, 1], '/pathViewBox'],
     ['negative-height viewBox', 'M0 0L1 1', [0, 0, 1, -1], '/pathViewBox'],
   ] as const)('rejects %s before structured apply', (_label, pathData, pathViewBox, expectedPath) => {
@@ -29,7 +32,7 @@ describe('Label Spec v2', () => {
         id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
         range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
         layers: [{
-          id: 'vector', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.8, height: 0.8,
+          id: 'vector', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 4, height: 4,
           pathData, pathViewBox,
         }],
       }],
@@ -60,6 +63,38 @@ describe('Label Spec v2', () => {
     expect(applyStructuredLabelSpec(baseArea, spec).areas[0].layers[0]).toMatchObject({
       kind: 'shape', shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1],
     })
+  })
+
+  it('accepts valid closed and compound Task 5 paths', () => {
+    for (const pathData of ['M0 0H1V1H0Z', 'M0 0H1V1H0ZM0.25 0.25H0.75V0.75H0.25Z']) {
+      const spec = {
+        version: 2,
+        areas: [{
+          id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+          range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+          layers: [{ id: 'vector', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.8, height: 0.8, pathData, pathViewBox: [0, 0, 1, 1] }],
+        }],
+      }
+      expect(validateLabelSpec(spec).ok).toBe(true)
+      expect(applyStructuredLabelSpec(baseArea, spec).areas[0].layers[0]).toMatchObject({ pathData })
+    }
+  })
+
+  it('rejects a path at apply time when normalized coordinates overflow after pixel mapping', () => {
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{
+          id: 'vector', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.8, height: 0.8,
+          pathData: 'M-10000000000 0L1 1', pathViewBox: [10000000000, 0, 1, 1],
+        }],
+      }],
+    }
+
+    expect(validateLabelSpec(spec).ok).toBe(true)
+    expect(() => applyStructuredLabelSpec(baseArea, spec)).toThrow(/invalid-vector-path.*pathData/)
   })
 
   it('keeps the existing pixel-only Label Spec v2 fixture valid', () => {

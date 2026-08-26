@@ -1,4 +1,4 @@
-import { parseNormalizedSvgPath } from './svgPath'
+import { traceValidatedSvgPath, validateSvgPathViewBox } from './svgPath'
 
 export type VectorPathField = 'pathData' | 'pathViewBox'
 
@@ -16,6 +16,8 @@ export interface VectorPathValidationIssue {
 export function validateVectorPath(
   pathData: unknown,
   pathViewBox: unknown,
+  width = 1,
+  height = 1,
 ): VectorPathValidationIssue | undefined {
   if (!Array.isArray(pathViewBox) || pathViewBox.length !== 4
     || pathViewBox.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
@@ -28,7 +30,20 @@ export function validateVectorPath(
     return { field: 'pathData', message: 'pathData 必须是非空字符串' }
   }
   try {
-    parseNormalizedSvgPath(pathData)
+    validateSvgPathViewBox(pathViewBox)
+  } catch (error) {
+    return {
+      field: 'pathViewBox',
+      message: `pathViewBox 不是受支持的有限坐标系：${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+  try {
+    traceValidatedSvgPath({
+      moveTo: () => undefined,
+      lineTo: () => undefined,
+      bezierCurveTo: () => undefined,
+      closePath: () => undefined,
+    }, pathData, pathViewBox, width, height)
   } catch (error) {
     return {
       field: 'pathData',

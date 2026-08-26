@@ -184,7 +184,7 @@ export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
   for (const [areaIndex, area] of normalized.areas.entries()) {
     for (const [layerIndex, layer] of area.layers.entries()) {
       if (layer.type !== 'shape' || layer.shape !== 'path') continue
-      const issue = validateVectorPath(layer.pathData, layer.pathViewBox)
+      const issue = validateVectorPath(layer.pathData, layer.pathViewBox, layer.width as number, layer.height as number)
       if (!issue) continue
       vectorIssues.push({
         path: `/areas/${areaIndex}/layers/${layerIndex}/${issue.field}`,

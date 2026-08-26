@@ -351,7 +351,7 @@ function arcCubics(start: Point, command: SvgArcTo): SvgCubicTo[] {
   return commands
 }
 
-function validateViewBox(viewBox: readonly number[] | undefined): asserts viewBox is readonly [number, number, number, number] {
+export function validateSvgPathViewBox(viewBox: readonly number[] | undefined): asserts viewBox is readonly [number, number, number, number] {
   if (!viewBox || viewBox.length !== 4 || !viewBox.every(Number.isFinite) || !(viewBox[2] > 0) || !(viewBox[3] > 0)) {
     throw pathError('viewBox must contain four finite values with positive width and height')
   }
@@ -366,7 +366,7 @@ export function traceNormalizedSvgPath(
   width: number,
   height: number,
 ): void {
-  validateViewBox(viewBox)
+  validateSvgPathViewBox(viewBox)
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw pathError('layer dimensions must be finite and positive')
   assertSafeNumber(width, 'layer width')
   assertSafeNumber(height, 'layer height')
@@ -545,6 +545,20 @@ export function svgPathBounds(commands: readonly NormalizedSvgPathCommand[]): Sv
   const bounds = { x: minimumX, y: minimumY, width: maximumX - minimumX, height: maximumY - minimumY }
   for (const [label, value] of Object.entries(bounds)) assertSafeNumber(value, `bounds ${label}`, MAX_SAFE_DERIVED_MAGNITUDE)
   return bounds
+}
+
+/** Parse, bound, arc-normalize, map, and trace through the exact renderer route. */
+export function traceValidatedSvgPath(
+  context: SvgPathTraceContext,
+  source: string,
+  viewBox: readonly [number, number, number, number] | undefined,
+  width: number,
+  height: number,
+): NormalizedSvgPath {
+  const commands = parseNormalizedSvgPath(source)
+  svgPathBounds(commands)
+  traceNormalizedSvgPath(context, commands, viewBox, width, height)
+  return commands
 }
 
 /** True when any drawable subpath lacks an explicit close command. */

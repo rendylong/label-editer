@@ -120,6 +120,9 @@ describe('label project v3', () => {
   it.each([
     ['malformed path syntax', 'M0 0 L', [0, 0, 1, 1], 'pathData'],
     ['unsupported path command', 'M0 0 R1 1', [0, 0, 1, 1], 'pathData'],
+    ['coincident-endpoint arc', 'M0 0A1 1 0 0 1 0 0', [0, 0, 1, 1], 'pathData'],
+    ['unsafe mapped coordinates', 'M-1000000000000 0L1 1', [1000000000000, 0, 1, 1], 'pathData'],
+    ['huge finite viewBox', 'M0 0L1 1', [10000000000000, 0, 1, 1], 'pathViewBox'],
     ['zero-width viewBox', 'M0 0L1 1', [0, 0, 0, 1], 'pathViewBox'],
     ['negative-height viewBox', 'M0 0L1 1', [0, 0, 1, -1], 'pathViewBox'],
   ] as const)('rejects %s at the project import boundary', (_label, pathData, pathViewBox, field) => {
@@ -138,6 +141,15 @@ describe('label project v3', () => {
     expect(parseLabelProject(project).areas[0].layers[1]).toMatchObject({
       kind: 'shape', shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1],
     })
+  })
+
+  it('accepts valid closed and compound Task 5 paths at the project boundary', () => {
+    for (const pathData of ['M0 0H1V1H0Z', 'M0 0H1V1H0ZM0.25 0.25H0.75V0.75H0.25Z']) {
+      const project = physicalProjectFixture()
+      const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>
+      layers[1] = { ...layers[1], pathData, pathViewBox: [0, 0, 1, 1] }
+      expect(parseLabelProject(project).areas[0].layers[1]).toMatchObject({ pathData })
+    }
   })
 
   it('round-trips physical metrics without changing bake dimensions', () => {

@@ -4,7 +4,7 @@ import { carrierReadinessChecks, type CarrierReadinessCode } from './exportReadi
 import { resolveCarrierBoundary, resolveCarrierSurface } from './paper'
 import { isRenderableWhiteUnderbaseLayer } from './whiteUnderbase'
 import { validateVectorPath } from './vectorPathValidation'
-import { isRendererProvenWhiteUnderbase, type WhiteUnderbaseAuthorization } from './craft'
+import { isRendererProvenWhiteUnderbase } from './craft'
 
 export type CarrierInvariantIssueCode =
   | 'carrier-forbidden-substrate'
@@ -107,11 +107,21 @@ function carrierInvariantIssues(area: LabelAreaConfig): PrintReadinessIssue[] {
 
 export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIssue[] {
   const spec = area.printSpec
+  const vectorIssues = area.layers.flatMap((layer): PrintReadinessIssue[] => {
+    if (layer.kind !== 'shape' || layer.shape !== 'path') return []
+    const vectorIssue = validateVectorPath(layer.pathData, layer.pathViewBox, layer.width, layer.height)
+    return vectorIssue ? [{
+      severity: 'error', code: 'invalid-vector-path', areaId: area.id, layerId: layer.id,
+      field: vectorIssue.field, fields: [vectorIssue.field],
+      message: `区域「${area.name}」图层「${layer.id}」的 ${vectorIssue.message}。`,
+    }] : []
+  })
   if (!area.carrier && !spec) {
-    return [{ code: 'missing-print-spec', message: '尚未设置物理尺寸、出血与刀模。' }]
+    return [...vectorIssues, { code: 'missing-print-spec', message: '尚未设置物理尺寸、出血与刀模。' }]
   }
   const surface = resolveCarrierSurface(area)
   const issues: PrintReadinessIssue[] = [
+    ...vectorIssues,
     ...carrierInvariantIssues(area),
     ...carrierReadinessChecks(area),
   ]
@@ -127,16 +137,6 @@ export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIss
   }
   const mmPerPixel = spec ? spec.physicalHeightMm / Math.max(area.canvas.height, 1) : null
   for (const layer of area.layers) {
-    if (layer.kind === 'shape' && layer.shape === 'path') {
-      const vectorIssue = validateVectorPath(layer.pathData, layer.pathViewBox)
-      if (vectorIssue) {
-        issues.push({
-          severity: 'error', code: 'invalid-vector-path', areaId: area.id, layerId: layer.id,
-          field: vectorIssue.field, fields: [vectorIssue.field],
-          message: `区域「${area.name}」图层「${layer.id}」的 ${vectorIssue.message}。`,
-        })
-      }
-    }
     if (spec && mmPerPixel !== null && layer.kind === 'text' && layer.visible && layer.fontSize * mmPerPixel < spec.minTextHeightMm) {
       issues.push({ code: 'text-below-minimum-height', layerId: layer.id, message: `文字「${layer.text.slice(0, 24)}」低于 ${spec.minTextHeightMm} mm 最小字高。` })
     }
@@ -152,7 +152,6 @@ export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIss
 export function buildPrintManifest(
   area: LabelAreaConfig,
   bake?: BakeInput,
-  whiteUnderbaseAuthorization?: WhiteUnderbaseAuthorization,
 ): PrintManifest {
   if (!area.printSpec && !area.carrier) throw new Error(`贴标区域「${area.name}」尚未设置印刷规格`)
   const spec = area.printSpec
@@ -161,7 +160,7 @@ export function buildPrintManifest(
     process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
   )))
   const rendererProvesCurrentWhiteUnderbase = declaresWhiteUnderbase
-    && isRendererProvenWhiteUnderbase(area, bake, whiteUnderbaseAuthorization)
+    && isRendererProvenWhiteUnderbase(area, bake)
   const declaredSeparations = area.layers.flatMap((layer) => (layer.processes ?? []).flatMap((process) => {
     const whiteUnderbase = process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
     if (whiteUnderbase && (
@@ -169,6 +168,7 @@ export function buildPrintManifest(
       || !isRenderableWhiteUnderbaseLayer(layer)
     )) return []
     return [
+      ...(whiteUnderbase ? ['white_underbase'] : []),
       ...(process.requiredMask ? [process.requiredMask] : []),
       ...(process.spotName ? [process.spotName] : []),
     ]

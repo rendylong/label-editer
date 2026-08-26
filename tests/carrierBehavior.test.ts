@@ -192,6 +192,37 @@ describe('canonical carrier rendering and readiness', () => {
   })
 
   it.each([
+    ['legacy without printSpec', (() => {
+      const value = carrierArea('applied_label', { layers: [] })
+      delete value.carrier
+      delete value.printSpec
+      return value
+    })()],
+    ['bare', carrierArea('bare', { layers: [] })],
+  ] as const)('blocks malformed runtime vector geometry before the %s early return', (_label, target) => {
+    const path = {
+      ...decorationLayer(),
+      shape: 'path' as const,
+      pathData: 'M0 0A1 1 0 0 1 0 0',
+      pathViewBox: [0, 0, 1, 1] as [number, number, number, number],
+    }
+    const area = { ...target, layers: [path] }
+    const issues = validatePrintReadiness(area)
+
+    expect(issues).toContainEqual(expect.objectContaining({
+      severity: 'error', code: 'invalid-vector-path', areaId: area.id,
+      layerId: path.id, field: 'pathData', fields: ['pathData'],
+    }))
+    if (area.carrier === 'bare') {
+      const codes = issues.map((issue) => issue.code)
+      expect(codes).not.toContain('missing-print-spec')
+      expect(codes).not.toContain('missing-bleed')
+      expect(codes).not.toContain('text-below-minimum-height')
+      expect(codes).not.toContain('foil-without-spot-name')
+    }
+  })
+
+  it.each([
     ['rectangle', undefined],
     ['rounded_rectangle', undefined],
     ['ellipse', undefined],

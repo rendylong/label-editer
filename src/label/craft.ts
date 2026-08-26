@@ -11,6 +11,7 @@ import {
   canRenderMaskLayer,
   isRenderableWhiteUnderbaseLayer,
   readWhiteUnderbaseRasterSignature,
+  snapshotWhiteUnderbaseRaster,
   whiteUnderbaseIntentKey,
 } from './whiteUnderbase'
 
@@ -851,7 +852,18 @@ interface RendererWhiteUnderbaseProof {
 
 type WhiteUnderbaseProofArea = Pick<
   LabelAreaConfig,
-  'id' | 'carrier' | 'substrate' | 'paper' | 'legacyPaperCarrier' | 'layers' | 'globalCraft' | 'fonts'
+  | 'id'
+  | 'carrier'
+  | 'substrate'
+  | 'paper'
+  | 'legacyPaperCarrier'
+  | 'canvas'
+  | 'artboard'
+  | 'placementPolicy'
+  | 'designBinding'
+  | 'layers'
+  | 'globalCraft'
+  | 'fonts'
 >
 
 export interface WhiteUnderbaseProofBake {
@@ -859,16 +871,8 @@ export interface WhiteUnderbaseProofBake {
   version?: number
 }
 
-declare const whiteUnderbaseAuthorizationBrand: unique symbol
-export interface WhiteUnderbaseAuthorization {
-  readonly [whiteUnderbaseAuthorizationBrand]: true
-}
-
 const rendererWhiteUnderbaseProofs = new WeakMap<HTMLCanvasElement, RendererWhiteUnderbaseProof>()
 const latestRendererWhiteUnderbaseRevision = new Map<string, object>()
-const activeWhiteUnderbaseAuthorizations = new WeakMap<object, RendererWhiteUnderbaseProof & {
-  canvas: HTMLCanvasElement
-}>()
 
 function beginRendererWhiteUnderbaseRevision(areaId: string, bakeVersion: number | undefined): object | undefined {
   if (!Number.isSafeInteger(bakeVersion) || (bakeVersion ?? 0) <= 0) {
@@ -886,6 +890,10 @@ function mintRendererWhiteUnderbaseProof(
   bakeVersion: number | undefined,
   revisionToken: object | undefined,
 ): boolean {
+  if (canvas.width !== area.canvas.width || canvas.height !== area.canvas.height) {
+    rendererWhiteUnderbaseProofs.delete(canvas)
+    return false
+  }
   const signature = readWhiteUnderbaseRasterSignature(canvas)
   if (!signature?.hasSelectivePixels) {
     rendererWhiteUnderbaseProofs.delete(canvas)
@@ -907,7 +915,6 @@ function mintRendererWhiteUnderbaseProof(
 export function isRendererProvenWhiteUnderbase(
   area: WhiteUnderbaseProofArea,
   bake: WhiteUnderbaseProofBake | undefined,
-  authorization?: WhiteUnderbaseAuthorization,
 ): bake is WhiteUnderbaseProofBake & { whiteUnderbase: HTMLCanvasElement; version: number } {
   const canvas = bake?.whiteUnderbase
   if (!canvas || !Number.isSafeInteger(bake.version)) return false
@@ -915,39 +922,33 @@ export function isRendererProvenWhiteUnderbase(
   if (!proof
     || proof.areaId !== area.id
     || proof.bakeVersion !== bake.version
+    || canvas.width !== area.canvas.width
+    || canvas.height !== area.canvas.height
     || latestRendererWhiteUnderbaseRevision.get(area.id) !== proof.revisionToken
     || proof.intentKey !== whiteUnderbaseIntentKey(area)) return false
-  const active = authorization ? activeWhiteUnderbaseAuthorizations.get(authorization) : undefined
-  if (active
-    && active.canvas === canvas
-    && active.areaId === proof.areaId
-    && active.bakeVersion === proof.bakeVersion
-    && active.intentKey === proof.intentKey
-    && active.rasterSignature === proof.rasterSignature) return true
   const current = readWhiteUnderbaseRasterSignature(canvas)
   return current?.hasSelectivePixels === true && current.key === proof.rasterSignature
 }
 
-/**
- * Shares one full current-pixel verification with synchronous consumers only.
- * The opaque authorization expires before this function returns, so retaining
- * it cannot authorize a later mutation.
- */
-export function withRendererWhiteUnderbaseAuthorization<T>(
+/** Returns an immutable encoding source containing the exact pixels reverified now. */
+export function snapshotRendererProvenWhiteUnderbase(
   area: WhiteUnderbaseProofArea,
   bake: WhiteUnderbaseProofBake | undefined,
-  consume: (authorization: WhiteUnderbaseAuthorization | undefined) => T,
-): T {
-  if (!isRendererProvenWhiteUnderbase(area, bake)) return consume(undefined)
-  const canvas = bake.whiteUnderbase
-  const proof = rendererWhiteUnderbaseProofs.get(canvas)!
-  const authorization = Object.freeze({}) as WhiteUnderbaseAuthorization
-  activeWhiteUnderbaseAuthorizations.set(authorization, { ...proof, canvas })
-  try {
-    return consume(authorization)
-  } finally {
-    activeWhiteUnderbaseAuthorizations.delete(authorization)
-  }
+): HTMLCanvasElement | undefined {
+  const canvas = bake?.whiteUnderbase
+  if (!canvas || !Number.isSafeInteger(bake.version)) return undefined
+  const proof = rendererWhiteUnderbaseProofs.get(canvas)
+  if (!proof
+    || proof.areaId !== area.id
+    || proof.bakeVersion !== bake.version
+    || canvas.width !== area.canvas.width
+    || canvas.height !== area.canvas.height
+    || latestRendererWhiteUnderbaseRevision.get(area.id) !== proof.revisionToken
+    || proof.intentKey !== whiteUnderbaseIntentKey(area)) return undefined
+  const current = snapshotWhiteUnderbaseRaster(canvas)
+  return current?.hasSelectivePixels === true && current.key === proof.rasterSignature
+    ? current.canvas
+    : undefined
 }
 
 /**

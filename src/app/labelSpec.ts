@@ -16,6 +16,7 @@ import type {
 } from '../label/types'
 import { validateLabelSpec } from '../agent/labelSpecSchema'
 import { assertPhysicalAreaPlacement, resolvePhysicalLayer } from './physicalLayout'
+import { validateVectorPath } from '../label/vectorPathValidation'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -131,6 +132,16 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
   }
 }
 
+function assertAppliedVectorGeometry(area: LabelAreaConfig): void {
+  for (const layer of area.layers) {
+    if (layer.kind !== 'shape' || layer.shape !== 'path') continue
+    const issue = validateVectorPath(layer.pathData, layer.pathViewBox, layer.width, layer.height)
+    if (issue) {
+      throw new Error(`Label Spec invalid-vector-path（${area.id}/${layer.id}/${issue.field}）：${issue.message}`)
+    }
+  }
+}
+
 /** Apply a JSON Label Spec to one selected target mesh, creating front/back areas independently. */
 export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown, idSeed = 'import'): StructuredLabelSpecResult {
   const validation = validateLabelSpec(raw)
@@ -177,6 +188,7 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
     assertPhysicalAreaPlacement(next)
     if (Array.isArray(input.layers)) {
       next.layers = input.layers.map((layer, layerIndex) => resolvePhysicalLayer(next, mapLayer(layer, next, layerIndex)))
+      assertAppliedVectorGeometry(next)
     }
     else warnings.push(`区域「${next.name}」没有 layers，已创建空白区域`)
     return next

@@ -1,5 +1,5 @@
 import type { ShapeGeometry, ShapeLayer } from './types'
-import { parseNormalizedSvgPath, traceNormalizedSvgPath } from './svgPath'
+import { traceValidatedSvgPath } from './svgPath'
 
 export interface MoveTo {
   type: 'moveTo'
@@ -317,12 +317,12 @@ export function shapeCommands(layer: ShapeLayer): ShapeCommand[] {
     case 'path': {
       if (!normalized.pathData || !normalized.pathViewBox) throw new Error('Path shapes require pathData and pathViewBox')
       const commands: ShapeCommand[] = []
-      traceNormalizedSvgPath({
+      traceValidatedSvgPath({
         moveTo: (x, y) => commands.push({ type: 'moveTo', x, y }),
         lineTo: (x, y) => commands.push({ type: 'lineTo', x, y }),
         bezierCurveTo: (cp1x, cp1y, cp2x, cp2y, x, y) => commands.push({ type: 'bezierTo', cp1x, cp1y, cp2x, cp2y, x, y }),
         closePath: () => commands.push({ type: 'close' }),
-      }, parseNormalizedSvgPath(normalized.pathData), normalized.pathViewBox, width, height)
+      }, normalized.pathData, normalized.pathViewBox, width, height)
       return commands
     }
     case 'rectangle': return rectangleCommands(width, height, normalized.cornerRadius)

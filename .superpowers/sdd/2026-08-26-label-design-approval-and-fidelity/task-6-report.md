@@ -528,3 +528,94 @@ Tests       1 passed | 1 skipped (2)
 - Confirmed prior replace-PBR clearing, legacy provenance, boundary handling, one-sided packing, image-source identity, neutral masks, optional-channel behavior, and four-channel GLB/QC contracts remain covered by affected/full/plugin E2E verification.
 
 All validation, raster proof, manifests, and exported separations remain digital runtime evidence, not physical-production certification. This fix does not certify press readiness, physical white-ink coverage or opacity, adhesion, registration, abrasion, film, foil, die cutting, in-mold compatibility, tooling, supplier capability, or GLB shader simulation of white ink.
+
+## Fix round 5
+
+### Review findings and RED evidence
+
+The fifth review found five remaining publication and validation gaps: callback-scoped authorization could survive a synchronous canvas mutation between consumers; vector validation stopped after syntax parsing instead of executing the renderer's bounded bounds/arc/viewBox route; legacy and bare readiness returned before inspecting malformed runtime vectors; proof did not bind the complete canvas contract; and the intent key serialized unrelated layer, craft, print, UI, history, and unused-font state.
+
+Primary RED command:
+
+```text
+pnpm vitest run tests/carrierExport.test.ts tests/projectSchema.test.ts tests/labelSpecV2.test.ts tests/carrierBehavior.test.ts tests/agentBrowserRuntime.test.ts
+Test Files  5 failed (5)
+Tests       22 failed | 161 passed (183)
+```
+
+The failures covered manifest-then-mutate-then-artifact, artifact-then-mutate-then-manifest, encoding from the later-mutated source, width/height/aspect and artboard staleness, overbroad locked/craft/process/paint/print/history/font invalidation, coincident arcs, unsafe mapped coordinates, huge finite viewBoxes, and legacy/bare/browser early returns. Additional isolated RED cases proved that an apply-time physical mapping could overflow after normalized Label Spec validation, substrate-backed mask-branch changes needed invalidation, and a white process without `requiredMask` needed the canonical `white_underbase` separation id.
+
+### Implemented corrections
+
+| Finding | Correction |
+| --- | --- |
+| Mutable callback authorization | Removed callback-scoped authorization and all cached authorization reuse. Every manifest consumption independently scans all current source pixels. Every artifact consumption independently scans while copying those exact RGBA chunks into a private snapshot canvas; PNG encoding uses that snapshot, so later source-canvas mutation cannot change the authorized bytes. Bundle publication creates the snapshot first, independently revalidates the current source for its manifest, and drops the white artifact whenever the manifest no longer authorizes `white_underbase`. Artifact-side read failure suppresses the manifest claim as well. |
+| Validator/renderer mismatch | Added one shared `traceValidatedSvgPath` route that parses, computes bounded curve/arc extrema, converts arcs, validates finite/magnitude limits, maps the viewBox into layer dimensions, and traces. Shape rendering and authoritative validation both call it. Project import supplies runtime dimensions; Label Spec validates normalized input and revalidates final physically mapped layers during apply. Coincident-endpoint arcs, unsafe mapped coordinates, huge finite/nonpositive/malformed viewBoxes, and unsupported syntax now fail; valid open, closed, and compound paths remain accepted. |
+| Legacy/bare early returns | Runtime vector issues are collected before either early return. Invalid geometry emits structured `invalid-vector-path` evidence with error severity plus area, layer, field, and fields. Browser readiness becomes false. Bare areas still omit paper, bleed, minimum-text, foil-name, and empty-label warnings; the pre-existing decoration conflict remains separate from the actual invalid serialized geometry. |
+| Canvas binding | Proof minting and consumption require raster width/height to equal the area's current canvas contract. The intent key additionally binds width, height, aspect, physical artboard dimensions, placement policy, approved crop, carrier/render-decoration decision, and substrate-backed rendering branch. A contract edit without rerender cannot reuse the raster. |
+| Overbroad intent key | Replaced whole-object serialization with a canonical pixel projection. It contains only current visible/nonzero white contributors, ordered deterministically by z-index/id, with identity, kind, transforms, bounds, design metrics, white-mask process declarations, and kind-specific text/image/shape mask inputs. It retains exact used image sources and only uploaded font bytes resolved by white text contributors. Locked state, paint colors, unrelated layer/global craft, unrelated process and spot metadata, print metadata, reference/history/UI state, and unused/reordered fonts no longer retire an otherwise exact raster. |
+| Separation identity | A valid white declaration always contributes canonical `white_underbase`, even when the process omitted `requiredMask`; optional spot names remain additional manifest separations. |
+
+### Publication and intent proof
+
+- Manifest and artifact calls no longer share an authorization object. Mutating the source after either consumer causes the later consumer to fail closed.
+- Artifact encoding receives a different, private canvas whose pixels are the same chunks used to recompute the renderer signature. A deferred encoder test mutates the original after authorization and still observes the pre-mutation verified bytes.
+- Encoder exception and reentrant manifest access do not leak proof. Bundle-level reentrancy or transient artifact-side read failure produces neither a white artifact nor a manifest-only white claim.
+- Latest-per-area revision retirement, area/version ownership, image-source isolation, full pixel scanning, unreadable/tainted failure closure, injected/clone rejection, and process visibility/opacity gates remain intact.
+- Relevant contributor, geometry, transform, z-order, design-metric, process-count, used-font-byte, image-source, carrier-branch, artboard, and canvas edits invalidate. Locked, unrelated craft/process/spot/print/reference/history, shape-paint, unused-font, and font-order edits do not invalidate a still-exact raster.
+
+The round-4 single-scan optimization is intentionally retired. A bundle with a legitimate white separation now pays one complete scan-and-copy for the artifact and a second complete scan for the manifest. This favors per-consumer correctness over the previously measured roughly 325 ms signature pass.
+
+### Final verification
+
+Focused GREEN:
+
+```text
+pnpm vitest run tests/carrierExport.test.ts tests/carrierBehavior.test.ts tests/projectSchema.test.ts tests/labelSpecV2.test.ts tests/agentBrowserRuntime.test.ts
+Test Files  5 passed (5)
+Tests       194 passed (194)
+```
+
+Affected integration suite:
+
+```text
+pnpm vitest run tests/carrierMask.test.ts tests/carrierExport.test.ts tests/carrierBehavior.test.ts tests/artifactExport.test.ts tests/labelImageReadiness.test.ts tests/bakeLifecycle.test.ts tests/renderingFidelity.test.ts tests/craft.test.ts tests/shapeGeometry.test.ts tests/svgPath.test.ts tests/exportReadiness.test.ts tests/agentBrowserRuntime.test.ts tests/projectSchema.test.ts tests/labelSpecV2.test.ts tests/projectControl.test.ts tests/exportOverlay.test.ts tests/export-roundtrip.test.ts tests/sceneTexture.test.ts tests/rebuildWorkerProtocol.test.ts tests/capabilityGaps.test.ts tests/agentBridge.test.ts tests/cliProtocol.test.ts tests/qcOutput.test.ts
+Test Files  23 passed (23)
+Tests       562 passed (562)
+```
+
+Full suite:
+
+```text
+pnpm test
+Test Files  71 passed (71)
+Tests       964 passed | 1 skipped (965)
+```
+
+Production build:
+
+```text
+pnpm build
+PASS — TypeScript and Vite production build completed (213 modules transformed).
+```
+
+Vite emitted the existing browser externalization, mixed static/dynamic import, and large-chunk warnings; no build error occurred.
+
+Dedicated plugin browser E2E:
+
+```text
+pnpm test:plugin-e2e
+Test Files  1 passed (1)
+Tests       1 passed | 1 skipped (2)
+```
+
+### Fix-round self-review and certification boundary
+
+- Confirmed no callback authorization symbol remains and every actual manifest/artifact consumer performs its own complete proof check.
+- Confirmed bundle inclusion requires both a successfully encoded verified snapshot and an independently current manifest claim; exact encoded pixels do not come from the mutable source canvas.
+- Confirmed validation and rendering now execute the same parse/bounds/arc/map/trace implementation, including final Label Spec physical mapping.
+- Confirmed early-return readiness and browser validation cannot treat malformed runtime vector geometry as ready.
+- Confirmed the projection includes all current white-mask inputs while excluding state demonstrated not to affect those pixels; a final self-review also removed white-process spot-name metadata from the pixel key.
+- Confirmed `git diff --check`, TypeScript project compilation, the focused/affected/full suites, production build, and dedicated plugin E2E all pass on the final implementation tree.
+
+All validation, proof signatures, snapshot PNGs, manifests, and GLB/QC outputs remain digital runtime evidence. This fix does not certify press readiness, physical white-ink coverage or opacity, adhesion, registration, abrasion, film, foil, die cutting, in-mold compatibility, tooling, supplier capability, or any GLB shader simulation of white ink.

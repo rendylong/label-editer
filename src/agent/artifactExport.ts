@@ -7,9 +7,7 @@ import { buildPrintManifest, type PrintManifest } from '../label/printReadiness'
 import type { LabelAreaConfig } from '../label/types'
 import { hasRenderableWhiteUnderbaseDeclaration } from '../label/whiteUnderbase'
 import {
-  isRendererProvenWhiteUnderbase,
-  withRendererWhiteUnderbaseAuthorization,
-  type WhiteUnderbaseAuthorization,
+  snapshotRendererProvenWhiteUnderbase,
 } from '../label/craft'
 
 export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase'
@@ -76,15 +74,14 @@ export async function createChannelArtifact(
   area: LabelAreaConfig,
   bake: BakeInput,
   channel: ArtifactChannel,
-  whiteUnderbaseAuthorization?: WhiteUnderbaseAuthorization,
 ): Promise<BrowserArtifact> {
-  if (channel === 'white_underbase' && (
-    !hasRenderableWhiteUnderbaseDeclaration(area)
-    || !isRendererProvenWhiteUnderbase(area, bake, whiteUnderbaseAuthorization)
-  )) {
+  const verifiedWhiteUnderbase = channel === 'white_underbase'
+    ? snapshotRendererProvenWhiteUnderbase(area, bake)
+    : undefined
+  if (channel === 'white_underbase' && (!hasRenderableWhiteUnderbaseDeclaration(area) || !verifiedWhiteUnderbase)) {
     throw new Error(`贴标区域「${area.name}」没有 white_underbase 烘焙通道（缺少当前 renderer proof）`)
   }
-  const canvas = channel === 'white_underbase' ? bake.whiteUnderbase : bake[channel]
+  const canvas = channel === 'white_underbase' ? verifiedWhiteUnderbase : bake[channel]
   if (!canvas) throw new Error(`贴标区域「${area.name}」没有 ${channel} 烘焙通道`)
   return {
     id: `${area.id}-${channel}`,
@@ -118,14 +115,24 @@ async function createAreaPublication(
     for (const channel of ['color', 'metalness', 'roughness', 'bump'] as const) {
       if (bake[channel]) artifacts.push(await createChannelArtifact(area, bake, channel))
     }
-    let whiteUnderbaseArtifact: Promise<BrowserArtifact> | undefined
-    withRendererWhiteUnderbaseAuthorization(area, bake, (authorization) => {
-      if (includeManifests) manifests.push(buildPrintManifest(area, bake, authorization))
-      if (bake.whiteUnderbase && hasRenderableWhiteUnderbaseDeclaration(area) && authorization) {
-        whiteUnderbaseArtifact = createChannelArtifact(area, bake, 'white_underbase', authorization)
+    let whiteUnderbaseArtifact: BrowserArtifact | undefined
+    if (bake.whiteUnderbase && hasRenderableWhiteUnderbaseDeclaration(area)) {
+      try {
+        whiteUnderbaseArtifact = await createChannelArtifact(area, bake, 'white_underbase')
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes('缺少当前 renderer proof')) throw error
       }
-    })
-    if (whiteUnderbaseArtifact) artifacts.push(await whiteUnderbaseArtifact)
+    }
+    if (includeManifests) {
+      // A transient artifact-side read failure must not leave a manifest-only
+      // white claim. When a snapshot exists, the manifest still performs its
+      // own current-source verification; a later mutation drops the snapshot.
+      const manifest = buildPrintManifest(area, whiteUnderbaseArtifact
+        ? bake
+        : { ...bake, whiteUnderbase: undefined })
+      manifests.push(manifest)
+      if (whiteUnderbaseArtifact && manifest.separations.includes('white_underbase')) artifacts.push(whiteUnderbaseArtifact)
+    } else if (whiteUnderbaseArtifact) artifacts.push(whiteUnderbaseArtifact)
   }
   return { artifacts, manifests }
 }
