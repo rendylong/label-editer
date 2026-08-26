@@ -9,4 +9,6 @@ export interface BakeInput {
   bump?: HTMLCanvasElement
   /** Selective production separation; not attached to the GLB material shader. */
   whiteUnderbase?: HTMLCanvasElement
+  /** Runtime bake revision used to bind production-separation proof. */
+  version?: number
 }

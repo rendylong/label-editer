@@ -183,6 +183,7 @@ export interface DesignValidationIssue {
   path?: string
   areaId?: string
   layerId?: string
+  field?: string
 }
 
 export interface DesignValidationReport {

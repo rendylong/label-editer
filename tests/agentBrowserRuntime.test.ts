@@ -366,6 +366,34 @@ describe('browser Agent QC runtime', () => {
     })
   })
 
+  it('preserves blocking severity for a runtime-mutated invalid vector path', async () => {
+    const owner = area()
+    const shape = owner.layers[0]
+    if (shape.kind !== 'shape') throw new Error('fixture must remain a shape layer')
+    owner.layers = [{
+      ...shape,
+      shape: 'path',
+      pathData: 'M0 0 L',
+      pathViewBox: [0, 0, 1, 1],
+    }]
+    installOwner(owner)
+
+    const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .validateDesign()
+
+    expect(result).toMatchObject({
+      ok: true,
+      operation: 'validate_design',
+      data: {
+        ready: false,
+        issues: [{
+          severity: 'error', code: 'invalid-vector-path', areaId: owner.id,
+          layerId: owner.layers[0].id, field: 'pathData',
+        }],
+      },
+    })
+  })
+
   it('serializes complete QC operations across deferred capture and upload boundaries', async () => {
     installOwner()
     const camera: QcCameraMetadata = {

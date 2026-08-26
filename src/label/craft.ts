@@ -7,7 +7,12 @@ import type { CraftEffect, CraftType, ImageLayer, LabelAreaConfig, LabelLayer, S
 import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
 import { resolveCarrierSurface } from './paper'
-import { canRenderMaskLayer, isRenderableWhiteUnderbaseLayer, proveRenderedWhiteUnderbase } from './whiteUnderbase'
+import {
+  canRenderMaskLayer,
+  isRenderableWhiteUnderbaseLayer,
+  readWhiteUnderbaseRasterSignature,
+  whiteUnderbaseIntentKey,
+} from './whiteUnderbase'
 
 export type CraftScope = 'layer' | 'global'
 export type MaskChannel = 'metalness' | 'roughness' | 'bump'
@@ -836,6 +841,115 @@ export interface CarrierMaskResult {
   whiteUnderbase?: HTMLCanvasElement
 }
 
+interface RendererWhiteUnderbaseProof {
+  areaId: string
+  bakeVersion: number
+  intentKey: string
+  rasterSignature: string
+  revisionToken: object
+}
+
+type WhiteUnderbaseProofArea = Pick<
+  LabelAreaConfig,
+  'id' | 'carrier' | 'substrate' | 'paper' | 'legacyPaperCarrier' | 'layers' | 'globalCraft' | 'fonts'
+>
+
+export interface WhiteUnderbaseProofBake {
+  whiteUnderbase?: HTMLCanvasElement
+  version?: number
+}
+
+declare const whiteUnderbaseAuthorizationBrand: unique symbol
+export interface WhiteUnderbaseAuthorization {
+  readonly [whiteUnderbaseAuthorizationBrand]: true
+}
+
+const rendererWhiteUnderbaseProofs = new WeakMap<HTMLCanvasElement, RendererWhiteUnderbaseProof>()
+const latestRendererWhiteUnderbaseRevision = new Map<string, object>()
+const activeWhiteUnderbaseAuthorizations = new WeakMap<object, RendererWhiteUnderbaseProof & {
+  canvas: HTMLCanvasElement
+}>()
+
+function beginRendererWhiteUnderbaseRevision(areaId: string, bakeVersion: number | undefined): object | undefined {
+  if (!Number.isSafeInteger(bakeVersion) || (bakeVersion ?? 0) <= 0) {
+    latestRendererWhiteUnderbaseRevision.delete(areaId)
+    return undefined
+  }
+  const revisionToken = Object.freeze({})
+  latestRendererWhiteUnderbaseRevision.set(areaId, revisionToken)
+  return revisionToken
+}
+
+function mintRendererWhiteUnderbaseProof(
+  canvas: HTMLCanvasElement,
+  area: WhiteUnderbaseProofArea,
+  bakeVersion: number | undefined,
+  revisionToken: object | undefined,
+): boolean {
+  const signature = readWhiteUnderbaseRasterSignature(canvas)
+  if (!signature?.hasSelectivePixels) {
+    rendererWhiteUnderbaseProofs.delete(canvas)
+    return false
+  }
+  if (revisionToken && latestRendererWhiteUnderbaseRevision.get(area.id) === revisionToken) {
+    rendererWhiteUnderbaseProofs.set(canvas, {
+      areaId: area.id,
+      bakeVersion: bakeVersion!,
+      intentKey: whiteUnderbaseIntentKey(area),
+      rasterSignature: signature.key,
+      revisionToken,
+    })
+  }
+  return true
+}
+
+/** Verifies renderer provenance, current intent/version, and every current RGBA pixel. */
+export function isRendererProvenWhiteUnderbase(
+  area: WhiteUnderbaseProofArea,
+  bake: WhiteUnderbaseProofBake | undefined,
+  authorization?: WhiteUnderbaseAuthorization,
+): bake is WhiteUnderbaseProofBake & { whiteUnderbase: HTMLCanvasElement; version: number } {
+  const canvas = bake?.whiteUnderbase
+  if (!canvas || !Number.isSafeInteger(bake.version)) return false
+  const proof = rendererWhiteUnderbaseProofs.get(canvas)
+  if (!proof
+    || proof.areaId !== area.id
+    || proof.bakeVersion !== bake.version
+    || latestRendererWhiteUnderbaseRevision.get(area.id) !== proof.revisionToken
+    || proof.intentKey !== whiteUnderbaseIntentKey(area)) return false
+  const active = authorization ? activeWhiteUnderbaseAuthorizations.get(authorization) : undefined
+  if (active
+    && active.canvas === canvas
+    && active.areaId === proof.areaId
+    && active.bakeVersion === proof.bakeVersion
+    && active.intentKey === proof.intentKey
+    && active.rasterSignature === proof.rasterSignature) return true
+  const current = readWhiteUnderbaseRasterSignature(canvas)
+  return current?.hasSelectivePixels === true && current.key === proof.rasterSignature
+}
+
+/**
+ * Shares one full current-pixel verification with synchronous consumers only.
+ * The opaque authorization expires before this function returns, so retaining
+ * it cannot authorize a later mutation.
+ */
+export function withRendererWhiteUnderbaseAuthorization<T>(
+  area: WhiteUnderbaseProofArea,
+  bake: WhiteUnderbaseProofBake | undefined,
+  consume: (authorization: WhiteUnderbaseAuthorization | undefined) => T,
+): T {
+  if (!isRendererProvenWhiteUnderbase(area, bake)) return consume(undefined)
+  const canvas = bake.whiteUnderbase
+  const proof = rendererWhiteUnderbaseProofs.get(canvas)!
+  const authorization = Object.freeze({}) as WhiteUnderbaseAuthorization
+  activeWhiteUnderbaseAuthorizations.set(authorization, { ...proof, canvas })
+  try {
+    return consume(authorization)
+  } finally {
+    activeWhiteUnderbaseAuthorizations.delete(authorization)
+  }
+}
+
 /**
  * Carrier-aware mask generation. Substrate-backed labels retain their legacy
  * full-surface PBR defaults; carrier-free artwork allocates only channels with
@@ -845,8 +959,10 @@ export function renderCarrierMasks(
   width: number,
   height: number,
   drawLayer: (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode) => boolean | void,
-  area: Pick<LabelAreaConfig, 'carrier' | 'substrate' | 'paper' | 'legacyPaperCarrier' | 'layers' | 'globalCraft'>,
+  area: WhiteUnderbaseProofArea,
+  bakeVersion?: number,
 ): CarrierMaskResult {
+  const revisionToken = beginRendererWhiteUnderbaseRevision(area.id, bakeVersion)
   const surface = resolveCarrierSurface(area)
   if (!surface.renderDecoration) return {}
   const safeDrawLayer = (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode): boolean => {
@@ -877,7 +993,7 @@ export function renderCarrierMasks(
           drawFailed = true
         }
       }
-      if (!drawFailed && proveRenderedWhiteUnderbase(whiteUnderbase)) result.whiteUnderbase = whiteUnderbase
+      if (!drawFailed && mintRendererWhiteUnderbaseProof(whiteUnderbase, area, bakeVersion, revisionToken)) result.whiteUnderbase = whiteUnderbase
     }
     return result
   }
@@ -966,7 +1082,7 @@ export function renderCarrierMasks(
       roughness.fillRect(0, 0, width, height)
     }
   }
-  if (result.whiteUnderbase && (whiteUnderbaseDrawFailed || !proveRenderedWhiteUnderbase(result.whiteUnderbase))) {
+  if (result.whiteUnderbase && (whiteUnderbaseDrawFailed || !mintRendererWhiteUnderbaseProof(result.whiteUnderbase, area, bakeVersion, revisionToken))) {
     delete result.whiteUnderbase
   }
   return result

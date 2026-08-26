@@ -2,6 +2,7 @@
 
 import { legacyFontId } from '../label/fontCatalog'
 import { hasValidLegacyPaperCarrierProvenance, resolveLabelPaper } from '../label/paper'
+import { validateVectorPath } from '../label/vectorPathValidation'
 import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
@@ -362,6 +363,8 @@ function normalizeLayer(raw: unknown): LabelLayer {
       raw.pathViewBox.forEach((value, index) => {
         if (typeof value !== 'number' || !Number.isFinite(value)) layerError(`pathViewBox[${index}] 必须是有限数字`)
       })
+      const vectorIssue = validateVectorPath(raw.pathData, raw.pathViewBox)
+      if (vectorIssue) layerError(`${vectorIssue.field} ${vectorIssue.message}`)
     }
     if (raw.fillRule !== undefined && raw.fillRule !== 'nonzero' && raw.fillRule !== 'evenodd') layerError('fillRule 无效')
     validateShapeGeometry(raw.geometry)

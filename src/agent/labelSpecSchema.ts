@@ -3,6 +3,7 @@ import labelSpecV2Schema from './label-spec-v2.schema.json'
 import validateV2 from './generated/labelSpecV2Validator'
 import type { CarrierMode, ProcessIntent } from './designContracts'
 import type { DesignBinding, LayerDesignMetrics, PhysicalArtboard, SubstrateSpec, TargetAspectPolicy } from '../label/types'
+import { validateVectorPath } from '../label/vectorPathValidation'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -179,6 +180,20 @@ export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
     }
   }
   const normalized = structuredClone(migrated.spec) as LabelSpecV2
+  const vectorIssues: LabelSpecIssue[] = []
+  for (const [areaIndex, area] of normalized.areas.entries()) {
+    for (const [layerIndex, layer] of area.layers.entries()) {
+      if (layer.type !== 'shape' || layer.shape !== 'path') continue
+      const issue = validateVectorPath(layer.pathData, layer.pathViewBox)
+      if (!issue) continue
+      vectorIssues.push({
+        path: `/areas/${areaIndex}/layers/${layerIndex}/${issue.field}`,
+        message: issue.message,
+        keyword: 'invalid-vector-path',
+      })
+    }
+  }
+  if (vectorIssues.length > 0) return { ok: false, issues: vectorIssues, warnings: migrated.warnings }
   for (const area of normalized.areas) {
     if (area.carrier === undefined && isRecord(area.paper) && area.paper.enabled === true) {
       area.carrier = 'applied_label'

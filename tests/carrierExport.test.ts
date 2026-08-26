@@ -17,13 +17,14 @@ vi.mock('../src/glb/uvRemap', () => ({
 vi.mock('../src/glb/textures', () => external)
 
 import { prepareAllAreas } from '../src/app/areaExporter'
-import { createAreaChannelArtifacts } from '../src/agent/artifactExport'
-import { renderCarrierMasks } from '../src/label/craft'
+import { createAreaChannelArtifacts, createChannelArtifact } from '../src/agent/artifactExport'
+import { renderCarrierMasks, withRendererWhiteUnderbaseAuthorization } from '../src/label/craft'
 import { buildPrintManifest } from '../src/label/printReadiness'
 
 class NeutralContext {
   fillStyle: string | CanvasGradient | CanvasPattern = '#000000'
   tone: number | undefined
+  getImageDataCalls = 0
   private pixels = new Uint8ClampedArray()
 
   constructor(private readonly canvas: NeutralCanvas) {}
@@ -46,6 +47,7 @@ class NeutralContext {
   }
 
   getImageData(x: number, y: number, width: number, height: number): ImageData {
+    this.getImageDataCalls += 1
     const data = new Uint8ClampedArray(width * height * 4)
     for (let py = 0; py < height; py += 1) {
       for (let px = 0; px < width; px += 1) {
@@ -88,6 +90,15 @@ function whiteLayer(overrides: Partial<LabelLayer> = {}): LabelLayer {
     processes: [{ process: 'white_underbase', requiredMask: 'white_underbase', spotName: 'WHITE' }],
     ...overrides,
   } as LabelLayer
+}
+
+function renderWhiteBake(target: LabelAreaConfig, version = 7) {
+  const masks = renderCarrierMasks(8, 8, (context, _layer, gray) => {
+    context.fillStyle = `rgb(${gray},${gray},${gray})`
+    context.fillRect(0, 0, 4, 4)
+    return true
+  }, target, version)
+  return { color: canvas(1), ...masks, version }
 }
 
 const originalDocument = globalThis.document
@@ -164,12 +175,7 @@ describe('carrier-aware channel export', () => {
 
   it('publishes only a renderer-proven selective white-underbase artifact and keeps manifest in lockstep', async () => {
     const target = area('clear_label', [whiteLayer()])
-    const masks = renderCarrierMasks(8, 8, (context, _layer, gray) => {
-      context.fillStyle = `rgb(${gray},${gray},${gray})`
-      context.fillRect(0, 0, 4, 4)
-      return true
-    }, target)
-    const bake = { color: canvas(1), ...masks }
+    const bake = renderWhiteBake(target)
     const artifacts = await createAreaChannelArtifacts([target], { front: bake })
 
     expect(artifacts.map((artifact) => [artifact.id, artifact.fileName, artifact.channel])).toEqual([
@@ -178,6 +184,164 @@ describe('carrier-aware channel export', () => {
     ])
     expect(buildPrintManifest(target, bake).separations).toEqual(['white_underbase', 'WHITE'])
     expect(external.canvasToPngBytes).toHaveBeenCalledTimes(2)
+  })
+
+  it('shares one current-pixel verification across synchronous artifact and manifest consumption', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(target)
+    const white = bake.whiteUnderbase as unknown as NeutralCanvas
+    const callsBeforePublication = white.context.getImageDataCalls
+    let manifest: ReturnType<typeof buildPrintManifest> | undefined
+    let artifact: ReturnType<typeof createChannelArtifact> | undefined
+
+    withRendererWhiteUnderbaseAuthorization(target, bake, (authorization) => {
+      manifest = buildPrintManifest(target, bake, authorization)
+      artifact = createChannelArtifact(target, bake, 'white_underbase', authorization)
+    })
+
+    expect(manifest?.separations).toEqual(['white_underbase', 'WHITE'])
+    await expect(artifact).resolves.toMatchObject({ channel: 'white_underbase' })
+    expect(white.context.getImageDataCalls - callsBeforePublication).toBe(1)
+  })
+
+  it('verifies current pixels once for a manifest with multiple white contributors', () => {
+    const target = area('clear_label', [
+      whiteLayer(),
+      whiteLayer({ id: 'second-white', x: 4, zIndex: 1 }),
+    ])
+    const bake = renderWhiteBake(target)
+    const white = bake.whiteUnderbase as unknown as NeutralCanvas
+    const callsBeforePublication = white.context.getImageDataCalls
+
+    expect(buildPrintManifest(target, bake).separations).toEqual(['white_underbase', 'WHITE'])
+    expect(white.context.getImageDataCalls - callsBeforePublication).toBe(1)
+  })
+
+  it('does not transfer a renderer proof to a different area id', async () => {
+    const rendered = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(rendered)
+    const current = { ...rendered, id: 'back', name: 'Back' }
+
+    expect((await createAreaChannelArtifacts([current], { back: bake })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(current, bake).separations).toEqual([])
+  })
+
+  it('does not transfer a renderer proof to another bake version', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(target, 7)
+    const stale = { ...bake, version: 8 }
+
+    expect((await createAreaChannelArtifacts([target], { front: stale })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(target, stale).separations).toEqual([])
+  })
+
+  it('retires an older same-intent raster after a newer area revision renders', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const stale = renderWhiteBake(target, 7)
+    const current = renderWhiteBake(target, 8)
+
+    expect((await createAreaChannelArtifacts([target], { front: stale })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(target, stale).separations).toEqual([])
+    expect((await createAreaChannelArtifacts([target], { front: current })).map((artifact) => artifact.channel)).toEqual([
+      'color', 'white_underbase',
+    ])
+    expect(buildPrintManifest(target, current).separations).toEqual(['white_underbase', 'WHITE'])
+  })
+
+  it.each([
+    ['layer id', (target: LabelAreaConfig) => ({
+      ...target,
+      layers: target.layers.map((layer) => ({ ...layer, id: 'replacement-white' })),
+    })],
+    ['geometry', (target: LabelAreaConfig) => ({
+      ...target,
+      layers: target.layers.map((layer) => ({ ...layer, width: 6 })),
+    })],
+    ['process', (target: LabelAreaConfig) => ({
+      ...target,
+      layers: target.layers.map((layer) => ({
+        ...layer,
+        processes: [{ process: 'white_underbase' as const, requiredMask: 'white_underbase' as const, spotName: 'OPAQUE_WHITE' }],
+      })),
+    })],
+    ['visibility', (target: LabelAreaConfig) => ({
+      ...target,
+      layers: target.layers.map((layer) => ({ ...layer, visible: false })),
+    })],
+    ['opacity', (target: LabelAreaConfig) => ({
+      ...target,
+      layers: target.layers.map((layer) => ({ ...layer, opacity: 0.5 })),
+    })],
+  ] as const)('invalidates proof after current %s intent changes', async (_label, mutate) => {
+    const rendered = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(rendered)
+    const current = mutate(rendered)
+
+    expect((await createAreaChannelArtifacts([current], { front: bake })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(current, bake).separations).toEqual([])
+  })
+
+  it('invalidates proof after the proven pixels are cleared', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(target)
+    const white = bake.whiteUnderbase as unknown as NeutralCanvas
+    white.context.fillStyle = 'rgb(0,0,0)'
+    white.context.fillRect(0, 0, white.width, white.height)
+
+    expect((await createAreaChannelArtifacts([target], { front: bake })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(target, bake).separations).toEqual([])
+  })
+
+  it('invalidates proof after a nonempty proven raster is mutated', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(target)
+    const white = bake.whiteUnderbase as unknown as NeutralCanvas
+    white.context.fillStyle = 'rgb(255,255,255)'
+    white.context.fillRect(7, 7, 1, 1)
+
+    expect((await createAreaChannelArtifacts([target], { front: bake })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(target, bake).separations).toEqual([])
+  })
+
+  it('fails closed when a proven raster becomes unreadable before consumption', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(target)
+    const white = bake.whiteUnderbase as unknown as NeutralCanvas
+    vi.spyOn(white.context, 'getImageData').mockImplementation(() => { throw new Error('tainted after proof') })
+
+    expect((await createAreaChannelArtifacts([target], { front: bake })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(target, bake).separations).toEqual([])
+  })
+
+  it('does not transfer proof to a pixel-identical cloned canvas', async () => {
+    const target = area('clear_label', [whiteLayer()])
+    const bake = renderWhiteBake(target)
+    const clone = new NeutralCanvas()
+    clone.width = 8
+    clone.height = 8
+    clone.context.fillStyle = 'rgb(0,0,0)'
+    clone.context.fillRect(0, 0, 8, 8)
+    clone.context.fillStyle = 'rgb(255,255,255)'
+    clone.context.fillRect(0, 0, 4, 4)
+    const injected = { ...bake, whiteUnderbase: clone as unknown as HTMLCanvasElement }
+
+    expect((await createAreaChannelArtifacts([target], { front: injected })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(target, injected).separations).toEqual([])
+  })
+
+  it('binds image source identity into renderer proof', async () => {
+    const image = {
+      id: 'white-image', kind: 'image', src: 'opaque-a.png', naturalWidth: 8, naturalHeight: 8,
+      x: 4, y: 4, width: 4, height: 4, rotation: 0, opacity: 1, visible: true,
+      locked: false, zIndex: 0, craft: [],
+      processes: [{ process: 'white_underbase', requiredMask: 'white_underbase', spotName: 'WHITE' }],
+    } as LabelLayer
+    const rendered = area('clear_label', [image])
+    const bake = renderWhiteBake(rendered)
+    const current = { ...rendered, layers: [{ ...image, src: 'opaque-b.png' } as LabelLayer] }
+
+    expect((await createAreaChannelArtifacts([current], { front: bake })).map((artifact) => artifact.channel)).toEqual(['color'])
+    expect(buildPrintManifest(current, bake).separations).toEqual([])
   })
 
   it.each([

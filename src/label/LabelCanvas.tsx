@@ -360,7 +360,9 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       } else drawShapeMask(ctx, layer, gray, mode)
       return true
     }
-    const masks = renderCarrierMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, cfg)
+    const previousVersion = useLabelStore.getState().bakeMap[cfg.id]?.version ?? 0
+    const version = Math.max(Date.now(), previousVersion + 1)
+    const masks = renderCarrierMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, cfg, version)
     const textOverflowLayerIds = renderLayers.flatMap((layer) => {
       if (layer.kind !== 'text' || !layer.visible) return []
       const measurementCanvas = document.createElement('canvas')
@@ -371,8 +373,6 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         ? [layer.id]
         : []
     })
-    const previousVersion = useLabelStore.getState().bakeMap[cfg.id]?.version ?? 0
-    const version = Math.max(Date.now(), previousVersion + 1)
     setBake(cfg.id, {
       color,
       ...masks,

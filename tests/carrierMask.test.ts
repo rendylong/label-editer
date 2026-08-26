@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createChannelArtifact } from '../src/agent/artifactExport'
 import { genericShapePaintProps, renderCarrierMasks, shapeUsesOpenStroke } from '../src/label/craft'
-import { buildPrintManifest } from '../src/label/printReadiness'
+import { buildPrintManifest, validatePrintReadiness } from '../src/label/printReadiness'
 import type { LabelAreaConfig, LabelLayer } from '../src/label/types'
 import { useLabelStore } from '../src/state/stores'
 
@@ -202,6 +202,13 @@ describe('carrier mask raster production', () => {
     expect(() => shapeUsesOpenStroke(malformed as Extract<LabelLayer, { kind: 'shape' }>)).not.toThrow()
   })
 
+  it('keeps a valid bounded open Task 5 path renderable in preview helpers', () => {
+    const open = layer({ shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1] })
+
+    expect(shapeUsesOpenStroke(open as Extract<LabelLayer, { kind: 'shape' }>)).toBe(true)
+    expect(() => genericShapePaintProps(open as Extract<LabelLayer, { kind: 'shape' }>, undefined)).not.toThrow()
+  })
+
   it('clears a stale white-underbase channel on the next non-rendering rebake', () => {
     const declared = layer({
       processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
@@ -242,6 +249,10 @@ describe('carrier mask raster production', () => {
     const bake = useLabelStore.getState().bakeMap[target.id]
     expect(bake.version).toBe(2)
     expect(bake).not.toHaveProperty('whiteUnderbase')
+    expect(validatePrintReadiness(target)).toContainEqual(expect.objectContaining({
+      severity: 'error', code: 'invalid-vector-path', areaId: target.id,
+      layerId: target.layers[0].id, fields: ['pathData'],
+    }))
     expect(buildPrintManifest(target, bake).separations).not.toContain('white_underbase')
     await expect(createChannelArtifact(target, bake, 'white_underbase')).rejects.toThrow(/没有 white_underbase 烘焙通道/)
   })

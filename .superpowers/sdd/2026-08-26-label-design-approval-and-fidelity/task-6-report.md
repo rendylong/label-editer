@@ -437,3 +437,94 @@ Tests       1 passed | 1 skipped (2)
 - Confirmed prior round replace-PBR, provenance, one-sided packing, boundary, and optional-channel compatibility behavior remains covered by full-suite and plugin E2E tests.
 
 All readiness and separation results remain digital, unverified production evidence. This fix does not certify physical white-ink coverage/opacity, adhesion, registration, abrasion, film, foil, die cutting, in-mold compatibility, tooling, supplier capability, press readiness, or GLB shader simulation of white ink.
+
+## Fix round 4
+
+### Review findings and RED evidence
+
+The fourth review found two remaining P1 classes. First, renderer proof was only a canvas-identity brand: it did not bind the area, exact current contributor intent, bake revision, latest renderer revision, or unchanged pixel contents, and the public proof function could brand an arbitrary canvas. Second, malformed or unsupported bounded-vector input could pass Project/Label Spec boundaries, be caught as empty geometry during rendering, and still leave browser readiness at warning severity.
+
+The primary proof/vector regression set failed before implementation with:
+
+```text
+pnpm vitest run tests/carrierExport.test.ts tests/carrierMask.test.ts tests/projectSchema.test.ts tests/labelSpecV2.test.ts tests/agentBrowserRuntime.test.ts
+Test Files  5 failed (5)
+Tests       18 failed | 124 passed (142)
+```
+
+The single-publication scan-sharing regression also failed while the scoped authorization helper did not yet exist. A final self-review added a distinct stale-revision regression: proof N still authorized its own stale bake object after same-intent revision N+1 had rendered. It failed before the latest-revision binding was added:
+
+```text
+pnpm vitest run tests/carrierExport.test.ts -t 'retires an older same-intent raster'
+Test Files  1 failed (1)
+Tests       1 failed | 23 skipped (24)
+```
+
+### Implemented corrections
+
+| Finding | Correction |
+| --- | --- |
+| Proof scope and provenance | Proof minting is now private to `renderCarrierMasks`; the public arbitrary-canvas grant function was removed. Each proof binds the internally created canvas to area id, bake version, the renderer's latest per-area revision token, and a canonical key of the complete current visible white-underbase contributor objects. The key therefore covers layer identity, geometry, source, process, visibility, opacity, carrier/substrate/paper context, and font inputs. A newer render, including a failed/no-white render, retires the prior revision token. |
+| Pixel immutability | Minting scans every RGBA pixel and records a deterministic four-lane 128-bit signature including raster dimensions. Consumption scans every current pixel again and fails closed on changed dimensions/content, clearing, unreadable/tainted data, a cloned/injected canvas, stale intent, stale revision, or area/version mismatch. A nonempty mutation is covered separately from a black clear. |
+| Artifact/manifest lockstep | An unforgeable, callback-scoped authorization can share one completed current-pixel verification across synchronous manifest and artifact consumers. It is removed in `finally` before the callback returns and cannot authorize later mutation. Direct calls still reverify. Manifest generation also verifies once when several white contributors exist. Legitimate current rasters authorize both outputs; all stale/injected paths authorize neither. |
+| Authoritative vector validation | A shared validator invokes the bounded Task 5 `parseNormalizedSvgPath` implementation and requires a finite four-number viewBox with strictly positive width and height. Project import rejects malformed/unsupported paths and non-positive viewBoxes. Label Spec validation returns structured `invalid-vector-path` issues before `applyStructuredLabelSpec` can create runtime layers. The accepted SVG command subset was not broadened. |
+| Runtime mutation/readiness | Runtime path mutation produces a blocking `invalid-vector-path` issue with area id, layer id, field, and error severity. Browser validation preserves that severity and reports `ready: false`. Rendering retains its catch only as a last-resort stale-channel clear; malformed geometry cannot be represented as a valid ready design. Existing valid open Task 5 paths remain accepted and retain their preview/mask rendering coverage. |
+
+### Bounded scan cost
+
+- A 4096×4096 RGBA raster contains 16,777,216 pixels / 64 MiB. Each `getImageData` allocation is capped at 262,144 pixels / 1 MiB, so an exact 4096-class pass uses 64 chunks and does not sample or early-return.
+- On this host, an isolated warm CPU loop using the production four-lane per-pixel signature over 64 MiB measured 334.2 ms, 325.7 ms, and 326.9 ms. This excludes browser `getImageData` copying and PNG encoding; browser/device wall time is expected to vary and may be higher.
+- A production bake performs one renderer-time mint scan. A successful current-white publication performs one current-pixel scan per white-bearing area and shares that result across its manifest and PNG authorization. Separate API calls intentionally rescan because no authorization survives the synchronous publication scope.
+
+### Final verification
+
+Focused GREEN:
+
+```text
+pnpm vitest run tests/carrierExport.test.ts tests/carrierMask.test.ts tests/projectSchema.test.ts tests/labelSpecV2.test.ts tests/agentBrowserRuntime.test.ts
+Test Files  5 passed (5)
+Tests       147 passed (147)
+```
+
+Affected integration suite:
+
+```text
+pnpm vitest run tests/carrierMask.test.ts tests/carrierExport.test.ts tests/carrierBehavior.test.ts tests/artifactExport.test.ts tests/labelImageReadiness.test.ts tests/bakeLifecycle.test.ts tests/renderingFidelity.test.ts tests/craft.test.ts tests/shapeGeometry.test.ts tests/svgPath.test.ts tests/exportReadiness.test.ts tests/agentBrowserRuntime.test.ts tests/projectSchema.test.ts tests/labelSpecV2.test.ts tests/projectControl.test.ts tests/exportOverlay.test.ts tests/export-roundtrip.test.ts tests/sceneTexture.test.ts tests/rebuildWorkerProtocol.test.ts tests/capabilityGaps.test.ts tests/agentBridge.test.ts tests/cliProtocol.test.ts tests/qcOutput.test.ts
+Test Files  23 passed (23)
+Tests       525 passed (525)
+```
+
+Full suite:
+
+```text
+pnpm test
+Test Files  71 passed (71)
+Tests       927 passed | 1 skipped (928)
+```
+
+Production build:
+
+```text
+pnpm build
+PASS — TypeScript and Vite production build completed.
+```
+
+Vite emitted the existing browser externalization, mixed static/dynamic import, and large-chunk warnings; no build error occurred.
+
+Dedicated plugin browser E2E:
+
+```text
+pnpm test:plugin-e2e
+Test Files  1 passed (1)
+Tests       1 passed | 1 skipped (2)
+```
+
+### Fix-round self-review and certification boundary
+
+- Confirmed old revision proof is retired even when its own stale bake retains the matching old version and unchanged intent; the newest legitimate raster remains authorized.
+- Confirmed area id, bake mismatch, layer id, geometry, process, visibility, opacity, image source, black clear, nonempty pixel mutation, unreadable pixels, and pixel-identical clone/injection each fail artifact and manifest authorization.
+- Confirmed exact current-pixel verification is shared only within one synchronous publication scope and cannot be retained for a later mutation.
+- Confirmed malformed, unsupported, zero-width, and negative-height vector inputs fail at Project and Label Spec/apply boundaries; runtime mutations remain blocking and clear prior white output; valid bounded open paths remain accepted/rendered.
+- Confirmed prior replace-PBR clearing, legacy provenance, boundary handling, one-sided packing, image-source identity, neutral masks, optional-channel behavior, and four-channel GLB/QC contracts remain covered by affected/full/plugin E2E verification.
+
+All validation, raster proof, manifests, and exported separations remain digital runtime evidence, not physical-production certification. This fix does not certify press readiness, physical white-ink coverage or opacity, adhesion, registration, abrasion, film, foil, die cutting, in-mold compatibility, tooling, supplier capability, or GLB shader simulation of white ink.

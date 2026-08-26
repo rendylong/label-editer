@@ -3,9 +3,14 @@ import type { BakeInput } from '../app/exportTypes'
 import { serializeLabelProject } from '../app/projectSchema'
 import { exportGlb, type CrossCheckResult } from '../glb/rebuild'
 import { canvasToPngBytes } from '../glb/textures'
-import { buildPrintManifest } from '../label/printReadiness'
+import { buildPrintManifest, type PrintManifest } from '../label/printReadiness'
 import type { LabelAreaConfig } from '../label/types'
-import { hasRenderableWhiteUnderbaseDeclaration, isRendererProvenWhiteUnderbase } from '../label/whiteUnderbase'
+import { hasRenderableWhiteUnderbaseDeclaration } from '../label/whiteUnderbase'
+import {
+  isRendererProvenWhiteUnderbase,
+  withRendererWhiteUnderbaseAuthorization,
+  type WhiteUnderbaseAuthorization,
+} from '../label/craft'
 
 export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase'
 
@@ -53,11 +58,17 @@ export function createPrintArtifact(area: LabelAreaConfig, bake?: BakeInput): Br
 }
 
 export function createAggregatePrintArtifact(areas: LabelAreaConfig[], bakeMap?: Record<string, BakeInput>): BrowserArtifact {
+  return createAggregatePrintArtifactFromManifests(
+    areas.map((area) => buildPrintManifest(area, bakeMap?.[area.id])),
+  )
+}
+
+function createAggregatePrintArtifactFromManifests(manifests: PrintManifest[]): BrowserArtifact {
   return {
     id: 'print-manifest',
     fileName: 'print-manifest.json',
     mimeType: 'application/json',
-    bytes: jsonBytes({ version: 1, areas: areas.map((area) => buildPrintManifest(area, bakeMap?.[area.id])) }),
+    bytes: jsonBytes({ version: 1, areas: manifests }),
   }
 }
 
@@ -65,10 +76,11 @@ export async function createChannelArtifact(
   area: LabelAreaConfig,
   bake: BakeInput,
   channel: ArtifactChannel,
+  whiteUnderbaseAuthorization?: WhiteUnderbaseAuthorization,
 ): Promise<BrowserArtifact> {
   if (channel === 'white_underbase' && (
     !hasRenderableWhiteUnderbaseDeclaration(area)
-    || !isRendererProvenWhiteUnderbase(bake.whiteUnderbase)
+    || !isRendererProvenWhiteUnderbase(area, bake, whiteUnderbaseAuthorization)
   )) {
     throw new Error(`贴标区域「${area.name}」没有 white_underbase 烘焙通道（缺少当前 renderer proof）`)
   }
@@ -90,20 +102,32 @@ export async function createAreaChannelArtifacts(
   areas: LabelAreaConfig[],
   bakeMap: Record<string, BakeInput>,
 ): Promise<BrowserArtifact[]> {
+  return (await createAreaPublication(areas, bakeMap, false)).artifacts
+}
+
+async function createAreaPublication(
+  areas: LabelAreaConfig[],
+  bakeMap: Record<string, BakeInput>,
+  includeManifests: boolean,
+): Promise<{ artifacts: BrowserArtifact[]; manifests: PrintManifest[] }> {
   const artifacts: BrowserArtifact[] = []
+  const manifests: PrintManifest[] = []
   for (const area of areas) {
     const bake = bakeMap[area.id]
     if (!bake) throw new Error(`贴标区域「${area.name}」缺少烘焙结果`)
-    for (const channel of ['color', 'metalness', 'roughness', 'bump', 'white_underbase'] as const) {
-      const present = channel === 'white_underbase' ? bake.whiteUnderbase : bake[channel]
-      const declared = channel !== 'white_underbase' || (
-        hasRenderableWhiteUnderbaseDeclaration(area)
-        && isRendererProvenWhiteUnderbase(bake.whiteUnderbase)
-      )
-      if (present && declared) artifacts.push(await createChannelArtifact(area, bake, channel))
+    for (const channel of ['color', 'metalness', 'roughness', 'bump'] as const) {
+      if (bake[channel]) artifacts.push(await createChannelArtifact(area, bake, channel))
     }
+    let whiteUnderbaseArtifact: Promise<BrowserArtifact> | undefined
+    withRendererWhiteUnderbaseAuthorization(area, bake, (authorization) => {
+      if (includeManifests) manifests.push(buildPrintManifest(area, bake, authorization))
+      if (bake.whiteUnderbase && hasRenderableWhiteUnderbaseDeclaration(area) && authorization) {
+        whiteUnderbaseArtifact = createChannelArtifact(area, bake, 'white_underbase', authorization)
+      }
+    })
+    if (whiteUnderbaseArtifact) artifacts.push(await whiteUnderbaseArtifact)
   }
-  return artifacts
+  return { artifacts, manifests }
 }
 
 export interface CreateGlbArtifactInput {
@@ -154,15 +178,16 @@ export async function createExportBundle(input: CreateGlbArtifactInput & { norma
   artifacts: BrowserArtifact[]
   crossCheck: CrossCheckResult
 }> {
-  const [channels, glb] = await Promise.all([
-    createAreaChannelArtifacts(input.areas, input.bakeMap),
+  const [publication, glb] = await Promise.all([
+    createAreaPublication(input.areas, input.bakeMap, true),
     createGlbArtifact(input),
   ])
+  const printArtifact = createAggregatePrintArtifactFromManifests(publication.manifests)
   const artifacts = [
     glb.artifact,
     createProjectArtifact(input.modelName, input.areas),
-    createAggregatePrintArtifact(input.areas, input.bakeMap),
-    ...channels,
+    printArtifact,
+    ...publication.artifacts,
   ]
   if (input.normalizedSpec !== undefined) {
     artifacts.splice(2, 0, {

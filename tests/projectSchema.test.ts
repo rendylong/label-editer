@@ -117,6 +117,29 @@ afterEach(() => {
 })
 
 describe('label project v3', () => {
+  it.each([
+    ['malformed path syntax', 'M0 0 L', [0, 0, 1, 1], 'pathData'],
+    ['unsupported path command', 'M0 0 R1 1', [0, 0, 1, 1], 'pathData'],
+    ['zero-width viewBox', 'M0 0L1 1', [0, 0, 0, 1], 'pathViewBox'],
+    ['negative-height viewBox', 'M0 0L1 1', [0, 0, 1, -1], 'pathViewBox'],
+  ] as const)('rejects %s at the project import boundary', (_label, pathData, pathViewBox, field) => {
+    const project = physicalProjectFixture()
+    const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>
+    layers[1] = { ...layers[1], pathData, pathViewBox }
+
+    expect(() => parseLabelProject(project)).toThrow(field)
+  })
+
+  it('accepts a valid bounded open Task 5 path at the project boundary', () => {
+    const project = physicalProjectFixture()
+    const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>
+    layers[1] = { ...layers[1], pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1] }
+
+    expect(parseLabelProject(project).areas[0].layers[1]).toMatchObject({
+      kind: 'shape', shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1],
+    })
+  })
+
   it('round-trips physical metrics without changing bake dimensions', () => {
     const project = parseLabelProject(physicalProjectFixture())
     const serialized = serializeLabelProject('bottle.glb', project.areas)

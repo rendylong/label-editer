@@ -2,7 +2,9 @@ import type { LabelAreaConfig } from './types'
 import type { BakeInput } from '../app/exportTypes'
 import { carrierReadinessChecks, type CarrierReadinessCode } from './exportReadiness'
 import { resolveCarrierBoundary, resolveCarrierSurface } from './paper'
-import { isRenderableWhiteUnderbaseLayer, isRendererProvenWhiteUnderbase } from './whiteUnderbase'
+import { isRenderableWhiteUnderbaseLayer } from './whiteUnderbase'
+import { validateVectorPath } from './vectorPathValidation'
+import { isRendererProvenWhiteUnderbase, type WhiteUnderbaseAuthorization } from './craft'
 
 export type CarrierInvariantIssueCode =
   | 'carrier-forbidden-substrate'
@@ -15,10 +17,12 @@ export type CarrierInvariantIssueCode =
   | 'invalid-applied-substrate-opacity'
 
 export interface PrintReadinessIssue {
-  code: 'missing-print-spec' | 'text-below-minimum-height' | 'foil-without-spot-name' | 'missing-bleed' | CarrierInvariantIssueCode | CarrierReadinessCode
+  code: 'missing-print-spec' | 'text-below-minimum-height' | 'foil-without-spot-name' | 'missing-bleed' | 'invalid-vector-path' | CarrierInvariantIssueCode | CarrierReadinessCode
   message: string
+  severity?: 'error' | 'warning'
   areaId?: string
   layerId?: string
+  field?: string
   fields?: string[]
 }
 
@@ -123,6 +127,16 @@ export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIss
   }
   const mmPerPixel = spec ? spec.physicalHeightMm / Math.max(area.canvas.height, 1) : null
   for (const layer of area.layers) {
+    if (layer.kind === 'shape' && layer.shape === 'path') {
+      const vectorIssue = validateVectorPath(layer.pathData, layer.pathViewBox)
+      if (vectorIssue) {
+        issues.push({
+          severity: 'error', code: 'invalid-vector-path', areaId: area.id, layerId: layer.id,
+          field: vectorIssue.field, fields: [vectorIssue.field],
+          message: `区域「${area.name}」图层「${layer.id}」的 ${vectorIssue.message}。`,
+        })
+      }
+    }
     if (spec && mmPerPixel !== null && layer.kind === 'text' && layer.visible && layer.fontSize * mmPerPixel < spec.minTextHeightMm) {
       issues.push({ code: 'text-below-minimum-height', layerId: layer.id, message: `文字「${layer.text.slice(0, 24)}」低于 ${spec.minTextHeightMm} mm 最小字高。` })
     }
@@ -135,13 +149,25 @@ export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIss
   return issues
 }
 
-export function buildPrintManifest(area: LabelAreaConfig, bake?: BakeInput): PrintManifest {
+export function buildPrintManifest(
+  area: LabelAreaConfig,
+  bake?: BakeInput,
+  whiteUnderbaseAuthorization?: WhiteUnderbaseAuthorization,
+): PrintManifest {
   if (!area.printSpec && !area.carrier) throw new Error(`贴标区域「${area.name}」尚未设置印刷规格`)
   const spec = area.printSpec
   const foilNames = area.layers.flatMap((layer) => layer.craft.flatMap((effect) => effect.type === 'foil' && effect.params.foilSpotName ? [effect.params.foilSpotName] : []))
+  const declaresWhiteUnderbase = area.layers.some((layer) => (layer.processes ?? []).some((process) => (
+    process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
+  )))
+  const rendererProvesCurrentWhiteUnderbase = declaresWhiteUnderbase
+    && isRendererProvenWhiteUnderbase(area, bake, whiteUnderbaseAuthorization)
   const declaredSeparations = area.layers.flatMap((layer) => (layer.processes ?? []).flatMap((process) => {
     const whiteUnderbase = process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
-    if (whiteUnderbase && (!isRendererProvenWhiteUnderbase(bake?.whiteUnderbase) || !isRenderableWhiteUnderbaseLayer(layer))) return []
+    if (whiteUnderbase && (
+      !rendererProvesCurrentWhiteUnderbase
+      || !isRenderableWhiteUnderbaseLayer(layer)
+    )) return []
     return [
       ...(process.requiredMask ? [process.requiredMask] : []),
       ...(process.spotName ? [process.spotName] : []),

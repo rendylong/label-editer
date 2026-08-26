@@ -267,11 +267,12 @@ function designValidation(): { ready: boolean; issues: DesignValidationIssue[] }
   for (const area of areas) {
     for (const issue of validatePrintReadiness(area)) {
       issues.push({
-        severity: 'warning',
+        severity: issue.severity ?? 'warning',
         code: issue.code,
         message: issue.message,
         areaId: area.id,
         ...(issue.layerId ? { layerId: issue.layerId } : {}),
+        ...(issue.field ? { field: issue.field } : {}),
       })
     }
   }

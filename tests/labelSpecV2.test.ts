@@ -17,6 +17,51 @@ const baseArea: LabelAreaConfig = {
 }
 
 describe('Label Spec v2', () => {
+  it.each([
+    ['malformed path syntax', 'M0 0 L', [0, 0, 1, 1], '/pathData'],
+    ['unsupported path command', 'M0 0 R1 1', [0, 0, 1, 1], '/pathData'],
+    ['zero-width viewBox', 'M0 0L1 1', [0, 0, 0, 1], '/pathViewBox'],
+    ['negative-height viewBox', 'M0 0L1 1', [0, 0, 1, -1], '/pathViewBox'],
+  ] as const)('rejects %s before structured apply', (_label, pathData, pathViewBox, expectedPath) => {
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{
+          id: 'vector', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.8, height: 0.8,
+          pathData, pathViewBox,
+        }],
+      }],
+    }
+
+    const validation = validateLabelSpec(spec)
+    expect(validation.ok).toBe(false)
+    expect(validation.issues).toContainEqual(expect.objectContaining({
+      path: expect.stringContaining(expectedPath), keyword: 'invalid-vector-path',
+    }))
+    expect(() => applyStructuredLabelSpec(baseArea, spec)).toThrow(/Label Spec 校验失败/)
+  })
+
+  it('accepts and maps a valid bounded open Task 5 path', () => {
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{
+          id: 'vector', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.8, height: 0.8,
+          pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1],
+        }],
+      }],
+    }
+
+    expect(validateLabelSpec(spec).ok).toBe(true)
+    expect(applyStructuredLabelSpec(baseArea, spec).areas[0].layers[0]).toMatchObject({
+      kind: 'shape', shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1],
+    })
+  })
+
   it('keeps the existing pixel-only Label Spec v2 fixture valid', () => {
     expect(validateLabelSpec(existingPerfumeFixture).ok).toBe(true)
   })
