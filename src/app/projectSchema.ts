@@ -2,15 +2,23 @@
 
 import { legacyFontId } from '../label/fontCatalog'
 import { resolveLabelPaper } from '../label/paper'
+import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
+  CarrierMode,
   CraftEffect,
+  DesignBinding,
   LabelAreaConfig,
   LabelAreaRange,
   LabelLayer,
+  LayerDesignMetrics,
+  PhysicalArtboard,
+  ProcessIntent,
   RemapParams,
   ShapeKind,
   ShapeLayer,
+  SubstrateSpec,
+  TargetAspectPolicy,
   TextLayer,
   UploadedFontRecord,
   LabelPrintSpec,
@@ -29,9 +37,12 @@ type UnknownRecord = Record<string, unknown>
 
 const POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 const CRAFT_TYPES = new Set(['foil', 'emboss', 'deboss', 'matte', 'uv', 'stroke'])
-const SHAPE_KINDS = new Set<ShapeKind>([
+const CARRIER_MODES = new Set<string>(layoutBlueprintV1Schema.$defs.carrier.enum)
+const PROCESS_TYPES = new Set<string>(layoutBlueprintV1Schema.$defs.process.properties.process.enum)
+const REQUIRED_MASKS = new Set<string>(layoutBlueprintV1Schema.$defs.process.properties.requiredMask.enum)
+const SHAPE_KINDS = new Set<string>([
   'rectangle', 'ellipse', 'triangle', 'diamond', 'polygon', 'star', 'line',
-  'wave', 'burst', 'cross', 'bracket', 'dot-grid', 'frame',
+  'wave', 'burst', 'cross', 'bracket', 'dot-grid', 'frame', 'path',
 ])
 const SHAPE_GEOMETRY_NUMBER_FIELDS = ['sides', 'points', 'innerRatio', 'amplitude', 'frequency', 'inset', 'rows', 'columns', 'gap'] as const
 const SHAPE_GEOMETRY_BOOLEAN_FIELDS = ['arrowStart', 'arrowEnd', 'parallel'] as const
@@ -80,6 +91,133 @@ function areaFiniteNumber(value: unknown, path: string): number {
 function areaVector3(value: unknown, path: string): [number, number, number] {
   if (!Array.isArray(value) || value.length !== 3) areaError(path, '必须是 3 个有限数字')
   return value.map((item, index) => areaFiniteNumber(item, `${path}[${index}]`)) as [number, number, number]
+}
+
+function assertKnownFields(raw: UnknownRecord, allowed: readonly string[], path: string): void {
+  const known = new Set(allowed)
+  for (const key of Object.keys(raw)) if (!known.has(key)) areaError(`${path}.${key}`, '是未知字段')
+}
+
+function nonEmptyString(value: unknown, path: string, maximum?: number): string {
+  if (typeof value !== 'string' || value.length === 0) areaError(path, '必须是非空字符串')
+  if (maximum !== undefined && value.length > maximum) areaError(path, `长度不能超过 ${maximum}`)
+  return value
+}
+
+function normalizePhysicalBounds(value: unknown, path: string): { x: number; y: number; width: number; height: number } {
+  const raw = areaRecord(value, path)
+  assertKnownFields(raw, ['x', 'y', 'width', 'height'], path)
+  const width = areaFiniteNumber(raw.width, `${path}.width`)
+  const height = areaFiniteNumber(raw.height, `${path}.height`)
+  if (width <= 0 || height <= 0) areaError(path, '宽高必须大于 0')
+  return {
+    x: areaFiniteNumber(raw.x, `${path}.x`),
+    y: areaFiniteNumber(raw.y, `${path}.y`),
+    width,
+    height,
+  }
+}
+
+function normalizeDesignMetrics(value: unknown): LayerDesignMetrics | undefined {
+  if (value === undefined) return undefined
+  const raw = areaRecord(value, 'designMetrics')
+  assertKnownFields(raw, ['boundsMm', 'normalizedBounds', 'anchor', 'fontSizeMm', 'letterSpacingEm', 'lineHeight', 'wrapPolicy', 'maxLines'], 'designMetrics')
+  if (!['top_left', 'top_center', 'center', 'baseline_left', 'baseline_center'].includes(String(raw.anchor))) areaError('designMetrics.anchor', '无效')
+  const result: LayerDesignMetrics = {
+    ...(raw.boundsMm === undefined ? {} : { boundsMm: normalizePhysicalBounds(raw.boundsMm, 'designMetrics.boundsMm') }),
+    ...(raw.normalizedBounds === undefined ? {} : { normalizedBounds: normalizePhysicalBounds(raw.normalizedBounds, 'designMetrics.normalizedBounds') }),
+    anchor: raw.anchor as LayerDesignMetrics['anchor'],
+  }
+  for (const field of ['fontSizeMm', 'letterSpacingEm', 'lineHeight'] as const) {
+    if (raw[field] !== undefined) {
+      const number = areaFiniteNumber(raw[field], `designMetrics.${field}`)
+      if ((field === 'fontSizeMm' || field === 'lineHeight') && number <= 0) areaError(`designMetrics.${field}`, '必须大于 0')
+      result[field] = number
+    }
+  }
+  if (raw.wrapPolicy !== undefined) {
+    if (!['none', 'word', 'character'].includes(String(raw.wrapPolicy))) areaError('designMetrics.wrapPolicy', '无效')
+    result.wrapPolicy = raw.wrapPolicy as LayerDesignMetrics['wrapPolicy']
+  }
+  if (raw.maxLines !== undefined) {
+    const maxLines = areaFiniteNumber(raw.maxLines, 'designMetrics.maxLines')
+    if (!Number.isInteger(maxLines) || maxLines < 1) areaError('designMetrics.maxLines', '必须是正整数')
+    result.maxLines = maxLines
+  }
+  return result
+}
+
+function normalizeProcesses(value: unknown): ProcessIntent[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) areaError('processes', '必须是数组')
+  if (value.length > 32) areaError('processes', '不能超过 32 项')
+  return value.map((item, index) => {
+    const raw = areaRecord(item, `processes[${index}]`)
+    assertKnownFields(raw, ['process', 'spotName', 'requiredMask'], `processes[${index}]`)
+    if (typeof raw.process !== 'string' || !PROCESS_TYPES.has(raw.process)) areaError(`processes[${index}].process`, '无效')
+    if (raw.spotName !== undefined) nonEmptyString(raw.spotName, `processes[${index}].spotName`, 128)
+    if (raw.requiredMask !== undefined && (typeof raw.requiredMask !== 'string' || !REQUIRED_MASKS.has(raw.requiredMask))) {
+      areaError(`processes[${index}].requiredMask`, '无效')
+    }
+    return cloneValue(raw) as unknown as ProcessIntent
+  })
+}
+
+function normalizeArtboard(value: unknown): PhysicalArtboard | undefined {
+  if (value === undefined) return undefined
+  const raw = areaRecord(value, 'artboard')
+  assertKnownFields(raw, ['widthMm', 'heightMm', 'background'], 'artboard')
+  const widthMm = areaFiniteNumber(raw.widthMm, 'artboard.widthMm')
+  const heightMm = areaFiniteNumber(raw.heightMm, 'artboard.heightMm')
+  if (widthMm <= 0 || widthMm > 10000 || heightMm <= 0 || heightMm > 10000) areaError('artboard', '物理尺寸无效')
+  return { widthMm, heightMm, background: nonEmptyString(raw.background, 'artboard.background', 64) }
+}
+
+function normalizeSubstrate(value: unknown): SubstrateSpec | undefined {
+  if (value === undefined) return undefined
+  const raw = areaRecord(value, 'substrate')
+  assertKnownFields(raw, ['kind', 'color', 'opacity', 'boundary', 'material', 'adhesive'], 'substrate')
+  if (raw.kind !== 'opaque' && raw.kind !== 'transparent') areaError('substrate.kind', '无效')
+  const opacity = areaFiniteNumber(raw.opacity, 'substrate.opacity')
+  if (opacity < 0 || opacity > 1) areaError('substrate.opacity', '必须在 0..1 之间')
+  for (const field of ['color', 'material', 'adhesive'] as const) {
+    if (raw[field] !== undefined && typeof raw[field] !== 'string') areaError(`substrate.${field}`, '必须是字符串')
+  }
+  let boundary: SubstrateSpec['boundary']
+  if (raw.boundary !== undefined) {
+    const input = areaRecord(raw.boundary, 'substrate.boundary')
+    assertKnownFields(input, ['shape', 'radiusMm', 'pathData'], 'substrate.boundary')
+    if (!['rectangle', 'rounded_rectangle', 'ellipse', 'custom'].includes(String(input.shape))) areaError('substrate.boundary.shape', '无效')
+    if (input.radiusMm !== undefined && areaFiniteNumber(input.radiusMm, 'substrate.boundary.radiusMm') < 0) areaError('substrate.boundary.radiusMm', '不能小于 0')
+    if (input.pathData !== undefined) nonEmptyString(input.pathData, 'substrate.boundary.pathData', 131072)
+    boundary = cloneValue(input) as unknown as SubstrateSpec['boundary']
+  }
+  return {
+    kind: raw.kind,
+    opacity,
+    ...(raw.color === undefined ? {} : { color: raw.color as string }),
+    ...(boundary === undefined ? {} : { boundary }),
+    ...(raw.material === undefined ? {} : { material: raw.material as string }),
+    ...(raw.adhesive === undefined ? {} : { adhesive: raw.adhesive as string }),
+  }
+}
+
+function normalizeDesignBinding(value: unknown): DesignBinding | undefined {
+  if (value === undefined) return undefined
+  const raw = areaRecord(value, 'designBinding')
+  assertKnownFields(raw, ['blueprintRevision', 'blueprintSha256', 'reviewManifestSha256', 'approvedCrop'], 'designBinding')
+  const blueprintRevision = nonEmptyString(raw.blueprintRevision, 'designBinding.blueprintRevision', 256)
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(blueprintRevision)) areaError('designBinding.blueprintRevision', '格式无效')
+  const blueprintSha256 = nonEmptyString(raw.blueprintSha256, 'designBinding.blueprintSha256')
+  const reviewManifestSha256 = nonEmptyString(raw.reviewManifestSha256, 'designBinding.reviewManifestSha256')
+  if (!/^[a-f0-9]{64}$/.test(blueprintSha256)) areaError('designBinding.blueprintSha256', '格式无效')
+  if (!/^[a-f0-9]{64}$/.test(reviewManifestSha256)) areaError('designBinding.reviewManifestSha256', '格式无效')
+  return {
+    blueprintRevision,
+    blueprintSha256,
+    reviewManifestSha256,
+    ...(raw.approvedCrop === undefined ? {} : { approvedCrop: normalizePhysicalBounds(raw.approvedCrop, 'designBinding.approvedCrop') }),
+  }
 }
 
 function requiredAreaValue(raw: UnknownRecord, field: string, legacy: boolean, fallback: unknown): unknown {
@@ -179,27 +317,46 @@ function normalizeLayer(raw: unknown): LabelLayer {
     if (raw.writingDirection !== undefined && raw.writingDirection !== 'auto' && raw.writingDirection !== 'ltr' && raw.writingDirection !== 'rtl') layerError('writingDirection 无效')
     if (raw.language !== undefined && typeof raw.language !== 'string') layerError('language 必须是字符串')
     const layer = cloneValue(raw) as unknown as TextLayer
-    return { ...layer, fontFamily: legacyFontId(fontFamily) }
+    return {
+      ...layer,
+      fontFamily: legacyFontId(fontFamily),
+      ...(raw.designMetrics === undefined ? {} : { designMetrics: normalizeDesignMetrics(raw.designMetrics) }),
+      ...(raw.processes === undefined ? {} : { processes: normalizeProcesses(raw.processes) }),
+    }
   }
   if (raw.kind === 'image') {
     validateCommonLayerFields(raw)
     requiredString(raw, 'src', { nonEmpty: true })
     for (const field of ['naturalWidth', 'naturalHeight', 'width', 'height']) requiredFiniteNumber(raw, field)
-    return cloneValue(raw) as unknown as LabelLayer
+    return {
+      ...cloneValue(raw) as unknown as LabelLayer,
+      ...(raw.designMetrics === undefined ? {} : { designMetrics: normalizeDesignMetrics(raw.designMetrics) }),
+      ...(raw.processes === undefined ? {} : { processes: normalizeProcesses(raw.processes) }),
+    }
   }
   if (raw.kind === 'shape') {
     validateCommonLayerFields(raw)
     const shape = Object.prototype.hasOwnProperty.call(raw, 'shape') ? raw.shape : 'rectangle'
-    if (typeof shape !== 'string' || !SHAPE_KINDS.has(shape as ShapeKind)) layerError('shape 无效')
+    if (typeof shape !== 'string' || !SHAPE_KINDS.has(shape)) layerError('shape 无效')
     for (const field of ['width', 'height', 'strokeWidth', 'cornerRadius']) requiredFiniteNumber(raw, field)
     requiredString(raw, 'fill', { nonEmpty: true })
     requiredString(raw, 'stroke', { nonEmpty: true })
+    if (shape === 'path') {
+      requiredString(raw, 'pathData', { nonEmpty: true })
+      if (!Array.isArray(raw.pathViewBox) || raw.pathViewBox.length !== 4) layerError('pathViewBox 必须是 4 个有限数字')
+      raw.pathViewBox.forEach((value, index) => {
+        if (typeof value !== 'number' || !Number.isFinite(value)) layerError(`pathViewBox[${index}] 必须是有限数字`)
+      })
+    }
+    if (raw.fillRule !== undefined && raw.fillRule !== 'nonzero' && raw.fillRule !== 'evenodd') layerError('fillRule 无效')
     validateShapeGeometry(raw.geometry)
     const layer = cloneValue(raw) as unknown as ShapeLayer
     return {
       ...layer,
       shape: shape as ShapeKind,
       geometry: recordOr(raw.geometry, {}),
+      ...(raw.designMetrics === undefined ? {} : { designMetrics: normalizeDesignMetrics(raw.designMetrics) }),
+      ...(raw.processes === undefined ? {} : { processes: normalizeProcesses(raw.processes) }),
     }
   }
   layerError('kind 无效')
@@ -330,6 +487,19 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     const opacity = areaFiniteNumber(paperInput.opacity, 'paper.opacity')
     if (opacity < 0 || opacity > 1) areaError('paper.opacity', '必须在 0..1 之间')
   }
+  let carrier: CarrierMode | undefined
+  if (raw.carrier !== undefined) {
+    if (typeof raw.carrier !== 'string' || !CARRIER_MODES.has(raw.carrier)) areaError('carrier', '无效')
+    carrier = raw.carrier as CarrierMode
+  } else if (paperInput?.enabled === true) {
+    carrier = 'applied_label'
+  }
+  let placementPolicy: TargetAspectPolicy | undefined
+  if (raw.placementPolicy !== undefined) {
+    if (!['fit', 'crop-approved', 'block'].includes(String(raw.placementPolicy))) areaError('placementPolicy', '无效')
+    placementPolicy = raw.placementPolicy as TargetAspectPolicy
+  }
+  if (raw.blueprintAreaId !== undefined) nonEmptyString(raw.blueprintAreaId, 'blueprintAreaId', 128)
   return {
     id: idValue,
     name,
@@ -343,6 +513,12 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     range,
     canvas,
     paper: resolveLabelPaper(paperInput),
+    ...(carrier === undefined ? {} : { carrier }),
+    ...(raw.artboard === undefined ? {} : { artboard: normalizeArtboard(raw.artboard) }),
+    ...(raw.substrate === undefined ? {} : { substrate: normalizeSubstrate(raw.substrate) }),
+    ...(placementPolicy === undefined ? {} : { placementPolicy }),
+    ...(raw.blueprintAreaId === undefined ? {} : { blueprintAreaId: raw.blueprintAreaId as string }),
+    ...(raw.designBinding === undefined ? {} : { designBinding: normalizeDesignBinding(raw.designBinding) }),
     ...(raw.printSpec === undefined ? {} : { printSpec: normalizePrintSpec(raw.printSpec) }),
     layers: layersValue.map(normalizeLayer),
     globalCraft,
@@ -370,12 +546,13 @@ export function parseLabelProject(raw: unknown): LabelProjectV3 {
   }
 }
 
-export function serializeLabelProject(modelFileName: string, areas: LabelAreaConfig[]): LabelProjectV3 {
+export function serializeLabelProject(modelFileName: string, areas: Array<LabelAreaConfig | SerializedArea>): LabelProjectV3 {
   return {
     version: PROJECT_VERSION,
     modelFileName,
     areas: areas.map((area, index) => {
-      const { undoStack: _undoStack, redoStack: _redoStack, referenceUrl: _referenceUrl, ...serializable } = area
+      const withRuntimeFields = area as SerializedArea & Partial<Pick<LabelAreaConfig, 'undoStack' | 'redoStack' | 'referenceUrl'>>
+      const { undoStack: _undoStack, redoStack: _redoStack, referenceUrl: _referenceUrl, ...serializable } = withRuntimeFields
       return normalizeArea(serializable, index, PROJECT_VERSION)
     }),
   }

@@ -2,19 +2,22 @@
 // @ts-nocheck
 export const validate = validate20;
 export default validate20;
-const schema31 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.com/schemas/glb-label-spec-v2.json","title":"GLB Label Editor Label Spec v2","type":"object","additionalProperties":false,"required":["version","areas"],"properties":{"version":{"const":2},"variables":{"type":"object","additionalProperties":{"anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"}]}},"assets":{"type":"object","additionalProperties":{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":{"type":"string","minLength":1},"mimeType":{"type":"string","minLength":1}}}},"exports":{"type":"array","uniqueItems":true,"items":{"enum":["glb","project","normalized-spec","print-manifest","preview-3d","color","metalness","roughness","bump"]}},"areas":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/area"}}},"$defs":{"target":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"stableSelector":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"materialName":{"type":"string","minLength":1}}},"range":{"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"remap":{"type":"object","additionalProperties":false,"properties":{"mode":{"enum":["auto","cylindrical","planar"]},"wrap":{"type":"number","exclusiveMinimum":0,"maximum":8},"offset":{"type":"number","minimum":0,"maximum":1},"mirrorU":{"type":"boolean"}}},"paper":{"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"opacity":{"type":"number","minimum":0,"maximum":1}}},"print":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0},"heightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}}}},"foilCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"foil"},"params":{"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"foilSpotName":{"type":"string","minLength":1},"gradientAngle":{"type":"number","minimum":-360,"maximum":360},"highlight":{"type":"number","minimum":0,"maximum":1}}}}},"reliefCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["emboss","deboss"]},"params":{"type":"object","additionalProperties":false,"properties":{"depth":{"type":"number","minimum":0,"maximum":1},"lightAngle":{"type":"number","minimum":-360,"maximum":360}}}}},"matteCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"matte"},"params":{"type":"object","additionalProperties":false,"properties":{"intensity":{"type":"number","minimum":0,"maximum":1},"noise":{"type":"number","minimum":0,"maximum":1}}}}},"uvCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"uv"},"params":{"type":"object","additionalProperties":false,"properties":{"gloss":{"type":"number","minimum":0,"maximum":1}}}}},"strokeCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"stroke"},"params":{"type":"object","additionalProperties":false,"properties":{"strokeColor":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"strokeWidth":{"type":"number","minimum":0,"maximum":128}}}}},"craft":{"oneOf":[{"$ref":"#/$defs/foilCraft"},{"$ref":"#/$defs/reliefCraft"},{"$ref":"#/$defs/matteCraft"},{"$ref":"#/$defs/uvCraft"},{"$ref":"#/$defs/strokeCraft"}]},"commonLayerProperties":{"type":"object","properties":{"id":{"type":"string","minLength":1},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}},"textLayer":{"type":"object","additionalProperties":false,"required":["id","type","text","x","y"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontSize":{"type":"number","exclusiveMinimum":0,"maximum":2048},"fontWeight":{"oneOf":[{"type":"number","minimum":100,"maximum":1000},{"enum":["normal","bold"]}]},"letterSpacing":{"type":"number","minimum":-100,"maximum":100},"lineHeight":{"type":"number","minimum":0.5,"maximum":5},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"color":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string","minLength":2},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}},"imageLayer":{"type":"object","additionalProperties":false,"required":["id","type","asset","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"image"},"asset":{"type":"string","minLength":1},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}},"shapeLayer":{"type":"object","additionalProperties":false,"required":["id","type","shape","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame"]},"geometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"type":"integer","minimum":3,"maximum":64},"points":{"type":"integer","minimum":3,"maximum":64},"innerRatio":{"type":"number","minimum":0,"maximum":1},"amplitude":{"type":"number","minimum":0,"maximum":1},"frequency":{"type":"number","minimum":0,"maximum":64},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"type":"number","minimum":0}},"inset":{"type":"number","minimum":0},"rows":{"type":"integer","minimum":1,"maximum":128},"columns":{"type":"integer","minimum":1,"maximum":128},"gap":{"type":"number","minimum":0}}},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"fill":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"stroke":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"strokeWidth":{"type":"number","minimum":0},"cornerRadius":{"type":"number","minimum":0},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}},"layer":{"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]},"area":{"type":"object","additionalProperties":false,"required":["id","name","target","surfaceMode","range","layers"],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"target":{"$ref":"#/$defs/target"},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back"]},"range":{"$ref":"#/$defs/range"},"remap":{"$ref":"#/$defs/remap"},"paper":{"$ref":"#/$defs/paper"},"print":{"$ref":"#/$defs/print"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"}},"globalCraft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}}}};
+const schema31 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.com/schemas/glb-label-spec-v2.json","title":"GLB Label Editor Label Spec v2","type":"object","additionalProperties":false,"required":["version","areas"],"properties":{"version":{"const":2},"variables":{"type":"object","additionalProperties":{"anyOf":[{"type":"string"},{"type":"number"},{"type":"boolean"}]}},"assets":{"type":"object","additionalProperties":{"type":"object","additionalProperties":false,"required":["path"],"properties":{"path":{"type":"string","minLength":1},"mimeType":{"type":"string","minLength":1}}}},"exports":{"type":"array","uniqueItems":true,"items":{"enum":["glb","project","normalized-spec","print-manifest","preview-3d","color","metalness","roughness","bump"]}},"areas":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/area"}}},"$defs":{"target":{"type":"object","additionalProperties":false,"minProperties":1,"properties":{"stableSelector":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"materialName":{"type":"string","minLength":1}}},"range":{"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"remap":{"type":"object","additionalProperties":false,"properties":{"mode":{"enum":["auto","cylindrical","planar"]},"wrap":{"type":"number","exclusiveMinimum":0,"maximum":8},"offset":{"type":"number","minimum":0,"maximum":1},"mirrorU":{"type":"boolean"}}},"paper":{"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"opacity":{"type":"number","minimum":0,"maximum":1}}},"print":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0},"heightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}}}},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"physicalBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}},"artboard":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}},"boundary":{"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}},"substrate":{"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"type":"string","maxLength":64},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}},"process":{"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}},"designMetrics":{"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/physicalBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"type":"number"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1}}},"designBinding":{"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}},"foilCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"foil"},"params":{"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"foilSpotName":{"type":"string","minLength":1},"gradientAngle":{"type":"number","minimum":-360,"maximum":360},"highlight":{"type":"number","minimum":0,"maximum":1}}}}},"reliefCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["emboss","deboss"]},"params":{"type":"object","additionalProperties":false,"properties":{"depth":{"type":"number","minimum":0,"maximum":1},"lightAngle":{"type":"number","minimum":-360,"maximum":360}}}}},"matteCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"matte"},"params":{"type":"object","additionalProperties":false,"properties":{"intensity":{"type":"number","minimum":0,"maximum":1},"noise":{"type":"number","minimum":0,"maximum":1}}}}},"uvCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"uv"},"params":{"type":"object","additionalProperties":false,"properties":{"gloss":{"type":"number","minimum":0,"maximum":1}}}}},"strokeCraft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"stroke"},"params":{"type":"object","additionalProperties":false,"properties":{"strokeColor":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"strokeWidth":{"type":"number","minimum":0,"maximum":128}}}}},"craft":{"oneOf":[{"$ref":"#/$defs/foilCraft"},{"$ref":"#/$defs/reliefCraft"},{"$ref":"#/$defs/matteCraft"},{"$ref":"#/$defs/uvCraft"},{"$ref":"#/$defs/strokeCraft"}]},"commonLayerProperties":{"type":"object","properties":{"id":{"type":"string","minLength":1},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}},"textLayer":{"type":"object","additionalProperties":false,"required":["id","type","text","x","y"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontSize":{"type":"number","exclusiveMinimum":0,"maximum":2048},"fontWeight":{"oneOf":[{"type":"number","minimum":100,"maximum":1000},{"enum":["normal","bold"]}]},"letterSpacing":{"type":"number","minimum":-100,"maximum":100},"lineHeight":{"type":"number","minimum":0.5,"maximum":5},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"color":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string","minLength":2},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}},"imageLayer":{"type":"object","additionalProperties":false,"required":["id","type","asset","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"image"},"asset":{"type":"string","minLength":1},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}},"shapeLayer":{"type":"object","additionalProperties":false,"required":["id","type","shape","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"type":"integer","minimum":3,"maximum":64},"points":{"type":"integer","minimum":3,"maximum":64},"innerRatio":{"type":"number","minimum":0,"maximum":1},"amplitude":{"type":"number","minimum":0,"maximum":1},"frequency":{"type":"number","minimum":0,"maximum":64},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"type":"number","minimum":0}},"inset":{"type":"number","minimum":0},"rows":{"type":"integer","minimum":1,"maximum":128},"columns":{"type":"integer","minimum":1,"maximum":128},"gap":{"type":"number","minimum":0}}},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"fill":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"stroke":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"strokeWidth":{"type":"number","minimum":0},"cornerRadius":{"type":"number","minimum":0},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]},"layer":{"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]},"area":{"type":"object","additionalProperties":false,"required":["id","name","target","surfaceMode","range","layers"],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"target":{"$ref":"#/$defs/target"},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back"]},"range":{"$ref":"#/$defs/range"},"remap":{"$ref":"#/$defs/remap"},"paper":{"$ref":"#/$defs/paper"},"print":{"$ref":"#/$defs/print"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"}},"globalCraft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"}}}}};
 import func1 from "ajv/dist/runtime/ucs2length";
 import func0 from "ajv/dist/runtime/equal";
-const schema32 = {"type":"object","additionalProperties":false,"required":["id","name","target","surfaceMode","range","layers"],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"target":{"$ref":"#/$defs/target"},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back"]},"range":{"$ref":"#/$defs/range"},"remap":{"$ref":"#/$defs/remap"},"paper":{"$ref":"#/$defs/paper"},"print":{"$ref":"#/$defs/print"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"}},"globalCraft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}};
+const schema32 = {"type":"object","additionalProperties":false,"required":["id","name","target","surfaceMode","range","layers"],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"target":{"$ref":"#/$defs/target"},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back"]},"range":{"$ref":"#/$defs/range"},"remap":{"$ref":"#/$defs/remap"},"paper":{"$ref":"#/$defs/paper"},"print":{"$ref":"#/$defs/print"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"}},"globalCraft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"}}};
 const schema33 = {"type":"object","additionalProperties":false,"minProperties":1,"properties":{"stableSelector":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"materialName":{"type":"string","minLength":1}}};
 const schema34 = {"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}};
 const schema35 = {"type":"object","additionalProperties":false,"properties":{"mode":{"enum":["auto","cylindrical","planar"]},"wrap":{"type":"number","exclusiveMinimum":0,"maximum":8},"offset":{"type":"number","minimum":0,"maximum":1},"mirrorU":{"type":"boolean"}}};
 const schema36 = {"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"opacity":{"type":"number","minimum":0,"maximum":1}}};
 const schema37 = {"type":"object","additionalProperties":false,"required":["widthMm","heightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0},"heightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}}}};
+const schema54 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
+const schema55 = {"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}};
 const func4 = Object.prototype.hasOwnProperty;
 const pattern4 = new RegExp("^#[0-9A-Fa-f]{6}$", "u");
 const schema38 = {"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]};
-const schema39 = {"type":"object","additionalProperties":false,"required":["id","type","text","x","y"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontSize":{"type":"number","exclusiveMinimum":0,"maximum":2048},"fontWeight":{"oneOf":[{"type":"number","minimum":100,"maximum":1000},{"enum":["normal","bold"]}]},"letterSpacing":{"type":"number","minimum":-100,"maximum":100},"lineHeight":{"type":"number","minimum":0.5,"maximum":5},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"color":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string","minLength":2},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}};
+const schema39 = {"type":"object","additionalProperties":false,"required":["id","type","text","x","y"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontSize":{"type":"number","exclusiveMinimum":0,"maximum":2048},"fontWeight":{"oneOf":[{"type":"number","minimum":100,"maximum":1000},{"enum":["normal","bold"]}]},"letterSpacing":{"type":"number","minimum":-100,"maximum":100},"lineHeight":{"type":"number","minimum":0.5,"maximum":5},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"color":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string","minLength":2},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}};
+const schema49 = {"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}};
 const schema40 = {"oneOf":[{"$ref":"#/$defs/foilCraft"},{"$ref":"#/$defs/reliefCraft"},{"$ref":"#/$defs/matteCraft"},{"$ref":"#/$defs/uvCraft"},{"$ref":"#/$defs/strokeCraft"}]};
 const schema41 = {"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"const":"foil"},"params":{"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"foilSpotName":{"type":"string","minLength":1},"gradientAngle":{"type":"number","minimum":-360,"maximum":360},"highlight":{"type":"number","minimum":0,"maximum":1}}}}};
 const schema42 = {"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["emboss","deboss"]},"params":{"type":"object","additionalProperties":false,"properties":{"depth":{"type":"number","minimum":0,"maximum":1},"lightAngle":{"type":"number","minimum":-360,"maximum":360}}}}};
@@ -913,6 +916,468 @@ return errors === 0;
 }
 validate24.evaluated = {"dynamicProps":true,"dynamicItems":false};
 
+const schema46 = {"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/physicalBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"type":"number"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1}}};
+const schema47 = {"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}};
+
+function validate26(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate26.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.anchor === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "anchor"},message:"must have required property '"+"anchor"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+for(const key0 in data){
+if(!((((((((key0 === "boundsMm") || (key0 === "normalizedBounds")) || (key0 === "anchor")) || (key0 === "fontSizeMm")) || (key0 === "letterSpacingEm")) || (key0 === "lineHeight")) || (key0 === "wrapPolicy")) || (key0 === "maxLines"))){
+const err1 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+}
+if(data.boundsMm !== undefined){
+let data0 = data.boundsMm;
+if(data0 && typeof data0 == "object" && !Array.isArray(data0)){
+if(data0.x === undefined){
+const err2 = {instancePath:instancePath+"/boundsMm",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "x"},message:"must have required property '"+"x"+"'"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+if(data0.y === undefined){
+const err3 = {instancePath:instancePath+"/boundsMm",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "y"},message:"must have required property '"+"y"+"'"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+if(data0.width === undefined){
+const err4 = {instancePath:instancePath+"/boundsMm",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "width"},message:"must have required property '"+"width"+"'"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+if(data0.height === undefined){
+const err5 = {instancePath:instancePath+"/boundsMm",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "height"},message:"must have required property '"+"height"+"'"};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+for(const key1 in data0){
+if(!((((key1 === "x") || (key1 === "y")) || (key1 === "width")) || (key1 === "height"))){
+const err6 = {instancePath:instancePath+"/boundsMm",schemaPath:"#/$defs/physicalBounds/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+}
+if(data0.x !== undefined){
+let data1 = data0.x;
+if(!((typeof data1 == "number") && (isFinite(data1)))){
+const err7 = {instancePath:instancePath+"/boundsMm/x",schemaPath:"#/$defs/physicalBounds/properties/x/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+}
+if(data0.y !== undefined){
+let data2 = data0.y;
+if(!((typeof data2 == "number") && (isFinite(data2)))){
+const err8 = {instancePath:instancePath+"/boundsMm/y",schemaPath:"#/$defs/physicalBounds/properties/y/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+}
+if(data0.width !== undefined){
+let data3 = data0.width;
+if((typeof data3 == "number") && (isFinite(data3))){
+if(data3 <= 0 || isNaN(data3)){
+const err9 = {instancePath:instancePath+"/boundsMm/width",schemaPath:"#/$defs/physicalBounds/properties/width/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+}
+else {
+const err10 = {instancePath:instancePath+"/boundsMm/width",schemaPath:"#/$defs/physicalBounds/properties/width/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+if(data0.height !== undefined){
+let data4 = data0.height;
+if((typeof data4 == "number") && (isFinite(data4))){
+if(data4 <= 0 || isNaN(data4)){
+const err11 = {instancePath:instancePath+"/boundsMm/height",schemaPath:"#/$defs/physicalBounds/properties/height/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+}
+else {
+const err12 = {instancePath:instancePath+"/boundsMm/height",schemaPath:"#/$defs/physicalBounds/properties/height/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
+}
+errors++;
+}
+}
+}
+else {
+const err13 = {instancePath:instancePath+"/boundsMm",schemaPath:"#/$defs/physicalBounds/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err13];
+}
+else {
+vErrors.push(err13);
+}
+errors++;
+}
+}
+if(data.normalizedBounds !== undefined){
+let data5 = data.normalizedBounds;
+if(data5 && typeof data5 == "object" && !Array.isArray(data5)){
+if(data5.x === undefined){
+const err14 = {instancePath:instancePath+"/normalizedBounds",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "x"},message:"must have required property '"+"x"+"'"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
+}
+errors++;
+}
+if(data5.y === undefined){
+const err15 = {instancePath:instancePath+"/normalizedBounds",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "y"},message:"must have required property '"+"y"+"'"};
+if(vErrors === null){
+vErrors = [err15];
+}
+else {
+vErrors.push(err15);
+}
+errors++;
+}
+if(data5.width === undefined){
+const err16 = {instancePath:instancePath+"/normalizedBounds",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "width"},message:"must have required property '"+"width"+"'"};
+if(vErrors === null){
+vErrors = [err16];
+}
+else {
+vErrors.push(err16);
+}
+errors++;
+}
+if(data5.height === undefined){
+const err17 = {instancePath:instancePath+"/normalizedBounds",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "height"},message:"must have required property '"+"height"+"'"};
+if(vErrors === null){
+vErrors = [err17];
+}
+else {
+vErrors.push(err17);
+}
+errors++;
+}
+for(const key2 in data5){
+if(!((((key2 === "x") || (key2 === "y")) || (key2 === "width")) || (key2 === "height"))){
+const err18 = {instancePath:instancePath+"/normalizedBounds",schemaPath:"#/$defs/physicalBounds/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key2},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err18];
+}
+else {
+vErrors.push(err18);
+}
+errors++;
+}
+}
+if(data5.x !== undefined){
+let data6 = data5.x;
+if(!((typeof data6 == "number") && (isFinite(data6)))){
+const err19 = {instancePath:instancePath+"/normalizedBounds/x",schemaPath:"#/$defs/physicalBounds/properties/x/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err19];
+}
+else {
+vErrors.push(err19);
+}
+errors++;
+}
+}
+if(data5.y !== undefined){
+let data7 = data5.y;
+if(!((typeof data7 == "number") && (isFinite(data7)))){
+const err20 = {instancePath:instancePath+"/normalizedBounds/y",schemaPath:"#/$defs/physicalBounds/properties/y/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err20];
+}
+else {
+vErrors.push(err20);
+}
+errors++;
+}
+}
+if(data5.width !== undefined){
+let data8 = data5.width;
+if((typeof data8 == "number") && (isFinite(data8))){
+if(data8 <= 0 || isNaN(data8)){
+const err21 = {instancePath:instancePath+"/normalizedBounds/width",schemaPath:"#/$defs/physicalBounds/properties/width/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err21];
+}
+else {
+vErrors.push(err21);
+}
+errors++;
+}
+}
+else {
+const err22 = {instancePath:instancePath+"/normalizedBounds/width",schemaPath:"#/$defs/physicalBounds/properties/width/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err22];
+}
+else {
+vErrors.push(err22);
+}
+errors++;
+}
+}
+if(data5.height !== undefined){
+let data9 = data5.height;
+if((typeof data9 == "number") && (isFinite(data9))){
+if(data9 <= 0 || isNaN(data9)){
+const err23 = {instancePath:instancePath+"/normalizedBounds/height",schemaPath:"#/$defs/physicalBounds/properties/height/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err23];
+}
+else {
+vErrors.push(err23);
+}
+errors++;
+}
+}
+else {
+const err24 = {instancePath:instancePath+"/normalizedBounds/height",schemaPath:"#/$defs/physicalBounds/properties/height/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err24];
+}
+else {
+vErrors.push(err24);
+}
+errors++;
+}
+}
+}
+else {
+const err25 = {instancePath:instancePath+"/normalizedBounds",schemaPath:"#/$defs/physicalBounds/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err25];
+}
+else {
+vErrors.push(err25);
+}
+errors++;
+}
+}
+if(data.anchor !== undefined){
+let data10 = data.anchor;
+if(!(((((data10 === "top_left") || (data10 === "top_center")) || (data10 === "center")) || (data10 === "baseline_left")) || (data10 === "baseline_center"))){
+const err26 = {instancePath:instancePath+"/anchor",schemaPath:"#/properties/anchor/enum",keyword:"enum",params:{allowedValues: schema46.properties.anchor.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err26];
+}
+else {
+vErrors.push(err26);
+}
+errors++;
+}
+}
+if(data.fontSizeMm !== undefined){
+let data11 = data.fontSizeMm;
+if((typeof data11 == "number") && (isFinite(data11))){
+if(data11 > 10000 || isNaN(data11)){
+const err27 = {instancePath:instancePath+"/fontSizeMm",schemaPath:"#/properties/fontSizeMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
+if(vErrors === null){
+vErrors = [err27];
+}
+else {
+vErrors.push(err27);
+}
+errors++;
+}
+if(data11 <= 0 || isNaN(data11)){
+const err28 = {instancePath:instancePath+"/fontSizeMm",schemaPath:"#/properties/fontSizeMm/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err28];
+}
+else {
+vErrors.push(err28);
+}
+errors++;
+}
+}
+else {
+const err29 = {instancePath:instancePath+"/fontSizeMm",schemaPath:"#/properties/fontSizeMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err29];
+}
+else {
+vErrors.push(err29);
+}
+errors++;
+}
+}
+if(data.letterSpacingEm !== undefined){
+let data12 = data.letterSpacingEm;
+if(!((typeof data12 == "number") && (isFinite(data12)))){
+const err30 = {instancePath:instancePath+"/letterSpacingEm",schemaPath:"#/properties/letterSpacingEm/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err30];
+}
+else {
+vErrors.push(err30);
+}
+errors++;
+}
+}
+if(data.lineHeight !== undefined){
+let data13 = data.lineHeight;
+if((typeof data13 == "number") && (isFinite(data13))){
+if(data13 <= 0 || isNaN(data13)){
+const err31 = {instancePath:instancePath+"/lineHeight",schemaPath:"#/properties/lineHeight/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err31];
+}
+else {
+vErrors.push(err31);
+}
+errors++;
+}
+}
+else {
+const err32 = {instancePath:instancePath+"/lineHeight",schemaPath:"#/properties/lineHeight/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err32];
+}
+else {
+vErrors.push(err32);
+}
+errors++;
+}
+}
+if(data.wrapPolicy !== undefined){
+let data14 = data.wrapPolicy;
+if(!(((data14 === "none") || (data14 === "word")) || (data14 === "character"))){
+const err33 = {instancePath:instancePath+"/wrapPolicy",schemaPath:"#/properties/wrapPolicy/enum",keyword:"enum",params:{allowedValues: schema46.properties.wrapPolicy.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err33];
+}
+else {
+vErrors.push(err33);
+}
+errors++;
+}
+}
+if(data.maxLines !== undefined){
+let data15 = data.maxLines;
+if(!(((typeof data15 == "number") && (!(data15 % 1) && !isNaN(data15))) && (isFinite(data15)))){
+const err34 = {instancePath:instancePath+"/maxLines",schemaPath:"#/properties/maxLines/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err34];
+}
+else {
+vErrors.push(err34);
+}
+errors++;
+}
+if((typeof data15 == "number") && (isFinite(data15))){
+if(data15 < 1 || isNaN(data15)){
+const err35 = {instancePath:instancePath+"/maxLines",schemaPath:"#/properties/maxLines/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err35];
+}
+else {
+vErrors.push(err35);
+}
+errors++;
+}
+}
+}
+}
+else {
+const err36 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err36];
+}
+else {
+vErrors.push(err36);
+}
+errors++;
+}
+validate26.errors = vErrors;
+return errors === 0;
+}
+validate26.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
 
 function validate23(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -1575,9 +2040,17 @@ vErrors.push(err51);
 errors++;
 }
 }
+if(data.designMetrics !== undefined){
+if(!(validate26(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate26.errors : vErrors.concat(validate26.errors);
+errors = vErrors.length;
 }
-else {
-const err52 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+}
+if(data.processes !== undefined){
+let data24 = data.processes;
+if(Array.isArray(data24)){
+if(data24.length > 32){
+const err52 = {instancePath:instancePath+"/processes",schemaPath:"#/properties/processes/maxItems",keyword:"maxItems",params:{limit: 32},message:"must NOT have more than 32 items"};
 if(vErrors === null){
 vErrors = [err52];
 }
@@ -1586,17 +2059,139 @@ vErrors.push(err52);
 }
 errors++;
 }
+const len1 = data24.length;
+for(let i1=0; i1<len1; i1++){
+let data25 = data24[i1];
+if(data25 && typeof data25 == "object" && !Array.isArray(data25)){
+if(data25.process === undefined){
+const err53 = {instancePath:instancePath+"/processes/" + i1,schemaPath:"#/$defs/process/required",keyword:"required",params:{missingProperty: "process"},message:"must have required property '"+"process"+"'"};
+if(vErrors === null){
+vErrors = [err53];
+}
+else {
+vErrors.push(err53);
+}
+errors++;
+}
+for(const key1 in data25){
+if(!(((key1 === "process") || (key1 === "spotName")) || (key1 === "requiredMask"))){
+const err54 = {instancePath:instancePath+"/processes/" + i1,schemaPath:"#/$defs/process/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err54];
+}
+else {
+vErrors.push(err54);
+}
+errors++;
+}
+}
+if(data25.process !== undefined){
+let data26 = data25.process;
+if(!(((((((((((data26 === "screen_print") || (data26 === "pad_print")) || (data26 === "digital_print")) || (data26 === "offset_print")) || (data26 === "white_underbase")) || (data26 === "varnish")) || (data26 === "hot_stamp_foil")) || (data26 === "emboss")) || (data26 === "deboss")) || (data26 === "in_mold")) || (data26 === "batch_code"))){
+const err55 = {instancePath:instancePath+"/processes/" + i1+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema49.properties.process.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err55];
+}
+else {
+vErrors.push(err55);
+}
+errors++;
+}
+}
+if(data25.spotName !== undefined){
+let data27 = data25.spotName;
+if(typeof data27 === "string"){
+if(func1(data27) > 128){
+const err56 = {instancePath:instancePath+"/processes/" + i1+"/spotName",schemaPath:"#/$defs/process/properties/spotName/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+if(vErrors === null){
+vErrors = [err56];
+}
+else {
+vErrors.push(err56);
+}
+errors++;
+}
+if(func1(data27) < 1){
+const err57 = {instancePath:instancePath+"/processes/" + i1+"/spotName",schemaPath:"#/$defs/process/properties/spotName/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err57];
+}
+else {
+vErrors.push(err57);
+}
+errors++;
+}
+}
+else {
+const err58 = {instancePath:instancePath+"/processes/" + i1+"/spotName",schemaPath:"#/$defs/process/properties/spotName/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err58];
+}
+else {
+vErrors.push(err58);
+}
+errors++;
+}
+}
+if(data25.requiredMask !== undefined){
+let data28 = data25.requiredMask;
+if(!(((((data28 === "color") || (data28 === "metalness")) || (data28 === "roughness")) || (data28 === "bump")) || (data28 === "white_underbase"))){
+const err59 = {instancePath:instancePath+"/processes/" + i1+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema49.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err59];
+}
+else {
+vErrors.push(err59);
+}
+errors++;
+}
+}
+}
+else {
+const err60 = {instancePath:instancePath+"/processes/" + i1,schemaPath:"#/$defs/process/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err60];
+}
+else {
+vErrors.push(err60);
+}
+errors++;
+}
+}
+}
+else {
+const err61 = {instancePath:instancePath+"/processes",schemaPath:"#/properties/processes/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(vErrors === null){
+vErrors = [err61];
+}
+else {
+vErrors.push(err61);
+}
+errors++;
+}
+}
+}
+else {
+const err62 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err62];
+}
+else {
+vErrors.push(err62);
+}
+errors++;
+}
 validate23.errors = vErrors;
 return errors === 0;
 }
 validate23.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema46 = {"type":"object","additionalProperties":false,"required":["id","type","asset","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"image"},"asset":{"type":"string","minLength":1},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}};
+const schema50 = {"type":"object","additionalProperties":false,"required":["id","type","asset","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"image"},"asset":{"type":"string","minLength":1},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}};
 
-function validate27(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate29(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate27.evaluated;
+const evaluated0 = validate29.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -1675,7 +2270,7 @@ vErrors.push(err6);
 errors++;
 }
 for(const key0 in data){
-if(!(func4.call(schema46.properties, key0))){
+if(!(func4.call(schema50.properties, key0))){
 const err7 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err7];
@@ -2004,9 +2599,17 @@ vErrors.push(err33);
 errors++;
 }
 }
+if(data.designMetrics !== undefined){
+if(!(validate26(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate26.errors : vErrors.concat(validate26.errors);
+errors = vErrors.length;
 }
-else {
-const err34 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+}
+if(data.processes !== undefined){
+let data14 = data.processes;
+if(Array.isArray(data14)){
+if(data14.length > 32){
+const err34 = {instancePath:instancePath+"/processes",schemaPath:"#/properties/processes/maxItems",keyword:"maxItems",params:{limit: 32},message:"must NOT have more than 32 items"};
 if(vErrors === null){
 vErrors = [err34];
 }
@@ -2015,439 +2618,12 @@ vErrors.push(err34);
 }
 errors++;
 }
-validate27.errors = vErrors;
-return errors === 0;
-}
-validate27.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
-
-const schema47 = {"type":"object","additionalProperties":false,"required":["id","type","shape","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame"]},"geometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"type":"integer","minimum":3,"maximum":64},"points":{"type":"integer","minimum":3,"maximum":64},"innerRatio":{"type":"number","minimum":0,"maximum":1},"amplitude":{"type":"number","minimum":0,"maximum":1},"frequency":{"type":"number","minimum":0,"maximum":64},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"type":"number","minimum":0}},"inset":{"type":"number","minimum":0},"rows":{"type":"integer","minimum":1,"maximum":128},"columns":{"type":"integer","minimum":1,"maximum":128},"gap":{"type":"number","minimum":0}}},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"fill":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"stroke":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"strokeWidth":{"type":"number","minimum":0},"cornerRadius":{"type":"number","minimum":0},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}}}};
-
-function validate30(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
-let vErrors = null;
-let errors = 0;
-const evaluated0 = validate30.evaluated;
-if(evaluated0.dynamicProps){
-evaluated0.props = undefined;
-}
-if(evaluated0.dynamicItems){
-evaluated0.items = undefined;
-}
-if(data && typeof data == "object" && !Array.isArray(data)){
-if(data.id === undefined){
-const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "id"},message:"must have required property '"+"id"+"'"};
-if(vErrors === null){
-vErrors = [err0];
-}
-else {
-vErrors.push(err0);
-}
-errors++;
-}
-if(data.type === undefined){
-const err1 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "type"},message:"must have required property '"+"type"+"'"};
-if(vErrors === null){
-vErrors = [err1];
-}
-else {
-vErrors.push(err1);
-}
-errors++;
-}
-if(data.shape === undefined){
-const err2 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "shape"},message:"must have required property '"+"shape"+"'"};
-if(vErrors === null){
-vErrors = [err2];
-}
-else {
-vErrors.push(err2);
-}
-errors++;
-}
-if(data.x === undefined){
-const err3 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "x"},message:"must have required property '"+"x"+"'"};
-if(vErrors === null){
-vErrors = [err3];
-}
-else {
-vErrors.push(err3);
-}
-errors++;
-}
-if(data.y === undefined){
-const err4 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "y"},message:"must have required property '"+"y"+"'"};
-if(vErrors === null){
-vErrors = [err4];
-}
-else {
-vErrors.push(err4);
-}
-errors++;
-}
-if(data.width === undefined){
-const err5 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "width"},message:"must have required property '"+"width"+"'"};
-if(vErrors === null){
-vErrors = [err5];
-}
-else {
-vErrors.push(err5);
-}
-errors++;
-}
-if(data.height === undefined){
-const err6 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "height"},message:"must have required property '"+"height"+"'"};
-if(vErrors === null){
-vErrors = [err6];
-}
-else {
-vErrors.push(err6);
-}
-errors++;
-}
-for(const key0 in data){
-if(!(func4.call(schema47.properties, key0))){
-const err7 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
-if(vErrors === null){
-vErrors = [err7];
-}
-else {
-vErrors.push(err7);
-}
-errors++;
-}
-}
-if(data.id !== undefined){
-let data0 = data.id;
-if(typeof data0 === "string"){
-if(func1(data0) < 1){
-const err8 = {instancePath:instancePath+"/id",schemaPath:"#/properties/id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
-if(vErrors === null){
-vErrors = [err8];
-}
-else {
-vErrors.push(err8);
-}
-errors++;
-}
-}
-else {
-const err9 = {instancePath:instancePath+"/id",schemaPath:"#/properties/id/type",keyword:"type",params:{type: "string"},message:"must be string"};
-if(vErrors === null){
-vErrors = [err9];
-}
-else {
-vErrors.push(err9);
-}
-errors++;
-}
-}
-if(data.type !== undefined){
-if("shape" !== data.type){
-const err10 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/const",keyword:"const",params:{allowedValue: "shape"},message:"must be equal to constant"};
-if(vErrors === null){
-vErrors = [err10];
-}
-else {
-vErrors.push(err10);
-}
-errors++;
-}
-}
-if(data.shape !== undefined){
-let data2 = data.shape;
-if(!(((((((((((((data2 === "rectangle") || (data2 === "ellipse")) || (data2 === "triangle")) || (data2 === "diamond")) || (data2 === "polygon")) || (data2 === "star")) || (data2 === "line")) || (data2 === "wave")) || (data2 === "burst")) || (data2 === "cross")) || (data2 === "bracket")) || (data2 === "dot-grid")) || (data2 === "frame"))){
-const err11 = {instancePath:instancePath+"/shape",schemaPath:"#/properties/shape/enum",keyword:"enum",params:{allowedValues: schema47.properties.shape.enum},message:"must be equal to one of the allowed values"};
-if(vErrors === null){
-vErrors = [err11];
-}
-else {
-vErrors.push(err11);
-}
-errors++;
-}
-}
-if(data.geometry !== undefined){
-let data3 = data.geometry;
-if(data3 && typeof data3 == "object" && !Array.isArray(data3)){
-for(const key1 in data3){
-if(!(func4.call(schema47.properties.geometry.properties, key1))){
-const err12 = {instancePath:instancePath+"/geometry",schemaPath:"#/properties/geometry/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
-if(vErrors === null){
-vErrors = [err12];
-}
-else {
-vErrors.push(err12);
-}
-errors++;
-}
-}
-if(data3.sides !== undefined){
-let data4 = data3.sides;
-if(!(((typeof data4 == "number") && (!(data4 % 1) && !isNaN(data4))) && (isFinite(data4)))){
-const err13 = {instancePath:instancePath+"/geometry/sides",schemaPath:"#/properties/geometry/properties/sides/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
-if(vErrors === null){
-vErrors = [err13];
-}
-else {
-vErrors.push(err13);
-}
-errors++;
-}
-if((typeof data4 == "number") && (isFinite(data4))){
-if(data4 > 64 || isNaN(data4)){
-const err14 = {instancePath:instancePath+"/geometry/sides",schemaPath:"#/properties/geometry/properties/sides/maximum",keyword:"maximum",params:{comparison: "<=", limit: 64},message:"must be <= 64"};
-if(vErrors === null){
-vErrors = [err14];
-}
-else {
-vErrors.push(err14);
-}
-errors++;
-}
-if(data4 < 3 || isNaN(data4)){
-const err15 = {instancePath:instancePath+"/geometry/sides",schemaPath:"#/properties/geometry/properties/sides/minimum",keyword:"minimum",params:{comparison: ">=", limit: 3},message:"must be >= 3"};
-if(vErrors === null){
-vErrors = [err15];
-}
-else {
-vErrors.push(err15);
-}
-errors++;
-}
-}
-}
-if(data3.points !== undefined){
-let data5 = data3.points;
-if(!(((typeof data5 == "number") && (!(data5 % 1) && !isNaN(data5))) && (isFinite(data5)))){
-const err16 = {instancePath:instancePath+"/geometry/points",schemaPath:"#/properties/geometry/properties/points/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
-if(vErrors === null){
-vErrors = [err16];
-}
-else {
-vErrors.push(err16);
-}
-errors++;
-}
-if((typeof data5 == "number") && (isFinite(data5))){
-if(data5 > 64 || isNaN(data5)){
-const err17 = {instancePath:instancePath+"/geometry/points",schemaPath:"#/properties/geometry/properties/points/maximum",keyword:"maximum",params:{comparison: "<=", limit: 64},message:"must be <= 64"};
-if(vErrors === null){
-vErrors = [err17];
-}
-else {
-vErrors.push(err17);
-}
-errors++;
-}
-if(data5 < 3 || isNaN(data5)){
-const err18 = {instancePath:instancePath+"/geometry/points",schemaPath:"#/properties/geometry/properties/points/minimum",keyword:"minimum",params:{comparison: ">=", limit: 3},message:"must be >= 3"};
-if(vErrors === null){
-vErrors = [err18];
-}
-else {
-vErrors.push(err18);
-}
-errors++;
-}
-}
-}
-if(data3.innerRatio !== undefined){
-let data6 = data3.innerRatio;
-if((typeof data6 == "number") && (isFinite(data6))){
-if(data6 > 1 || isNaN(data6)){
-const err19 = {instancePath:instancePath+"/geometry/innerRatio",schemaPath:"#/properties/geometry/properties/innerRatio/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
-if(vErrors === null){
-vErrors = [err19];
-}
-else {
-vErrors.push(err19);
-}
-errors++;
-}
-if(data6 < 0 || isNaN(data6)){
-const err20 = {instancePath:instancePath+"/geometry/innerRatio",schemaPath:"#/properties/geometry/properties/innerRatio/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
-if(vErrors === null){
-vErrors = [err20];
-}
-else {
-vErrors.push(err20);
-}
-errors++;
-}
-}
-else {
-const err21 = {instancePath:instancePath+"/geometry/innerRatio",schemaPath:"#/properties/geometry/properties/innerRatio/type",keyword:"type",params:{type: "number"},message:"must be number"};
-if(vErrors === null){
-vErrors = [err21];
-}
-else {
-vErrors.push(err21);
-}
-errors++;
-}
-}
-if(data3.amplitude !== undefined){
-let data7 = data3.amplitude;
-if((typeof data7 == "number") && (isFinite(data7))){
-if(data7 > 1 || isNaN(data7)){
-const err22 = {instancePath:instancePath+"/geometry/amplitude",schemaPath:"#/properties/geometry/properties/amplitude/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
-if(vErrors === null){
-vErrors = [err22];
-}
-else {
-vErrors.push(err22);
-}
-errors++;
-}
-if(data7 < 0 || isNaN(data7)){
-const err23 = {instancePath:instancePath+"/geometry/amplitude",schemaPath:"#/properties/geometry/properties/amplitude/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
-if(vErrors === null){
-vErrors = [err23];
-}
-else {
-vErrors.push(err23);
-}
-errors++;
-}
-}
-else {
-const err24 = {instancePath:instancePath+"/geometry/amplitude",schemaPath:"#/properties/geometry/properties/amplitude/type",keyword:"type",params:{type: "number"},message:"must be number"};
-if(vErrors === null){
-vErrors = [err24];
-}
-else {
-vErrors.push(err24);
-}
-errors++;
-}
-}
-if(data3.frequency !== undefined){
-let data8 = data3.frequency;
-if((typeof data8 == "number") && (isFinite(data8))){
-if(data8 > 64 || isNaN(data8)){
-const err25 = {instancePath:instancePath+"/geometry/frequency",schemaPath:"#/properties/geometry/properties/frequency/maximum",keyword:"maximum",params:{comparison: "<=", limit: 64},message:"must be <= 64"};
-if(vErrors === null){
-vErrors = [err25];
-}
-else {
-vErrors.push(err25);
-}
-errors++;
-}
-if(data8 < 0 || isNaN(data8)){
-const err26 = {instancePath:instancePath+"/geometry/frequency",schemaPath:"#/properties/geometry/properties/frequency/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
-if(vErrors === null){
-vErrors = [err26];
-}
-else {
-vErrors.push(err26);
-}
-errors++;
-}
-}
-else {
-const err27 = {instancePath:instancePath+"/geometry/frequency",schemaPath:"#/properties/geometry/properties/frequency/type",keyword:"type",params:{type: "number"},message:"must be number"};
-if(vErrors === null){
-vErrors = [err27];
-}
-else {
-vErrors.push(err27);
-}
-errors++;
-}
-}
-if(data3.arrowStart !== undefined){
-if(typeof data3.arrowStart !== "boolean"){
-const err28 = {instancePath:instancePath+"/geometry/arrowStart",schemaPath:"#/properties/geometry/properties/arrowStart/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
-if(vErrors === null){
-vErrors = [err28];
-}
-else {
-vErrors.push(err28);
-}
-errors++;
-}
-}
-if(data3.arrowEnd !== undefined){
-if(typeof data3.arrowEnd !== "boolean"){
-const err29 = {instancePath:instancePath+"/geometry/arrowEnd",schemaPath:"#/properties/geometry/properties/arrowEnd/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
-if(vErrors === null){
-vErrors = [err29];
-}
-else {
-vErrors.push(err29);
-}
-errors++;
-}
-}
-if(data3.parallel !== undefined){
-if(typeof data3.parallel !== "boolean"){
-const err30 = {instancePath:instancePath+"/geometry/parallel",schemaPath:"#/properties/geometry/properties/parallel/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
-if(vErrors === null){
-vErrors = [err30];
-}
-else {
-vErrors.push(err30);
-}
-errors++;
-}
-}
-if(data3.dash !== undefined){
-let data12 = data3.dash;
-if(Array.isArray(data12)){
-const len0 = data12.length;
-for(let i0=0; i0<len0; i0++){
-let data13 = data12[i0];
-if((typeof data13 == "number") && (isFinite(data13))){
-if(data13 < 0 || isNaN(data13)){
-const err31 = {instancePath:instancePath+"/geometry/dash/" + i0,schemaPath:"#/properties/geometry/properties/dash/items/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
-if(vErrors === null){
-vErrors = [err31];
-}
-else {
-vErrors.push(err31);
-}
-errors++;
-}
-}
-else {
-const err32 = {instancePath:instancePath+"/geometry/dash/" + i0,schemaPath:"#/properties/geometry/properties/dash/items/type",keyword:"type",params:{type: "number"},message:"must be number"};
-if(vErrors === null){
-vErrors = [err32];
-}
-else {
-vErrors.push(err32);
-}
-errors++;
-}
-}
-}
-else {
-const err33 = {instancePath:instancePath+"/geometry/dash",schemaPath:"#/properties/geometry/properties/dash/type",keyword:"type",params:{type: "array"},message:"must be array"};
-if(vErrors === null){
-vErrors = [err33];
-}
-else {
-vErrors.push(err33);
-}
-errors++;
-}
-}
-if(data3.inset !== undefined){
-let data14 = data3.inset;
-if((typeof data14 == "number") && (isFinite(data14))){
-if(data14 < 0 || isNaN(data14)){
-const err34 = {instancePath:instancePath+"/geometry/inset",schemaPath:"#/properties/geometry/properties/inset/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
-if(vErrors === null){
-vErrors = [err34];
-}
-else {
-vErrors.push(err34);
-}
-errors++;
-}
-}
-else {
-const err35 = {instancePath:instancePath+"/geometry/inset",schemaPath:"#/properties/geometry/properties/inset/type",keyword:"type",params:{type: "number"},message:"must be number"};
+const len1 = data14.length;
+for(let i1=0; i1<len1; i1++){
+let data15 = data14[i1];
+if(data15 && typeof data15 == "object" && !Array.isArray(data15)){
+if(data15.process === undefined){
+const err35 = {instancePath:instancePath+"/processes/" + i1,schemaPath:"#/$defs/process/required",keyword:"required",params:{missingProperty: "process"},message:"must have required property '"+"process"+"'"};
 if(vErrors === null){
 vErrors = [err35];
 }
@@ -2456,11 +2632,9 @@ vErrors.push(err35);
 }
 errors++;
 }
-}
-if(data3.rows !== undefined){
-let data15 = data3.rows;
-if(!(((typeof data15 == "number") && (!(data15 % 1) && !isNaN(data15))) && (isFinite(data15)))){
-const err36 = {instancePath:instancePath+"/geometry/rows",schemaPath:"#/properties/geometry/properties/rows/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+for(const key1 in data15){
+if(!(((key1 === "process") || (key1 === "spotName")) || (key1 === "requiredMask"))){
+const err36 = {instancePath:instancePath+"/processes/" + i1,schemaPath:"#/$defs/process/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err36];
 }
@@ -2469,9 +2643,11 @@ vErrors.push(err36);
 }
 errors++;
 }
-if((typeof data15 == "number") && (isFinite(data15))){
-if(data15 > 128 || isNaN(data15)){
-const err37 = {instancePath:instancePath+"/geometry/rows",schemaPath:"#/properties/geometry/properties/rows/maximum",keyword:"maximum",params:{comparison: "<=", limit: 128},message:"must be <= 128"};
+}
+if(data15.process !== undefined){
+let data16 = data15.process;
+if(!(((((((((((data16 === "screen_print") || (data16 === "pad_print")) || (data16 === "digital_print")) || (data16 === "offset_print")) || (data16 === "white_underbase")) || (data16 === "varnish")) || (data16 === "hot_stamp_foil")) || (data16 === "emboss")) || (data16 === "deboss")) || (data16 === "in_mold")) || (data16 === "batch_code"))){
+const err37 = {instancePath:instancePath+"/processes/" + i1+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema49.properties.process.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err37];
 }
@@ -2480,8 +2656,12 @@ vErrors.push(err37);
 }
 errors++;
 }
-if(data15 < 1 || isNaN(data15)){
-const err38 = {instancePath:instancePath+"/geometry/rows",schemaPath:"#/properties/geometry/properties/rows/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+}
+if(data15.spotName !== undefined){
+let data17 = data15.spotName;
+if(typeof data17 === "string"){
+if(func1(data17) > 128){
+const err38 = {instancePath:instancePath+"/processes/" + i1+"/spotName",schemaPath:"#/$defs/process/properties/spotName/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
 if(vErrors === null){
 vErrors = [err38];
 }
@@ -2490,12 +2670,8 @@ vErrors.push(err38);
 }
 errors++;
 }
-}
-}
-if(data3.columns !== undefined){
-let data16 = data3.columns;
-if(!(((typeof data16 == "number") && (!(data16 % 1) && !isNaN(data16))) && (isFinite(data16)))){
-const err39 = {instancePath:instancePath+"/geometry/columns",schemaPath:"#/properties/geometry/properties/columns/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(func1(data17) < 1){
+const err39 = {instancePath:instancePath+"/processes/" + i1+"/spotName",schemaPath:"#/$defs/process/properties/spotName/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err39];
 }
@@ -2504,9 +2680,9 @@ vErrors.push(err39);
 }
 errors++;
 }
-if((typeof data16 == "number") && (isFinite(data16))){
-if(data16 > 128 || isNaN(data16)){
-const err40 = {instancePath:instancePath+"/geometry/columns",schemaPath:"#/properties/geometry/properties/columns/maximum",keyword:"maximum",params:{comparison: "<=", limit: 128},message:"must be <= 128"};
+}
+else {
+const err40 = {instancePath:instancePath+"/processes/" + i1+"/spotName",schemaPath:"#/$defs/process/properties/spotName/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err40];
 }
@@ -2515,8 +2691,11 @@ vErrors.push(err40);
 }
 errors++;
 }
-if(data16 < 1 || isNaN(data16)){
-const err41 = {instancePath:instancePath+"/geometry/columns",schemaPath:"#/properties/geometry/properties/columns/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+}
+if(data15.requiredMask !== undefined){
+let data18 = data15.requiredMask;
+if(!(((((data18 === "color") || (data18 === "metalness")) || (data18 === "roughness")) || (data18 === "bump")) || (data18 === "white_underbase"))){
+const err41 = {instancePath:instancePath+"/processes/" + i1+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema49.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err41];
 }
@@ -2527,11 +2706,8 @@ errors++;
 }
 }
 }
-if(data3.gap !== undefined){
-let data17 = data3.gap;
-if((typeof data17 == "number") && (isFinite(data17))){
-if(data17 < 0 || isNaN(data17)){
-const err42 = {instancePath:instancePath+"/geometry/gap",schemaPath:"#/properties/geometry/properties/gap/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+else {
+const err42 = {instancePath:instancePath+"/processes/" + i1,schemaPath:"#/$defs/process/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err42];
 }
@@ -2541,8 +2717,9 @@ vErrors.push(err42);
 errors++;
 }
 }
+}
 else {
-const err43 = {instancePath:instancePath+"/geometry/gap",schemaPath:"#/properties/geometry/properties/gap/type",keyword:"type",params:{type: "number"},message:"must be number"};
+const err43 = {instancePath:instancePath+"/processes",schemaPath:"#/properties/processes/type",keyword:"type",params:{type: "array"},message:"must be array"};
 if(vErrors === null){
 vErrors = [err43];
 }
@@ -2554,7 +2731,7 @@ errors++;
 }
 }
 else {
-const err44 = {instancePath:instancePath+"/geometry",schemaPath:"#/properties/geometry/type",keyword:"type",params:{type: "object"},message:"must be object"};
+const err44 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err44];
 }
@@ -2563,12 +2740,581 @@ vErrors.push(err44);
 }
 errors++;
 }
+validate29.errors = vErrors;
+return errors === 0;
 }
-if(data.x !== undefined){
-let data18 = data.x;
-if((typeof data18 == "number") && (isFinite(data18))){
-if(data18 > 1 || isNaN(data18)){
-const err45 = {instancePath:instancePath+"/x",schemaPath:"#/properties/x/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
+validate29.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+const schema52 = {"type":"object","additionalProperties":false,"required":["id","type","shape","x","y","width","height"],"properties":{"id":{"type":"string","minLength":1},"type":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"type":"integer","minimum":3,"maximum":64},"points":{"type":"integer","minimum":3,"maximum":64},"innerRatio":{"type":"number","minimum":0,"maximum":1},"amplitude":{"type":"number","minimum":0,"maximum":1},"frequency":{"type":"number","minimum":0,"maximum":64},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"type":"number","minimum":0}},"inset":{"type":"number","minimum":0},"rows":{"type":"integer","minimum":1,"maximum":128},"columns":{"type":"integer","minimum":1,"maximum":128},"gap":{"type":"number","minimum":0}}},"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":4},"height":{"type":"number","exclusiveMinimum":0,"maximum":4},"fill":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"stroke":{"type":"string","pattern":"^#[0-9A-Fa-f]{6}$"},"strokeWidth":{"type":"number","minimum":0},"cornerRadius":{"type":"number","minimum":0},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"craft":{"type":"array","items":{"$ref":"#/$defs/craft"}},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]};
+
+function validate33(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate33.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+const _errs2 = errors;
+let valid1 = true;
+const _errs3 = errors;
+if(data && typeof data == "object" && !Array.isArray(data)){
+let missing0;
+if((data.shape === undefined) && (missing0 = "shape")){
+const err0 = {};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+else {
+if(data.shape !== undefined){
+if("path" !== data.shape){
+const err1 = {};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+}
+}
+}
+var _valid0 = _errs3 === errors;
+errors = _errs2;
+if(vErrors !== null){
+if(_errs2){
+vErrors.length = _errs2;
+}
+else {
+vErrors = null;
+}
+}
+if(_valid0){
+const _errs5 = errors;
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.pathData === undefined){
+const err2 = {instancePath,schemaPath:"#/allOf/0/then/required",keyword:"required",params:{missingProperty: "pathData"},message:"must have required property '"+"pathData"+"'"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+if(data.pathViewBox === undefined){
+const err3 = {instancePath,schemaPath:"#/allOf/0/then/required",keyword:"required",params:{missingProperty: "pathViewBox"},message:"must have required property '"+"pathViewBox"+"'"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+}
+var _valid0 = _errs5 === errors;
+valid1 = _valid0;
+if(valid1){
+var props0 = {};
+props0.pathData = true;
+props0.pathViewBox = true;
+props0.shape = true;
+}
+}
+if(!valid1){
+const err4 = {instancePath,schemaPath:"#/allOf/0/if",keyword:"if",params:{failingKeyword: "then"},message:"must match \"then\" schema"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.id === undefined){
+const err5 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "id"},message:"must have required property '"+"id"+"'"};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+if(data.type === undefined){
+const err6 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "type"},message:"must have required property '"+"type"+"'"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+if(data.shape === undefined){
+const err7 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "shape"},message:"must have required property '"+"shape"+"'"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+if(data.x === undefined){
+const err8 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "x"},message:"must have required property '"+"x"+"'"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+if(data.y === undefined){
+const err9 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "y"},message:"must have required property '"+"y"+"'"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+if(data.width === undefined){
+const err10 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "width"},message:"must have required property '"+"width"+"'"};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+if(data.height === undefined){
+const err11 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "height"},message:"must have required property '"+"height"+"'"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+for(const key0 in data){
+if(!(func4.call(schema52.properties, key0))){
+const err12 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
+}
+errors++;
+}
+}
+if(data.id !== undefined){
+let data1 = data.id;
+if(typeof data1 === "string"){
+if(func1(data1) < 1){
+const err13 = {instancePath:instancePath+"/id",schemaPath:"#/properties/id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err13];
+}
+else {
+vErrors.push(err13);
+}
+errors++;
+}
+}
+else {
+const err14 = {instancePath:instancePath+"/id",schemaPath:"#/properties/id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
+}
+errors++;
+}
+}
+if(data.type !== undefined){
+if("shape" !== data.type){
+const err15 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/const",keyword:"const",params:{allowedValue: "shape"},message:"must be equal to constant"};
+if(vErrors === null){
+vErrors = [err15];
+}
+else {
+vErrors.push(err15);
+}
+errors++;
+}
+}
+if(data.shape !== undefined){
+let data3 = data.shape;
+if(!((((((((((((((data3 === "rectangle") || (data3 === "ellipse")) || (data3 === "triangle")) || (data3 === "diamond")) || (data3 === "polygon")) || (data3 === "star")) || (data3 === "line")) || (data3 === "wave")) || (data3 === "burst")) || (data3 === "cross")) || (data3 === "bracket")) || (data3 === "dot-grid")) || (data3 === "frame")) || (data3 === "path"))){
+const err16 = {instancePath:instancePath+"/shape",schemaPath:"#/properties/shape/enum",keyword:"enum",params:{allowedValues: schema52.properties.shape.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err16];
+}
+else {
+vErrors.push(err16);
+}
+errors++;
+}
+}
+if(data.geometry !== undefined){
+let data4 = data.geometry;
+if(data4 && typeof data4 == "object" && !Array.isArray(data4)){
+for(const key1 in data4){
+if(!(func4.call(schema52.properties.geometry.properties, key1))){
+const err17 = {instancePath:instancePath+"/geometry",schemaPath:"#/properties/geometry/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err17];
+}
+else {
+vErrors.push(err17);
+}
+errors++;
+}
+}
+if(data4.sides !== undefined){
+let data5 = data4.sides;
+if(!(((typeof data5 == "number") && (!(data5 % 1) && !isNaN(data5))) && (isFinite(data5)))){
+const err18 = {instancePath:instancePath+"/geometry/sides",schemaPath:"#/properties/geometry/properties/sides/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err18];
+}
+else {
+vErrors.push(err18);
+}
+errors++;
+}
+if((typeof data5 == "number") && (isFinite(data5))){
+if(data5 > 64 || isNaN(data5)){
+const err19 = {instancePath:instancePath+"/geometry/sides",schemaPath:"#/properties/geometry/properties/sides/maximum",keyword:"maximum",params:{comparison: "<=", limit: 64},message:"must be <= 64"};
+if(vErrors === null){
+vErrors = [err19];
+}
+else {
+vErrors.push(err19);
+}
+errors++;
+}
+if(data5 < 3 || isNaN(data5)){
+const err20 = {instancePath:instancePath+"/geometry/sides",schemaPath:"#/properties/geometry/properties/sides/minimum",keyword:"minimum",params:{comparison: ">=", limit: 3},message:"must be >= 3"};
+if(vErrors === null){
+vErrors = [err20];
+}
+else {
+vErrors.push(err20);
+}
+errors++;
+}
+}
+}
+if(data4.points !== undefined){
+let data6 = data4.points;
+if(!(((typeof data6 == "number") && (!(data6 % 1) && !isNaN(data6))) && (isFinite(data6)))){
+const err21 = {instancePath:instancePath+"/geometry/points",schemaPath:"#/properties/geometry/properties/points/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err21];
+}
+else {
+vErrors.push(err21);
+}
+errors++;
+}
+if((typeof data6 == "number") && (isFinite(data6))){
+if(data6 > 64 || isNaN(data6)){
+const err22 = {instancePath:instancePath+"/geometry/points",schemaPath:"#/properties/geometry/properties/points/maximum",keyword:"maximum",params:{comparison: "<=", limit: 64},message:"must be <= 64"};
+if(vErrors === null){
+vErrors = [err22];
+}
+else {
+vErrors.push(err22);
+}
+errors++;
+}
+if(data6 < 3 || isNaN(data6)){
+const err23 = {instancePath:instancePath+"/geometry/points",schemaPath:"#/properties/geometry/properties/points/minimum",keyword:"minimum",params:{comparison: ">=", limit: 3},message:"must be >= 3"};
+if(vErrors === null){
+vErrors = [err23];
+}
+else {
+vErrors.push(err23);
+}
+errors++;
+}
+}
+}
+if(data4.innerRatio !== undefined){
+let data7 = data4.innerRatio;
+if((typeof data7 == "number") && (isFinite(data7))){
+if(data7 > 1 || isNaN(data7)){
+const err24 = {instancePath:instancePath+"/geometry/innerRatio",schemaPath:"#/properties/geometry/properties/innerRatio/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
+if(vErrors === null){
+vErrors = [err24];
+}
+else {
+vErrors.push(err24);
+}
+errors++;
+}
+if(data7 < 0 || isNaN(data7)){
+const err25 = {instancePath:instancePath+"/geometry/innerRatio",schemaPath:"#/properties/geometry/properties/innerRatio/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err25];
+}
+else {
+vErrors.push(err25);
+}
+errors++;
+}
+}
+else {
+const err26 = {instancePath:instancePath+"/geometry/innerRatio",schemaPath:"#/properties/geometry/properties/innerRatio/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err26];
+}
+else {
+vErrors.push(err26);
+}
+errors++;
+}
+}
+if(data4.amplitude !== undefined){
+let data8 = data4.amplitude;
+if((typeof data8 == "number") && (isFinite(data8))){
+if(data8 > 1 || isNaN(data8)){
+const err27 = {instancePath:instancePath+"/geometry/amplitude",schemaPath:"#/properties/geometry/properties/amplitude/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
+if(vErrors === null){
+vErrors = [err27];
+}
+else {
+vErrors.push(err27);
+}
+errors++;
+}
+if(data8 < 0 || isNaN(data8)){
+const err28 = {instancePath:instancePath+"/geometry/amplitude",schemaPath:"#/properties/geometry/properties/amplitude/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err28];
+}
+else {
+vErrors.push(err28);
+}
+errors++;
+}
+}
+else {
+const err29 = {instancePath:instancePath+"/geometry/amplitude",schemaPath:"#/properties/geometry/properties/amplitude/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err29];
+}
+else {
+vErrors.push(err29);
+}
+errors++;
+}
+}
+if(data4.frequency !== undefined){
+let data9 = data4.frequency;
+if((typeof data9 == "number") && (isFinite(data9))){
+if(data9 > 64 || isNaN(data9)){
+const err30 = {instancePath:instancePath+"/geometry/frequency",schemaPath:"#/properties/geometry/properties/frequency/maximum",keyword:"maximum",params:{comparison: "<=", limit: 64},message:"must be <= 64"};
+if(vErrors === null){
+vErrors = [err30];
+}
+else {
+vErrors.push(err30);
+}
+errors++;
+}
+if(data9 < 0 || isNaN(data9)){
+const err31 = {instancePath:instancePath+"/geometry/frequency",schemaPath:"#/properties/geometry/properties/frequency/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err31];
+}
+else {
+vErrors.push(err31);
+}
+errors++;
+}
+}
+else {
+const err32 = {instancePath:instancePath+"/geometry/frequency",schemaPath:"#/properties/geometry/properties/frequency/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err32];
+}
+else {
+vErrors.push(err32);
+}
+errors++;
+}
+}
+if(data4.arrowStart !== undefined){
+if(typeof data4.arrowStart !== "boolean"){
+const err33 = {instancePath:instancePath+"/geometry/arrowStart",schemaPath:"#/properties/geometry/properties/arrowStart/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err33];
+}
+else {
+vErrors.push(err33);
+}
+errors++;
+}
+}
+if(data4.arrowEnd !== undefined){
+if(typeof data4.arrowEnd !== "boolean"){
+const err34 = {instancePath:instancePath+"/geometry/arrowEnd",schemaPath:"#/properties/geometry/properties/arrowEnd/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err34];
+}
+else {
+vErrors.push(err34);
+}
+errors++;
+}
+}
+if(data4.parallel !== undefined){
+if(typeof data4.parallel !== "boolean"){
+const err35 = {instancePath:instancePath+"/geometry/parallel",schemaPath:"#/properties/geometry/properties/parallel/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err35];
+}
+else {
+vErrors.push(err35);
+}
+errors++;
+}
+}
+if(data4.dash !== undefined){
+let data13 = data4.dash;
+if(Array.isArray(data13)){
+const len0 = data13.length;
+for(let i0=0; i0<len0; i0++){
+let data14 = data13[i0];
+if((typeof data14 == "number") && (isFinite(data14))){
+if(data14 < 0 || isNaN(data14)){
+const err36 = {instancePath:instancePath+"/geometry/dash/" + i0,schemaPath:"#/properties/geometry/properties/dash/items/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err36];
+}
+else {
+vErrors.push(err36);
+}
+errors++;
+}
+}
+else {
+const err37 = {instancePath:instancePath+"/geometry/dash/" + i0,schemaPath:"#/properties/geometry/properties/dash/items/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err37];
+}
+else {
+vErrors.push(err37);
+}
+errors++;
+}
+}
+}
+else {
+const err38 = {instancePath:instancePath+"/geometry/dash",schemaPath:"#/properties/geometry/properties/dash/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(vErrors === null){
+vErrors = [err38];
+}
+else {
+vErrors.push(err38);
+}
+errors++;
+}
+}
+if(data4.inset !== undefined){
+let data15 = data4.inset;
+if((typeof data15 == "number") && (isFinite(data15))){
+if(data15 < 0 || isNaN(data15)){
+const err39 = {instancePath:instancePath+"/geometry/inset",schemaPath:"#/properties/geometry/properties/inset/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err39];
+}
+else {
+vErrors.push(err39);
+}
+errors++;
+}
+}
+else {
+const err40 = {instancePath:instancePath+"/geometry/inset",schemaPath:"#/properties/geometry/properties/inset/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err40];
+}
+else {
+vErrors.push(err40);
+}
+errors++;
+}
+}
+if(data4.rows !== undefined){
+let data16 = data4.rows;
+if(!(((typeof data16 == "number") && (!(data16 % 1) && !isNaN(data16))) && (isFinite(data16)))){
+const err41 = {instancePath:instancePath+"/geometry/rows",schemaPath:"#/properties/geometry/properties/rows/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err41];
+}
+else {
+vErrors.push(err41);
+}
+errors++;
+}
+if((typeof data16 == "number") && (isFinite(data16))){
+if(data16 > 128 || isNaN(data16)){
+const err42 = {instancePath:instancePath+"/geometry/rows",schemaPath:"#/properties/geometry/properties/rows/maximum",keyword:"maximum",params:{comparison: "<=", limit: 128},message:"must be <= 128"};
+if(vErrors === null){
+vErrors = [err42];
+}
+else {
+vErrors.push(err42);
+}
+errors++;
+}
+if(data16 < 1 || isNaN(data16)){
+const err43 = {instancePath:instancePath+"/geometry/rows",schemaPath:"#/properties/geometry/properties/rows/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
+if(vErrors === null){
+vErrors = [err43];
+}
+else {
+vErrors.push(err43);
+}
+errors++;
+}
+}
+}
+if(data4.columns !== undefined){
+let data17 = data4.columns;
+if(!(((typeof data17 == "number") && (!(data17 % 1) && !isNaN(data17))) && (isFinite(data17)))){
+const err44 = {instancePath:instancePath+"/geometry/columns",schemaPath:"#/properties/geometry/properties/columns/type",keyword:"type",params:{type: "integer"},message:"must be integer"};
+if(vErrors === null){
+vErrors = [err44];
+}
+else {
+vErrors.push(err44);
+}
+errors++;
+}
+if((typeof data17 == "number") && (isFinite(data17))){
+if(data17 > 128 || isNaN(data17)){
+const err45 = {instancePath:instancePath+"/geometry/columns",schemaPath:"#/properties/geometry/properties/columns/maximum",keyword:"maximum",params:{comparison: "<=", limit: 128},message:"must be <= 128"};
 if(vErrors === null){
 vErrors = [err45];
 }
@@ -2577,8 +3323,8 @@ vErrors.push(err45);
 }
 errors++;
 }
-if(data18 < 0 || isNaN(data18)){
-const err46 = {instancePath:instancePath+"/x",schemaPath:"#/properties/x/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(data17 < 1 || isNaN(data17)){
+const err46 = {instancePath:instancePath+"/geometry/columns",schemaPath:"#/properties/geometry/properties/columns/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
 if(vErrors === null){
 vErrors = [err46];
 }
@@ -2588,8 +3334,12 @@ vErrors.push(err46);
 errors++;
 }
 }
-else {
-const err47 = {instancePath:instancePath+"/x",schemaPath:"#/properties/x/type",keyword:"type",params:{type: "number"},message:"must be number"};
+}
+if(data4.gap !== undefined){
+let data18 = data4.gap;
+if((typeof data18 == "number") && (isFinite(data18))){
+if(data18 < 0 || isNaN(data18)){
+const err47 = {instancePath:instancePath+"/geometry/gap",schemaPath:"#/properties/geometry/properties/gap/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err47];
 }
@@ -2599,11 +3349,8 @@ vErrors.push(err47);
 errors++;
 }
 }
-if(data.y !== undefined){
-let data19 = data.y;
-if((typeof data19 == "number") && (isFinite(data19))){
-if(data19 > 1 || isNaN(data19)){
-const err48 = {instancePath:instancePath+"/y",schemaPath:"#/properties/y/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
+else {
+const err48 = {instancePath:instancePath+"/geometry/gap",schemaPath:"#/properties/geometry/properties/gap/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err48];
 }
@@ -2612,8 +3359,10 @@ vErrors.push(err48);
 }
 errors++;
 }
-if(data19 < 0 || isNaN(data19)){
-const err49 = {instancePath:instancePath+"/y",schemaPath:"#/properties/y/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+}
+}
+else {
+const err49 = {instancePath:instancePath+"/geometry",schemaPath:"#/properties/geometry/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err49];
 }
@@ -2623,8 +3372,11 @@ vErrors.push(err49);
 errors++;
 }
 }
-else {
-const err50 = {instancePath:instancePath+"/y",schemaPath:"#/properties/y/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.x !== undefined){
+let data19 = data.x;
+if((typeof data19 == "number") && (isFinite(data19))){
+if(data19 > 1 || isNaN(data19)){
+const err50 = {instancePath:instancePath+"/x",schemaPath:"#/properties/x/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
 if(vErrors === null){
 vErrors = [err50];
 }
@@ -2633,12 +3385,8 @@ vErrors.push(err50);
 }
 errors++;
 }
-}
-if(data.width !== undefined){
-let data20 = data.width;
-if((typeof data20 == "number") && (isFinite(data20))){
-if(data20 > 4 || isNaN(data20)){
-const err51 = {instancePath:instancePath+"/width",schemaPath:"#/properties/width/maximum",keyword:"maximum",params:{comparison: "<=", limit: 4},message:"must be <= 4"};
+if(data19 < 0 || isNaN(data19)){
+const err51 = {instancePath:instancePath+"/x",schemaPath:"#/properties/x/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err51];
 }
@@ -2647,8 +3395,9 @@ vErrors.push(err51);
 }
 errors++;
 }
-if(data20 <= 0 || isNaN(data20)){
-const err52 = {instancePath:instancePath+"/width",schemaPath:"#/properties/width/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+}
+else {
+const err52 = {instancePath:instancePath+"/x",schemaPath:"#/properties/x/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err52];
 }
@@ -2658,8 +3407,11 @@ vErrors.push(err52);
 errors++;
 }
 }
-else {
-const err53 = {instancePath:instancePath+"/width",schemaPath:"#/properties/width/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.y !== undefined){
+let data20 = data.y;
+if((typeof data20 == "number") && (isFinite(data20))){
+if(data20 > 1 || isNaN(data20)){
+const err53 = {instancePath:instancePath+"/y",schemaPath:"#/properties/y/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
 if(vErrors === null){
 vErrors = [err53];
 }
@@ -2668,12 +3420,8 @@ vErrors.push(err53);
 }
 errors++;
 }
-}
-if(data.height !== undefined){
-let data21 = data.height;
-if((typeof data21 == "number") && (isFinite(data21))){
-if(data21 > 4 || isNaN(data21)){
-const err54 = {instancePath:instancePath+"/height",schemaPath:"#/properties/height/maximum",keyword:"maximum",params:{comparison: "<=", limit: 4},message:"must be <= 4"};
+if(data20 < 0 || isNaN(data20)){
+const err54 = {instancePath:instancePath+"/y",schemaPath:"#/properties/y/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err54];
 }
@@ -2682,8 +3430,9 @@ vErrors.push(err54);
 }
 errors++;
 }
-if(data21 <= 0 || isNaN(data21)){
-const err55 = {instancePath:instancePath+"/height",schemaPath:"#/properties/height/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+}
+else {
+const err55 = {instancePath:instancePath+"/y",schemaPath:"#/properties/y/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err55];
 }
@@ -2693,8 +3442,11 @@ vErrors.push(err55);
 errors++;
 }
 }
-else {
-const err56 = {instancePath:instancePath+"/height",schemaPath:"#/properties/height/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.width !== undefined){
+let data21 = data.width;
+if((typeof data21 == "number") && (isFinite(data21))){
+if(data21 > 4 || isNaN(data21)){
+const err56 = {instancePath:instancePath+"/width",schemaPath:"#/properties/width/maximum",keyword:"maximum",params:{comparison: "<=", limit: 4},message:"must be <= 4"};
 if(vErrors === null){
 vErrors = [err56];
 }
@@ -2703,12 +3455,8 @@ vErrors.push(err56);
 }
 errors++;
 }
-}
-if(data.fill !== undefined){
-let data22 = data.fill;
-if(typeof data22 === "string"){
-if(!pattern4.test(data22)){
-const err57 = {instancePath:instancePath+"/fill",schemaPath:"#/properties/fill/pattern",keyword:"pattern",params:{pattern: "^#[0-9A-Fa-f]{6}$"},message:"must match pattern \""+"^#[0-9A-Fa-f]{6}$"+"\""};
+if(data21 <= 0 || isNaN(data21)){
+const err57 = {instancePath:instancePath+"/width",schemaPath:"#/properties/width/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
 if(vErrors === null){
 vErrors = [err57];
 }
@@ -2719,7 +3467,7 @@ errors++;
 }
 }
 else {
-const err58 = {instancePath:instancePath+"/fill",schemaPath:"#/properties/fill/type",keyword:"type",params:{type: "string"},message:"must be string"};
+const err58 = {instancePath:instancePath+"/width",schemaPath:"#/properties/width/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err58];
 }
@@ -2729,11 +3477,11 @@ vErrors.push(err58);
 errors++;
 }
 }
-if(data.stroke !== undefined){
-let data23 = data.stroke;
-if(typeof data23 === "string"){
-if(!pattern4.test(data23)){
-const err59 = {instancePath:instancePath+"/stroke",schemaPath:"#/properties/stroke/pattern",keyword:"pattern",params:{pattern: "^#[0-9A-Fa-f]{6}$"},message:"must match pattern \""+"^#[0-9A-Fa-f]{6}$"+"\""};
+if(data.height !== undefined){
+let data22 = data.height;
+if((typeof data22 == "number") && (isFinite(data22))){
+if(data22 > 4 || isNaN(data22)){
+const err59 = {instancePath:instancePath+"/height",schemaPath:"#/properties/height/maximum",keyword:"maximum",params:{comparison: "<=", limit: 4},message:"must be <= 4"};
 if(vErrors === null){
 vErrors = [err59];
 }
@@ -2742,9 +3490,8 @@ vErrors.push(err59);
 }
 errors++;
 }
-}
-else {
-const err60 = {instancePath:instancePath+"/stroke",schemaPath:"#/properties/stroke/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data22 <= 0 || isNaN(data22)){
+const err60 = {instancePath:instancePath+"/height",schemaPath:"#/properties/height/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
 if(vErrors === null){
 vErrors = [err60];
 }
@@ -2754,11 +3501,8 @@ vErrors.push(err60);
 errors++;
 }
 }
-if(data.strokeWidth !== undefined){
-let data24 = data.strokeWidth;
-if((typeof data24 == "number") && (isFinite(data24))){
-if(data24 < 0 || isNaN(data24)){
-const err61 = {instancePath:instancePath+"/strokeWidth",schemaPath:"#/properties/strokeWidth/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+else {
+const err61 = {instancePath:instancePath+"/height",schemaPath:"#/properties/height/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err61];
 }
@@ -2768,8 +3512,11 @@ vErrors.push(err61);
 errors++;
 }
 }
-else {
-const err62 = {instancePath:instancePath+"/strokeWidth",schemaPath:"#/properties/strokeWidth/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.fill !== undefined){
+let data23 = data.fill;
+if(typeof data23 === "string"){
+if(!pattern4.test(data23)){
+const err62 = {instancePath:instancePath+"/fill",schemaPath:"#/properties/fill/pattern",keyword:"pattern",params:{pattern: "^#[0-9A-Fa-f]{6}$"},message:"must match pattern \""+"^#[0-9A-Fa-f]{6}$"+"\""};
 if(vErrors === null){
 vErrors = [err62];
 }
@@ -2779,11 +3526,8 @@ vErrors.push(err62);
 errors++;
 }
 }
-if(data.cornerRadius !== undefined){
-let data25 = data.cornerRadius;
-if((typeof data25 == "number") && (isFinite(data25))){
-if(data25 < 0 || isNaN(data25)){
-const err63 = {instancePath:instancePath+"/cornerRadius",schemaPath:"#/properties/cornerRadius/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+else {
+const err63 = {instancePath:instancePath+"/fill",schemaPath:"#/properties/fill/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err63];
 }
@@ -2793,8 +3537,11 @@ vErrors.push(err63);
 errors++;
 }
 }
-else {
-const err64 = {instancePath:instancePath+"/cornerRadius",schemaPath:"#/properties/cornerRadius/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.stroke !== undefined){
+let data24 = data.stroke;
+if(typeof data24 === "string"){
+if(!pattern4.test(data24)){
+const err64 = {instancePath:instancePath+"/stroke",schemaPath:"#/properties/stroke/pattern",keyword:"pattern",params:{pattern: "^#[0-9A-Fa-f]{6}$"},message:"must match pattern \""+"^#[0-9A-Fa-f]{6}$"+"\""};
 if(vErrors === null){
 vErrors = [err64];
 }
@@ -2804,11 +3551,8 @@ vErrors.push(err64);
 errors++;
 }
 }
-if(data.rotation !== undefined){
-let data26 = data.rotation;
-if((typeof data26 == "number") && (isFinite(data26))){
-if(data26 > 360 || isNaN(data26)){
-const err65 = {instancePath:instancePath+"/rotation",schemaPath:"#/properties/rotation/maximum",keyword:"maximum",params:{comparison: "<=", limit: 360},message:"must be <= 360"};
+else {
+const err65 = {instancePath:instancePath+"/stroke",schemaPath:"#/properties/stroke/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err65];
 }
@@ -2817,8 +3561,12 @@ vErrors.push(err65);
 }
 errors++;
 }
-if(data26 < -360 || isNaN(data26)){
-const err66 = {instancePath:instancePath+"/rotation",schemaPath:"#/properties/rotation/minimum",keyword:"minimum",params:{comparison: ">=", limit: -360},message:"must be >= -360"};
+}
+if(data.strokeWidth !== undefined){
+let data25 = data.strokeWidth;
+if((typeof data25 == "number") && (isFinite(data25))){
+if(data25 < 0 || isNaN(data25)){
+const err66 = {instancePath:instancePath+"/strokeWidth",schemaPath:"#/properties/strokeWidth/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err66];
 }
@@ -2829,7 +3577,7 @@ errors++;
 }
 }
 else {
-const err67 = {instancePath:instancePath+"/rotation",schemaPath:"#/properties/rotation/type",keyword:"type",params:{type: "number"},message:"must be number"};
+const err67 = {instancePath:instancePath+"/strokeWidth",schemaPath:"#/properties/strokeWidth/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err67];
 }
@@ -2839,11 +3587,11 @@ vErrors.push(err67);
 errors++;
 }
 }
-if(data.opacity !== undefined){
-let data27 = data.opacity;
-if((typeof data27 == "number") && (isFinite(data27))){
-if(data27 > 1 || isNaN(data27)){
-const err68 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
+if(data.cornerRadius !== undefined){
+let data26 = data.cornerRadius;
+if((typeof data26 == "number") && (isFinite(data26))){
+if(data26 < 0 || isNaN(data26)){
+const err68 = {instancePath:instancePath+"/cornerRadius",schemaPath:"#/properties/cornerRadius/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
 if(vErrors === null){
 vErrors = [err68];
 }
@@ -2852,8 +3600,9 @@ vErrors.push(err68);
 }
 errors++;
 }
-if(data27 < 0 || isNaN(data27)){
-const err69 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+}
+else {
+const err69 = {instancePath:instancePath+"/cornerRadius",schemaPath:"#/properties/cornerRadius/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err69];
 }
@@ -2863,8 +3612,11 @@ vErrors.push(err69);
 errors++;
 }
 }
-else {
-const err70 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.pathData !== undefined){
+let data27 = data.pathData;
+if(typeof data27 === "string"){
+if(func1(data27) > 131072){
+const err70 = {instancePath:instancePath+"/pathData",schemaPath:"#/properties/pathData/maxLength",keyword:"maxLength",params:{limit: 131072},message:"must NOT have more than 131072 characters"};
 if(vErrors === null){
 vErrors = [err70];
 }
@@ -2873,10 +3625,8 @@ vErrors.push(err70);
 }
 errors++;
 }
-}
-if(data.visible !== undefined){
-if(typeof data.visible !== "boolean"){
-const err71 = {instancePath:instancePath+"/visible",schemaPath:"#/properties/visible/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(func1(data27) < 1){
+const err71 = {instancePath:instancePath+"/pathData",schemaPath:"#/properties/pathData/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err71];
 }
@@ -2886,9 +3636,8 @@ vErrors.push(err71);
 errors++;
 }
 }
-if(data.locked !== undefined){
-if(typeof data.locked !== "boolean"){
-const err72 = {instancePath:instancePath+"/locked",schemaPath:"#/properties/locked/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+else {
+const err72 = {instancePath:instancePath+"/pathData",schemaPath:"#/properties/pathData/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err72];
 }
@@ -2898,19 +3647,11 @@ vErrors.push(err72);
 errors++;
 }
 }
-if(data.craft !== undefined){
-let data30 = data.craft;
-if(Array.isArray(data30)){
-const len1 = data30.length;
-for(let i1=0; i1<len1; i1++){
-if(!(validate24(data30[i1], {instancePath:instancePath+"/craft/" + i1,parentData:data30,parentDataProperty:i1,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate24.errors : vErrors.concat(validate24.errors);
-errors = vErrors.length;
-}
-}
-}
-else {
-const err73 = {instancePath:instancePath+"/craft",schemaPath:"#/properties/craft/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(data.pathViewBox !== undefined){
+let data28 = data.pathViewBox;
+if(Array.isArray(data28)){
+if(data28.length > 4){
+const err73 = {instancePath:instancePath+"/pathViewBox",schemaPath:"#/properties/pathViewBox/maxItems",keyword:"maxItems",params:{limit: 4},message:"must NOT have more than 4 items"};
 if(vErrors === null){
 vErrors = [err73];
 }
@@ -2919,10 +3660,8 @@ vErrors.push(err73);
 }
 errors++;
 }
-}
-}
-else {
-const err74 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data28.length < 4){
+const err74 = {instancePath:instancePath+"/pathViewBox",schemaPath:"#/properties/pathViewBox/minItems",keyword:"minItems",params:{limit: 4},message:"must NOT have fewer than 4 items"};
 if(vErrors === null){
 vErrors = [err74];
 }
@@ -2931,10 +3670,356 @@ vErrors.push(err74);
 }
 errors++;
 }
-validate30.errors = vErrors;
+const len1 = data28.length;
+if(len1 > 0){
+let data29 = data28[0];
+if(!((typeof data29 == "number") && (isFinite(data29)))){
+const err75 = {instancePath:instancePath+"/pathViewBox/0",schemaPath:"#/properties/pathViewBox/prefixItems/0/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err75];
+}
+else {
+vErrors.push(err75);
+}
+errors++;
+}
+}
+if(len1 > 1){
+let data30 = data28[1];
+if(!((typeof data30 == "number") && (isFinite(data30)))){
+const err76 = {instancePath:instancePath+"/pathViewBox/1",schemaPath:"#/properties/pathViewBox/prefixItems/1/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err76];
+}
+else {
+vErrors.push(err76);
+}
+errors++;
+}
+}
+if(len1 > 2){
+let data31 = data28[2];
+if(!((typeof data31 == "number") && (isFinite(data31)))){
+const err77 = {instancePath:instancePath+"/pathViewBox/2",schemaPath:"#/properties/pathViewBox/prefixItems/2/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err77];
+}
+else {
+vErrors.push(err77);
+}
+errors++;
+}
+}
+if(len1 > 3){
+let data32 = data28[3];
+if(!((typeof data32 == "number") && (isFinite(data32)))){
+const err78 = {instancePath:instancePath+"/pathViewBox/3",schemaPath:"#/properties/pathViewBox/prefixItems/3/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err78];
+}
+else {
+vErrors.push(err78);
+}
+errors++;
+}
+}
+const len2 = data28.length;
+if(!(len2 <= 4)){
+const err79 = {instancePath:instancePath+"/pathViewBox",schemaPath:"#/properties/pathViewBox/items",keyword:"items",params:{limit: 4},message:"must NOT have more than 4 items"};
+if(vErrors === null){
+vErrors = [err79];
+}
+else {
+vErrors.push(err79);
+}
+errors++;
+}
+}
+else {
+const err80 = {instancePath:instancePath+"/pathViewBox",schemaPath:"#/properties/pathViewBox/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(vErrors === null){
+vErrors = [err80];
+}
+else {
+vErrors.push(err80);
+}
+errors++;
+}
+}
+if(data.fillRule !== undefined){
+let data33 = data.fillRule;
+if(!((data33 === "nonzero") || (data33 === "evenodd"))){
+const err81 = {instancePath:instancePath+"/fillRule",schemaPath:"#/properties/fillRule/enum",keyword:"enum",params:{allowedValues: schema52.properties.fillRule.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err81];
+}
+else {
+vErrors.push(err81);
+}
+errors++;
+}
+}
+if(data.rotation !== undefined){
+let data34 = data.rotation;
+if((typeof data34 == "number") && (isFinite(data34))){
+if(data34 > 360 || isNaN(data34)){
+const err82 = {instancePath:instancePath+"/rotation",schemaPath:"#/properties/rotation/maximum",keyword:"maximum",params:{comparison: "<=", limit: 360},message:"must be <= 360"};
+if(vErrors === null){
+vErrors = [err82];
+}
+else {
+vErrors.push(err82);
+}
+errors++;
+}
+if(data34 < -360 || isNaN(data34)){
+const err83 = {instancePath:instancePath+"/rotation",schemaPath:"#/properties/rotation/minimum",keyword:"minimum",params:{comparison: ">=", limit: -360},message:"must be >= -360"};
+if(vErrors === null){
+vErrors = [err83];
+}
+else {
+vErrors.push(err83);
+}
+errors++;
+}
+}
+else {
+const err84 = {instancePath:instancePath+"/rotation",schemaPath:"#/properties/rotation/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err84];
+}
+else {
+vErrors.push(err84);
+}
+errors++;
+}
+}
+if(data.opacity !== undefined){
+let data35 = data.opacity;
+if((typeof data35 == "number") && (isFinite(data35))){
+if(data35 > 1 || isNaN(data35)){
+const err85 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
+if(vErrors === null){
+vErrors = [err85];
+}
+else {
+vErrors.push(err85);
+}
+errors++;
+}
+if(data35 < 0 || isNaN(data35)){
+const err86 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err86];
+}
+else {
+vErrors.push(err86);
+}
+errors++;
+}
+}
+else {
+const err87 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err87];
+}
+else {
+vErrors.push(err87);
+}
+errors++;
+}
+}
+if(data.visible !== undefined){
+if(typeof data.visible !== "boolean"){
+const err88 = {instancePath:instancePath+"/visible",schemaPath:"#/properties/visible/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err88];
+}
+else {
+vErrors.push(err88);
+}
+errors++;
+}
+}
+if(data.locked !== undefined){
+if(typeof data.locked !== "boolean"){
+const err89 = {instancePath:instancePath+"/locked",schemaPath:"#/properties/locked/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err89];
+}
+else {
+vErrors.push(err89);
+}
+errors++;
+}
+}
+if(data.craft !== undefined){
+let data38 = data.craft;
+if(Array.isArray(data38)){
+const len3 = data38.length;
+for(let i1=0; i1<len3; i1++){
+if(!(validate24(data38[i1], {instancePath:instancePath+"/craft/" + i1,parentData:data38,parentDataProperty:i1,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate24.errors : vErrors.concat(validate24.errors);
+errors = vErrors.length;
+}
+}
+}
+else {
+const err90 = {instancePath:instancePath+"/craft",schemaPath:"#/properties/craft/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(vErrors === null){
+vErrors = [err90];
+}
+else {
+vErrors.push(err90);
+}
+errors++;
+}
+}
+if(data.designMetrics !== undefined){
+if(!(validate26(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate26.errors : vErrors.concat(validate26.errors);
+errors = vErrors.length;
+}
+}
+if(data.processes !== undefined){
+let data41 = data.processes;
+if(Array.isArray(data41)){
+if(data41.length > 32){
+const err91 = {instancePath:instancePath+"/processes",schemaPath:"#/properties/processes/maxItems",keyword:"maxItems",params:{limit: 32},message:"must NOT have more than 32 items"};
+if(vErrors === null){
+vErrors = [err91];
+}
+else {
+vErrors.push(err91);
+}
+errors++;
+}
+const len4 = data41.length;
+for(let i2=0; i2<len4; i2++){
+let data42 = data41[i2];
+if(data42 && typeof data42 == "object" && !Array.isArray(data42)){
+if(data42.process === undefined){
+const err92 = {instancePath:instancePath+"/processes/" + i2,schemaPath:"#/$defs/process/required",keyword:"required",params:{missingProperty: "process"},message:"must have required property '"+"process"+"'"};
+if(vErrors === null){
+vErrors = [err92];
+}
+else {
+vErrors.push(err92);
+}
+errors++;
+}
+for(const key2 in data42){
+if(!(((key2 === "process") || (key2 === "spotName")) || (key2 === "requiredMask"))){
+const err93 = {instancePath:instancePath+"/processes/" + i2,schemaPath:"#/$defs/process/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key2},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err93];
+}
+else {
+vErrors.push(err93);
+}
+errors++;
+}
+}
+if(data42.process !== undefined){
+let data43 = data42.process;
+if(!(((((((((((data43 === "screen_print") || (data43 === "pad_print")) || (data43 === "digital_print")) || (data43 === "offset_print")) || (data43 === "white_underbase")) || (data43 === "varnish")) || (data43 === "hot_stamp_foil")) || (data43 === "emboss")) || (data43 === "deboss")) || (data43 === "in_mold")) || (data43 === "batch_code"))){
+const err94 = {instancePath:instancePath+"/processes/" + i2+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema49.properties.process.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err94];
+}
+else {
+vErrors.push(err94);
+}
+errors++;
+}
+}
+if(data42.spotName !== undefined){
+let data44 = data42.spotName;
+if(typeof data44 === "string"){
+if(func1(data44) > 128){
+const err95 = {instancePath:instancePath+"/processes/" + i2+"/spotName",schemaPath:"#/$defs/process/properties/spotName/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+if(vErrors === null){
+vErrors = [err95];
+}
+else {
+vErrors.push(err95);
+}
+errors++;
+}
+if(func1(data44) < 1){
+const err96 = {instancePath:instancePath+"/processes/" + i2+"/spotName",schemaPath:"#/$defs/process/properties/spotName/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err96];
+}
+else {
+vErrors.push(err96);
+}
+errors++;
+}
+}
+else {
+const err97 = {instancePath:instancePath+"/processes/" + i2+"/spotName",schemaPath:"#/$defs/process/properties/spotName/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err97];
+}
+else {
+vErrors.push(err97);
+}
+errors++;
+}
+}
+if(data42.requiredMask !== undefined){
+let data45 = data42.requiredMask;
+if(!(((((data45 === "color") || (data45 === "metalness")) || (data45 === "roughness")) || (data45 === "bump")) || (data45 === "white_underbase"))){
+const err98 = {instancePath:instancePath+"/processes/" + i2+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema49.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err98];
+}
+else {
+vErrors.push(err98);
+}
+errors++;
+}
+}
+}
+else {
+const err99 = {instancePath:instancePath+"/processes/" + i2,schemaPath:"#/$defs/process/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err99];
+}
+else {
+vErrors.push(err99);
+}
+errors++;
+}
+}
+}
+else {
+const err100 = {instancePath:instancePath+"/processes",schemaPath:"#/properties/processes/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(vErrors === null){
+vErrors = [err100];
+}
+else {
+vErrors.push(err100);
+}
+errors++;
+}
+}
+}
+else {
+const err101 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err101];
+}
+else {
+vErrors.push(err101);
+}
+errors++;
+}
+validate33.errors = vErrors;
 return errors === 0;
 }
-validate30.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate33.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
 function validate22(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -2962,8 +4047,8 @@ passing0 = 0;
 var props0 = true;
 }
 const _errs2 = errors;
-if(!(validate27(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate27.errors : vErrors.concat(validate27.errors);
+if(!(validate29(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate29.errors : vErrors.concat(validate29.errors);
 errors = vErrors.length;
 }
 var _valid0 = _errs2 === errors;
@@ -2980,8 +4065,8 @@ props0 = true;
 }
 }
 const _errs3 = errors;
-if(!(validate30(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate30.errors : vErrors.concat(validate30.errors);
+if(!(validate33(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate33.errors : vErrors.concat(validate33.errors);
 errors = vErrors.length;
 }
 var _valid0 = _errs3 === errors;
@@ -3025,6 +4110,622 @@ evaluated0.props = props0;
 return errors === 0;
 }
 validate22.evaluated = {"dynamicProps":true,"dynamicItems":false};
+
+const schema56 = {"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"type":"string","maxLength":64},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}};
+const schema57 = {"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}};
+
+function validate39(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate39.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.kind === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "kind"},message:"must have required property '"+"kind"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+if(data.opacity === undefined){
+const err1 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "opacity"},message:"must have required property '"+"opacity"+"'"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+for(const key0 in data){
+if(!((((((key0 === "kind") || (key0 === "color")) || (key0 === "opacity")) || (key0 === "boundary")) || (key0 === "material")) || (key0 === "adhesive"))){
+const err2 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+}
+if(data.kind !== undefined){
+let data0 = data.kind;
+if(!((data0 === "opaque") || (data0 === "transparent"))){
+const err3 = {instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/enum",keyword:"enum",params:{allowedValues: schema56.properties.kind.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+}
+if(data.color !== undefined){
+let data1 = data.color;
+if(typeof data1 === "string"){
+if(func1(data1) > 64){
+const err4 = {instancePath:instancePath+"/color",schemaPath:"#/properties/color/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+}
+else {
+const err5 = {instancePath:instancePath+"/color",schemaPath:"#/properties/color/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+}
+if(data.opacity !== undefined){
+let data2 = data.opacity;
+if((typeof data2 == "number") && (isFinite(data2))){
+if(data2 > 1 || isNaN(data2)){
+const err6 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/maximum",keyword:"maximum",params:{comparison: "<=", limit: 1},message:"must be <= 1"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+if(data2 < 0 || isNaN(data2)){
+const err7 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+}
+else {
+const err8 = {instancePath:instancePath+"/opacity",schemaPath:"#/properties/opacity/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+}
+if(data.boundary !== undefined){
+let data3 = data.boundary;
+if(data3 && typeof data3 == "object" && !Array.isArray(data3)){
+if(data3.shape === undefined){
+const err9 = {instancePath:instancePath+"/boundary",schemaPath:"#/$defs/boundary/required",keyword:"required",params:{missingProperty: "shape"},message:"must have required property '"+"shape"+"'"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+for(const key1 in data3){
+if(!(((key1 === "shape") || (key1 === "radiusMm")) || (key1 === "pathData"))){
+const err10 = {instancePath:instancePath+"/boundary",schemaPath:"#/$defs/boundary/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+if(data3.shape !== undefined){
+let data4 = data3.shape;
+if(!((((data4 === "rectangle") || (data4 === "rounded_rectangle")) || (data4 === "ellipse")) || (data4 === "custom"))){
+const err11 = {instancePath:instancePath+"/boundary/shape",schemaPath:"#/$defs/boundary/properties/shape/enum",keyword:"enum",params:{allowedValues: schema57.properties.shape.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+}
+if(data3.radiusMm !== undefined){
+let data5 = data3.radiusMm;
+if((typeof data5 == "number") && (isFinite(data5))){
+if(data5 > 10000 || isNaN(data5)){
+const err12 = {instancePath:instancePath+"/boundary/radiusMm",schemaPath:"#/$defs/boundary/properties/radiusMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
+}
+errors++;
+}
+if(data5 < 0 || isNaN(data5)){
+const err13 = {instancePath:instancePath+"/boundary/radiusMm",schemaPath:"#/$defs/boundary/properties/radiusMm/minimum",keyword:"minimum",params:{comparison: ">=", limit: 0},message:"must be >= 0"};
+if(vErrors === null){
+vErrors = [err13];
+}
+else {
+vErrors.push(err13);
+}
+errors++;
+}
+}
+else {
+const err14 = {instancePath:instancePath+"/boundary/radiusMm",schemaPath:"#/$defs/boundary/properties/radiusMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
+}
+errors++;
+}
+}
+if(data3.pathData !== undefined){
+let data6 = data3.pathData;
+if(typeof data6 === "string"){
+if(func1(data6) > 131072){
+const err15 = {instancePath:instancePath+"/boundary/pathData",schemaPath:"#/$defs/boundary/properties/pathData/maxLength",keyword:"maxLength",params:{limit: 131072},message:"must NOT have more than 131072 characters"};
+if(vErrors === null){
+vErrors = [err15];
+}
+else {
+vErrors.push(err15);
+}
+errors++;
+}
+if(func1(data6) < 1){
+const err16 = {instancePath:instancePath+"/boundary/pathData",schemaPath:"#/$defs/boundary/properties/pathData/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err16];
+}
+else {
+vErrors.push(err16);
+}
+errors++;
+}
+}
+else {
+const err17 = {instancePath:instancePath+"/boundary/pathData",schemaPath:"#/$defs/boundary/properties/pathData/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err17];
+}
+else {
+vErrors.push(err17);
+}
+errors++;
+}
+}
+}
+else {
+const err18 = {instancePath:instancePath+"/boundary",schemaPath:"#/$defs/boundary/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err18];
+}
+else {
+vErrors.push(err18);
+}
+errors++;
+}
+}
+if(data.material !== undefined){
+let data7 = data.material;
+if(typeof data7 === "string"){
+if(func1(data7) > 256){
+const err19 = {instancePath:instancePath+"/material",schemaPath:"#/properties/material/maxLength",keyword:"maxLength",params:{limit: 256},message:"must NOT have more than 256 characters"};
+if(vErrors === null){
+vErrors = [err19];
+}
+else {
+vErrors.push(err19);
+}
+errors++;
+}
+}
+else {
+const err20 = {instancePath:instancePath+"/material",schemaPath:"#/properties/material/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err20];
+}
+else {
+vErrors.push(err20);
+}
+errors++;
+}
+}
+if(data.adhesive !== undefined){
+let data8 = data.adhesive;
+if(typeof data8 === "string"){
+if(func1(data8) > 256){
+const err21 = {instancePath:instancePath+"/adhesive",schemaPath:"#/properties/adhesive/maxLength",keyword:"maxLength",params:{limit: 256},message:"must NOT have more than 256 characters"};
+if(vErrors === null){
+vErrors = [err21];
+}
+else {
+vErrors.push(err21);
+}
+errors++;
+}
+}
+else {
+const err22 = {instancePath:instancePath+"/adhesive",schemaPath:"#/properties/adhesive/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err22];
+}
+else {
+vErrors.push(err22);
+}
+errors++;
+}
+}
+}
+else {
+const err23 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err23];
+}
+else {
+vErrors.push(err23);
+}
+errors++;
+}
+validate39.errors = vErrors;
+return errors === 0;
+}
+validate39.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+const schema58 = {"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}};
+const pattern10 = new RegExp("^[A-Za-z0-9][A-Za-z0-9._:/-]*$", "u");
+const pattern11 = new RegExp("^[a-f0-9]{64}$", "u");
+
+function validate41(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate41.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.blueprintRevision === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "blueprintRevision"},message:"must have required property '"+"blueprintRevision"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+if(data.blueprintSha256 === undefined){
+const err1 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "blueprintSha256"},message:"must have required property '"+"blueprintSha256"+"'"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+if(data.reviewManifestSha256 === undefined){
+const err2 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "reviewManifestSha256"},message:"must have required property '"+"reviewManifestSha256"+"'"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+for(const key0 in data){
+if(!((((key0 === "blueprintRevision") || (key0 === "blueprintSha256")) || (key0 === "reviewManifestSha256")) || (key0 === "approvedCrop"))){
+const err3 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+}
+if(data.blueprintRevision !== undefined){
+let data0 = data.blueprintRevision;
+if(typeof data0 === "string"){
+if(func1(data0) > 256){
+const err4 = {instancePath:instancePath+"/blueprintRevision",schemaPath:"#/properties/blueprintRevision/maxLength",keyword:"maxLength",params:{limit: 256},message:"must NOT have more than 256 characters"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+if(func1(data0) < 1){
+const err5 = {instancePath:instancePath+"/blueprintRevision",schemaPath:"#/properties/blueprintRevision/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+if(!pattern10.test(data0)){
+const err6 = {instancePath:instancePath+"/blueprintRevision",schemaPath:"#/properties/blueprintRevision/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},message:"must match pattern \""+"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"+"\""};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+}
+else {
+const err7 = {instancePath:instancePath+"/blueprintRevision",schemaPath:"#/properties/blueprintRevision/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+}
+if(data.blueprintSha256 !== undefined){
+let data1 = data.blueprintSha256;
+if(typeof data1 === "string"){
+if(!pattern11.test(data1)){
+const err8 = {instancePath:instancePath+"/blueprintSha256",schemaPath:"#/properties/blueprintSha256/pattern",keyword:"pattern",params:{pattern: "^[a-f0-9]{64}$"},message:"must match pattern \""+"^[a-f0-9]{64}$"+"\""};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+}
+else {
+const err9 = {instancePath:instancePath+"/blueprintSha256",schemaPath:"#/properties/blueprintSha256/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+}
+if(data.reviewManifestSha256 !== undefined){
+let data2 = data.reviewManifestSha256;
+if(typeof data2 === "string"){
+if(!pattern11.test(data2)){
+const err10 = {instancePath:instancePath+"/reviewManifestSha256",schemaPath:"#/properties/reviewManifestSha256/pattern",keyword:"pattern",params:{pattern: "^[a-f0-9]{64}$"},message:"must match pattern \""+"^[a-f0-9]{64}$"+"\""};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+else {
+const err11 = {instancePath:instancePath+"/reviewManifestSha256",schemaPath:"#/properties/reviewManifestSha256/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+}
+if(data.approvedCrop !== undefined){
+let data3 = data.approvedCrop;
+if(data3 && typeof data3 == "object" && !Array.isArray(data3)){
+if(data3.x === undefined){
+const err12 = {instancePath:instancePath+"/approvedCrop",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "x"},message:"must have required property '"+"x"+"'"};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
+}
+errors++;
+}
+if(data3.y === undefined){
+const err13 = {instancePath:instancePath+"/approvedCrop",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "y"},message:"must have required property '"+"y"+"'"};
+if(vErrors === null){
+vErrors = [err13];
+}
+else {
+vErrors.push(err13);
+}
+errors++;
+}
+if(data3.width === undefined){
+const err14 = {instancePath:instancePath+"/approvedCrop",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "width"},message:"must have required property '"+"width"+"'"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
+}
+errors++;
+}
+if(data3.height === undefined){
+const err15 = {instancePath:instancePath+"/approvedCrop",schemaPath:"#/$defs/physicalBounds/required",keyword:"required",params:{missingProperty: "height"},message:"must have required property '"+"height"+"'"};
+if(vErrors === null){
+vErrors = [err15];
+}
+else {
+vErrors.push(err15);
+}
+errors++;
+}
+for(const key1 in data3){
+if(!((((key1 === "x") || (key1 === "y")) || (key1 === "width")) || (key1 === "height"))){
+const err16 = {instancePath:instancePath+"/approvedCrop",schemaPath:"#/$defs/physicalBounds/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err16];
+}
+else {
+vErrors.push(err16);
+}
+errors++;
+}
+}
+if(data3.x !== undefined){
+let data4 = data3.x;
+if(!((typeof data4 == "number") && (isFinite(data4)))){
+const err17 = {instancePath:instancePath+"/approvedCrop/x",schemaPath:"#/$defs/physicalBounds/properties/x/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err17];
+}
+else {
+vErrors.push(err17);
+}
+errors++;
+}
+}
+if(data3.y !== undefined){
+let data5 = data3.y;
+if(!((typeof data5 == "number") && (isFinite(data5)))){
+const err18 = {instancePath:instancePath+"/approvedCrop/y",schemaPath:"#/$defs/physicalBounds/properties/y/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err18];
+}
+else {
+vErrors.push(err18);
+}
+errors++;
+}
+}
+if(data3.width !== undefined){
+let data6 = data3.width;
+if((typeof data6 == "number") && (isFinite(data6))){
+if(data6 <= 0 || isNaN(data6)){
+const err19 = {instancePath:instancePath+"/approvedCrop/width",schemaPath:"#/$defs/physicalBounds/properties/width/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err19];
+}
+else {
+vErrors.push(err19);
+}
+errors++;
+}
+}
+else {
+const err20 = {instancePath:instancePath+"/approvedCrop/width",schemaPath:"#/$defs/physicalBounds/properties/width/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err20];
+}
+else {
+vErrors.push(err20);
+}
+errors++;
+}
+}
+if(data3.height !== undefined){
+let data7 = data3.height;
+if((typeof data7 == "number") && (isFinite(data7))){
+if(data7 <= 0 || isNaN(data7)){
+const err21 = {instancePath:instancePath+"/approvedCrop/height",schemaPath:"#/$defs/physicalBounds/properties/height/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err21];
+}
+else {
+vErrors.push(err21);
+}
+errors++;
+}
+}
+else {
+const err22 = {instancePath:instancePath+"/approvedCrop/height",schemaPath:"#/$defs/physicalBounds/properties/height/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err22];
+}
+else {
+vErrors.push(err22);
+}
+errors++;
+}
+}
+}
+else {
+const err23 = {instancePath:instancePath+"/approvedCrop",schemaPath:"#/$defs/physicalBounds/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err23];
+}
+else {
+vErrors.push(err23);
+}
+errors++;
+}
+}
+}
+else {
+const err24 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err24];
+}
+else {
+vErrors.push(err24);
+}
+errors++;
+}
+validate41.errors = vErrors;
+return errors === 0;
+}
+validate41.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
 function validate21(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -4125,14 +5826,249 @@ vErrors.push(err88);
 errors++;
 }
 }
-}
-else {
-const err89 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.carrier !== undefined){
+let data36 = data.carrier;
+if(!((((((data36 === "direct_surface_print") || (data36 === "applied_label")) || (data36 === "clear_label")) || (data36 === "in_mold")) || (data36 === "foil_or_ink_only")) || (data36 === "bare"))){
+const err89 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema54.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err89];
 }
 else {
 vErrors.push(err89);
+}
+errors++;
+}
+}
+if(data.artboard !== undefined){
+let data37 = data.artboard;
+if(data37 && typeof data37 == "object" && !Array.isArray(data37)){
+if(data37.widthMm === undefined){
+const err90 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "widthMm"},message:"must have required property '"+"widthMm"+"'"};
+if(vErrors === null){
+vErrors = [err90];
+}
+else {
+vErrors.push(err90);
+}
+errors++;
+}
+if(data37.heightMm === undefined){
+const err91 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "heightMm"},message:"must have required property '"+"heightMm"+"'"};
+if(vErrors === null){
+vErrors = [err91];
+}
+else {
+vErrors.push(err91);
+}
+errors++;
+}
+if(data37.background === undefined){
+const err92 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "background"},message:"must have required property '"+"background"+"'"};
+if(vErrors === null){
+vErrors = [err92];
+}
+else {
+vErrors.push(err92);
+}
+errors++;
+}
+for(const key6 in data37){
+if(!(((key6 === "widthMm") || (key6 === "heightMm")) || (key6 === "background"))){
+const err93 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key6},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err93];
+}
+else {
+vErrors.push(err93);
+}
+errors++;
+}
+}
+if(data37.widthMm !== undefined){
+let data38 = data37.widthMm;
+if((typeof data38 == "number") && (isFinite(data38))){
+if(data38 > 10000 || isNaN(data38)){
+const err94 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
+if(vErrors === null){
+vErrors = [err94];
+}
+else {
+vErrors.push(err94);
+}
+errors++;
+}
+if(data38 <= 0 || isNaN(data38)){
+const err95 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err95];
+}
+else {
+vErrors.push(err95);
+}
+errors++;
+}
+}
+else {
+const err96 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err96];
+}
+else {
+vErrors.push(err96);
+}
+errors++;
+}
+}
+if(data37.heightMm !== undefined){
+let data39 = data37.heightMm;
+if((typeof data39 == "number") && (isFinite(data39))){
+if(data39 > 10000 || isNaN(data39)){
+const err97 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
+if(vErrors === null){
+vErrors = [err97];
+}
+else {
+vErrors.push(err97);
+}
+errors++;
+}
+if(data39 <= 0 || isNaN(data39)){
+const err98 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+if(vErrors === null){
+vErrors = [err98];
+}
+else {
+vErrors.push(err98);
+}
+errors++;
+}
+}
+else {
+const err99 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err99];
+}
+else {
+vErrors.push(err99);
+}
+errors++;
+}
+}
+if(data37.background !== undefined){
+let data40 = data37.background;
+if(typeof data40 === "string"){
+if(func1(data40) > 64){
+const err100 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(vErrors === null){
+vErrors = [err100];
+}
+else {
+vErrors.push(err100);
+}
+errors++;
+}
+if(func1(data40) < 1){
+const err101 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err101];
+}
+else {
+vErrors.push(err101);
+}
+errors++;
+}
+}
+else {
+const err102 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err102];
+}
+else {
+vErrors.push(err102);
+}
+errors++;
+}
+}
+}
+else {
+const err103 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err103];
+}
+else {
+vErrors.push(err103);
+}
+errors++;
+}
+}
+if(data.substrate !== undefined){
+if(!(validate39(data.substrate, {instancePath:instancePath+"/substrate",parentData:data,parentDataProperty:"substrate",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate39.errors : vErrors.concat(validate39.errors);
+errors = vErrors.length;
+}
+}
+if(data.placementPolicy !== undefined){
+let data42 = data.placementPolicy;
+if(!(((data42 === "fit") || (data42 === "crop-approved")) || (data42 === "block"))){
+const err104 = {instancePath:instancePath+"/placementPolicy",schemaPath:"#/properties/placementPolicy/enum",keyword:"enum",params:{allowedValues: schema32.properties.placementPolicy.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err104];
+}
+else {
+vErrors.push(err104);
+}
+errors++;
+}
+}
+if(data.blueprintAreaId !== undefined){
+let data43 = data.blueprintAreaId;
+if(typeof data43 === "string"){
+if(func1(data43) > 128){
+const err105 = {instancePath:instancePath+"/blueprintAreaId",schemaPath:"#/properties/blueprintAreaId/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+if(vErrors === null){
+vErrors = [err105];
+}
+else {
+vErrors.push(err105);
+}
+errors++;
+}
+if(func1(data43) < 1){
+const err106 = {instancePath:instancePath+"/blueprintAreaId",schemaPath:"#/properties/blueprintAreaId/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err106];
+}
+else {
+vErrors.push(err106);
+}
+errors++;
+}
+}
+else {
+const err107 = {instancePath:instancePath+"/blueprintAreaId",schemaPath:"#/properties/blueprintAreaId/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err107];
+}
+else {
+vErrors.push(err107);
+}
+errors++;
+}
+}
+if(data.designBinding !== undefined){
+if(!(validate41(data.designBinding, {instancePath:instancePath+"/designBinding",parentData:data,parentDataProperty:"designBinding",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate41.errors : vErrors.concat(validate41.errors);
+errors = vErrors.length;
+}
+}
+}
+else {
+const err108 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err108];
+}
+else {
+vErrors.push(err108);
 }
 errors++;
 }

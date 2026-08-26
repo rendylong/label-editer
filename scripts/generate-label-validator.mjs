@@ -14,16 +14,20 @@ const ajv = new Ajv2020({
   strict: true,
   code: { source: true, esm: true, lines: true },
 })
-const generated = standaloneCode(ajv, ajv.compile(schema))
-  .replace('"use strict";\n', '')
-  .replace(
-    'const func1 = require("ajv/dist/runtime/ucs2length").default;',
-    'import func1 from "ajv/dist/runtime/ucs2length";',
+const runtimeImports = [
+  ['ajv/dist/runtime/ucs2length', 'import $name from "ajv/dist/runtime/ucs2length";'],
+  ['ajv/dist/runtime/equal', 'import $name from "ajv/dist/runtime/equal";'],
+]
+let generated = standaloneCode(ajv, ajv.compile(schema)).replace('"use strict";\n', '')
+for (const [moduleName, replacement] of runtimeImports) {
+  generated = generated.replace(
+    new RegExp(`const (func\\d+) = require\\("${moduleName}"\\)\\.default;`, 'g'),
+    (_match, name) => replacement.replace('$name', name),
   )
-  .replace(
-    'const func0 = require("ajv/dist/runtime/equal").default;',
-    'import func0 from "ajv/dist/runtime/equal";',
-  )
+}
+if (generated.includes('require(')) {
+  throw new Error('Generated Label Spec validator contains an unresolved CommonJS runtime import')
+}
 
 await mkdir(path.dirname(outputPath), { recursive: true })
 await writeFile(

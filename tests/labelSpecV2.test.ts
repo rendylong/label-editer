@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { validateLabelSpec } from '../src/agent/labelSpecSchema'
+import Ajv2020 from 'ajv/dist/2020.js'
+import { labelSpecV2Schema, validateLabelSpec } from '../src/agent/labelSpecSchema'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
 import type { LabelAreaConfig } from '../src/label/types'
+import existingPerfumeFixture from './fixtures/specs/perfume-front-back-v2.json'
+// @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
+import { patchLabelSpec, revisionOf } from '../scripts/lib/project-control.mjs'
 
 const baseArea: LabelAreaConfig = {
   id: 'base', name: 'Base', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay',
@@ -12,6 +16,101 @@ const baseArea: LabelAreaConfig = {
 }
 
 describe('Label Spec v2', () => {
+  it('keeps the existing pixel-only Label Spec v2 fixture valid', () => {
+    expect(validateLabelSpec(existingPerfumeFixture).ok).toBe(true)
+  })
+
+  it('accepts optional physical, process, vector, and design-binding metadata', () => {
+    const physicalSpec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay', side: 'front',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        carrier: 'direct_surface_print',
+        artboard: { widthMm: 42, heightMm: 68, background: 'transparent' },
+        placementPolicy: 'fit',
+        blueprintAreaId: 'front-blueprint',
+        designBinding: {
+          blueprintRevision: 'lavira-v1',
+          blueprintSha256: '1'.repeat(64),
+          reviewManifestSha256: '2'.repeat(64),
+        },
+        layers: [{
+          id: 'open-frame', type: 'shape', shape: 'path', x: 0.5, y: 0.5, width: 0.8, height: 0.8,
+          pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
+          designMetrics: {
+            normalizedBounds: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+            anchor: 'center',
+          },
+          processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER', requiredMask: 'metalness' }],
+        }],
+      }],
+    }
+
+    const result = validateLabelSpec(physicalSpec)
+    const ajvResult = new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(physicalSpec)
+    expect(result.ok).toBe(true)
+    expect(result.ok).toBe(ajvResult)
+    if (result.ok) expect(result.spec).toEqual(physicalSpec)
+
+    const invalid = {
+      ...physicalSpec,
+      areas: [{
+        ...physicalSpec.areas[0],
+        layers: [{ ...physicalSpec.areas[0].layers[0], processes: [{ process: 'laser_print' }] }],
+      }],
+    }
+    expect(validateLabelSpec(invalid).ok).toBe(false)
+    expect(validateLabelSpec(invalid).ok).toBe(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(invalid))
+  })
+
+  it('normalizes an old enabled paper spec to applied_label without changing its paper', () => {
+    const oldPaperSpec = structuredClone(existingPerfumeFixture)
+    oldPaperSpec.areas[0].paper = { enabled: true, color: '#EDE7DC', opacity: 0.84 }
+
+    const result = validateLabelSpec(oldPaperSpec)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.spec.areas[0].carrier).toBe('applied_label')
+      expect(result.spec.areas[0].paper).toEqual(oldPaperSpec.areas[0].paper)
+    }
+  })
+
+  it('patches optional physical metadata without losing canonical revision coverage', () => {
+    const input = structuredClone(existingPerfumeFixture)
+    const result = patchLabelSpec(input, {
+      version: 1,
+      baseRevision: revisionOf(input),
+      operations: [
+        {
+          op: 'update-area', areaId: 'front', changes: {
+            carrier: 'applied_label',
+            artboard: { widthMm: 42, heightMm: 68, background: '#f8f4ea' },
+            substrate: { kind: 'opaque', color: '#f8f4ea', opacity: 1, boundary: { shape: 'rectangle' } },
+            placementPolicy: 'block', blueprintAreaId: 'front-blueprint',
+            designBinding: {
+              blueprintRevision: 'revision-2', blueprintSha256: 'a'.repeat(64), reviewManifestSha256: 'b'.repeat(64),
+            },
+          },
+        },
+        {
+          op: 'update-layer', areaId: 'front', layerId: 'brand', changes: {
+            designMetrics: {
+              boundsMm: { x: 4, y: 6, width: 34, height: 10 }, anchor: 'center', fontSizeMm: 4.2,
+              letterSpacingEm: 0.08, lineHeight: 1.1, wrapPolicy: 'none', maxLines: 1,
+            },
+            processes: [{ process: 'screen_print', requiredMask: 'color' }],
+          },
+        },
+      ],
+    })
+
+    expect(result.revision).not.toBe(result.previousRevision)
+    expect(result.value.areas[0]).toMatchObject({ carrier: 'applied_label', blueprintAreaId: 'front-blueprint' })
+    expect(result.value.areas[0].layers[0].designMetrics.fontSizeMm).toBe(4.2)
+  })
+
   it('accepts deterministic front and back areas', () => {
     const result = validateLabelSpec({
       version: 2,

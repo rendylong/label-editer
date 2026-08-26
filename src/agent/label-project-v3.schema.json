@@ -23,6 +23,89 @@
       "minItems": 3,
       "maxItems": 3
     },
+    "carrier": {
+      "enum": ["direct_surface_print", "applied_label", "clear_label", "in_mold", "foil_or_ink_only", "bare"]
+    },
+    "physicalBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "$ref": "#/$defs/finiteNumber" },
+        "y": { "$ref": "#/$defs/finiteNumber" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "artboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["widthMm", "heightMm", "background"],
+      "properties": {
+        "widthMm": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+        "heightMm": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+        "background": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape"],
+      "properties": {
+        "shape": { "enum": ["rectangle", "rounded_rectangle", "ellipse", "custom"] },
+        "radiusMm": { "type": "number", "minimum": 0, "maximum": 10000 },
+        "pathData": { "type": "string", "minLength": 1, "maxLength": 131072 }
+      }
+    },
+    "substrate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "opacity"],
+      "properties": {
+        "kind": { "enum": ["opaque", "transparent"] },
+        "color": { "type": "string", "maxLength": 64 },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "boundary": { "$ref": "#/$defs/boundary" },
+        "material": { "type": "string", "maxLength": 256 },
+        "adhesive": { "type": "string", "maxLength": 256 }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["process"],
+      "properties": {
+        "process": { "enum": ["screen_print", "pad_print", "digital_print", "offset_print", "white_underbase", "varnish", "hot_stamp_foil", "emboss", "deboss", "in_mold", "batch_code"] },
+        "spotName": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "requiredMask": { "enum": ["color", "metalness", "roughness", "bump", "white_underbase"] }
+      }
+    },
+    "designMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anchor"],
+      "properties": {
+        "boundsMm": { "$ref": "#/$defs/physicalBounds" },
+        "normalizedBounds": { "$ref": "#/$defs/physicalBounds" },
+        "anchor": { "enum": ["top_left", "top_center", "center", "baseline_left", "baseline_center"] },
+        "fontSizeMm": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
+        "letterSpacingEm": { "$ref": "#/$defs/finiteNumber" },
+        "lineHeight": { "type": "number", "exclusiveMinimum": 0 },
+        "wrapPolicy": { "enum": ["none", "word", "character"] },
+        "maxLines": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "designBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["blueprintRevision", "blueprintSha256", "reviewManifestSha256"],
+      "properties": {
+        "blueprintRevision": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" },
+        "blueprintSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "reviewManifestSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "approvedCrop": { "$ref": "#/$defs/physicalBounds" }
+      }
+    },
     "craftParams": {
       "type": "object",
       "additionalProperties": false,
@@ -63,7 +146,9 @@
         "visible": { "type": "boolean" },
         "locked": { "type": "boolean" },
         "zIndex": { "$ref": "#/$defs/finiteNumber" },
-        "craft": { "$ref": "#/$defs/craftList" }
+        "craft": { "$ref": "#/$defs/craftList" },
+        "designMetrics": { "$ref": "#/$defs/designMetrics" },
+        "processes": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/process" } }
       }
     },
     "textLayer": {
@@ -96,7 +181,9 @@
             "visible": { "type": "boolean" },
             "locked": { "type": "boolean" },
             "zIndex": { "$ref": "#/$defs/finiteNumber" },
-            "craft": { "$ref": "#/$defs/craftList" }
+            "craft": { "$ref": "#/$defs/craftList" },
+            "designMetrics": { "$ref": "#/$defs/designMetrics" },
+            "processes": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/process" } }
           }
         }
       ]
@@ -123,7 +210,9 @@
             "visible": { "type": "boolean" },
             "locked": { "type": "boolean" },
             "zIndex": { "$ref": "#/$defs/finiteNumber" },
-            "craft": { "$ref": "#/$defs/craftList" }
+            "craft": { "$ref": "#/$defs/craftList" },
+            "designMetrics": { "$ref": "#/$defs/designMetrics" },
+            "processes": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/process" } }
           }
         }
       ]
@@ -157,7 +246,7 @@
           "properties": {
             "id": { "type": "string", "minLength": 1 },
             "kind": { "const": "shape" },
-            "shape": { "enum": ["rectangle", "ellipse", "triangle", "diamond", "polygon", "star", "line", "wave", "burst", "cross", "bracket", "dot-grid", "frame"] },
+            "shape": { "enum": ["rectangle", "ellipse", "triangle", "diamond", "polygon", "star", "line", "wave", "burst", "cross", "bracket", "dot-grid", "frame", "path"] },
             "geometry": { "$ref": "#/$defs/shapeGeometry" },
             "width": { "$ref": "#/$defs/finiteNumber" },
             "height": { "$ref": "#/$defs/finiteNumber" },
@@ -165,6 +254,15 @@
             "stroke": { "type": "string", "minLength": 1 },
             "strokeWidth": { "$ref": "#/$defs/finiteNumber" },
             "cornerRadius": { "$ref": "#/$defs/finiteNumber" },
+            "pathData": { "type": "string", "minLength": 1, "maxLength": 131072 },
+            "pathViewBox": {
+              "type": "array",
+              "prefixItems": [{ "$ref": "#/$defs/finiteNumber" }, { "$ref": "#/$defs/finiteNumber" }, { "$ref": "#/$defs/finiteNumber" }, { "$ref": "#/$defs/finiteNumber" }],
+              "items": false,
+              "minItems": 4,
+              "maxItems": 4
+            },
+            "fillRule": { "enum": ["nonzero", "evenodd"] },
             "x": { "$ref": "#/$defs/finiteNumber" },
             "y": { "$ref": "#/$defs/finiteNumber" },
             "rotation": { "$ref": "#/$defs/finiteNumber" },
@@ -172,8 +270,14 @@
             "visible": { "type": "boolean" },
             "locked": { "type": "boolean" },
             "zIndex": { "$ref": "#/$defs/finiteNumber" },
-            "craft": { "$ref": "#/$defs/craftList" }
-          }
+            "craft": { "$ref": "#/$defs/craftList" },
+            "designMetrics": { "$ref": "#/$defs/designMetrics" },
+            "processes": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/process" } }
+          },
+          "allOf": [{
+            "if": { "properties": { "shape": { "const": "path" } }, "required": ["shape"] },
+            "then": { "required": ["pathData", "pathViewBox"], "properties": { "pathData": true, "pathViewBox": true } }
+          }]
         }
       ]
     },
@@ -265,6 +369,12 @@
         "canvas": { "$ref": "#/$defs/canvas" },
         "paper": { "$ref": "#/$defs/paper" },
         "printSpec": { "$ref": "#/$defs/printSpec" },
+        "carrier": { "$ref": "#/$defs/carrier" },
+        "artboard": { "$ref": "#/$defs/artboard" },
+        "substrate": { "$ref": "#/$defs/substrate" },
+        "placementPolicy": { "enum": ["fit", "crop-approved", "block"] },
+        "blueprintAreaId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "designBinding": { "$ref": "#/$defs/designBinding" },
         "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
         "globalCraft": {
           "type": "object",

@@ -14,6 +14,7 @@ const validateLabelProject = ajv.compile(labelProjectSchema)
 const POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 const AREA_PATCHABLE_FIELDS = new Set([
   'name', 'target', 'surfaceMode', 'side', 'range', 'remap', 'paper', 'print', 'globalCraft',
+  'carrier', 'artboard', 'substrate', 'placementPolicy', 'blueprintAreaId', 'designBinding',
 ])
 const OPERATION_FIELDS = {
   'add-area': new Set(['op', 'area', 'index']),

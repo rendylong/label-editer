@@ -3,6 +3,43 @@
  * 所有数据模型必须 JSON 可序列化（.lbl 项目文件依赖）。
  */
 
+import type { CarrierMode, LabelSubstrate, PhysicalBounds, ProcessIntent } from '../agent/designContracts'
+
+export type { CarrierMode, ProcessIntent } from '../agent/designContracts'
+
+export interface PhysicalArtboard {
+  widthMm: number
+  heightMm: number
+  background: string
+}
+
+export type SubstrateSpec = LabelSubstrate
+
+export type TargetAspectPolicy = 'fit' | 'crop-approved' | 'block'
+
+export interface DesignBinding {
+  blueprintRevision: string
+  blueprintSha256: string
+  reviewManifestSha256: string
+  approvedCrop?: PhysicalBounds
+}
+
+export interface LayerDesignMetrics {
+  boundsMm?: PhysicalBounds
+  normalizedBounds?: PhysicalBounds
+  anchor: 'top_left' | 'top_center' | 'center' | 'baseline_left' | 'baseline_center'
+  fontSizeMm?: number
+  letterSpacingEm?: number
+  lineHeight?: number
+  wrapPolicy?: 'none' | 'word' | 'character'
+  maxLines?: number
+}
+
+export interface LayerPhysicalMetadata {
+  designMetrics?: LayerDesignMetrics
+  processes?: ProcessIntent[]
+}
+
 /** 工艺类型（六种，可叠加，作用于图层或全局）。 */
 export type CraftType = 'foil' | 'emboss' | 'deboss' | 'matte' | 'uv' | 'stroke'
 
@@ -39,7 +76,7 @@ export interface CraftEffect {
 }
 
 /** 文本图层。 */
-export interface TextLayer {
+export interface TextLayer extends LayerPhysicalMetadata {
   id: string
   kind: 'text'
   text: string
@@ -72,7 +109,7 @@ export interface TextLayer {
 }
 
 /** 图片图层。 */
-export interface ImageLayer {
+export interface ImageLayer extends LayerPhysicalMetadata {
   id: string
   kind: 'image'
   /** 可序列化的数据 URL（旧项目可能仍含临时 objectURL） */
@@ -114,12 +151,15 @@ export interface ShapeGeometry {
 }
 
 /** 可直接排版的色块/分隔线。旧矩形省略 geometry 时保持原有行为。 */
-export interface ShapeLayer {
+export interface ShapeLayer extends LayerPhysicalMetadata {
   id: string
   kind: 'shape'
   shape: ShapeKind
   /** Optional for source compatibility with existing rectangle layers. */
   geometry?: ShapeGeometry
+  pathData?: string
+  pathViewBox?: [number, number, number, number]
+  fillRule?: 'nonzero' | 'evenodd'
   width: number
   height: number
   fill: string
@@ -233,6 +273,13 @@ export interface LabelAreaConfig {
   canvas: CanvasSpec
   /** 显式纸张底色；不提供时透明。 */
   paper?: LabelPaper
+  /** Physical carrier selected by the approved design contract. */
+  carrier?: CarrierMode
+  artboard?: PhysicalArtboard
+  substrate?: SubstrateSpec
+  placementPolicy?: TargetAspectPolicy
+  blueprintAreaId?: string
+  designBinding?: DesignBinding
   /** 可选印刷规格；旧项目未提供时保持未设置。 */
   printSpec?: LabelPrintSpec
   layers: LabelLayer[]

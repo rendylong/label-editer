@@ -63,6 +63,46 @@ function projectWithLayers(layers: unknown[]): Record<string, unknown> {
   }
 }
 
+function physicalProjectFixture(): Record<string, unknown> {
+  return {
+    version: 3,
+    modelFileName: 'bottle.glb',
+    areas: [{
+      ...makeArea(),
+      carrier: 'applied_label',
+      artboard: { widthMm: 42, heightMm: 68, background: 'transparent' },
+      substrate: {
+        kind: 'transparent', color: '#ffffff', opacity: 0.2,
+        boundary: { shape: 'rounded_rectangle', radiusMm: 2 }, material: 'PET', adhesive: 'acrylic',
+      },
+      placementPolicy: 'fit',
+      blueprintAreaId: 'front-blueprint',
+      designBinding: {
+        blueprintRevision: 'lavira-v1',
+        blueprintSha256: '1'.repeat(64),
+        reviewManifestSha256: '2'.repeat(64),
+      },
+      layers: [
+        {
+          ...makeTextLayer(),
+          designMetrics: {
+            boundsMm: { x: 4, y: 6, width: 34, height: 10 },
+            anchor: 'center', fontSizeMm: 4.2, letterSpacingEm: 0.08,
+            lineHeight: 1.1, wrapPolicy: 'none', maxLines: 1,
+          },
+          processes: [{ process: 'screen_print', spotName: 'BRAND_BLACK', requiredMask: 'color' }],
+        },
+        {
+          ...makeArea().layers[0], shape: 'path',
+          pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
+          designMetrics: { normalizedBounds: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 }, anchor: 'center' },
+          processes: [{ process: 'hot_stamp_foil', requiredMask: 'metalness' }],
+        },
+      ],
+    }],
+  }
+}
+
 afterEach(() => {
   useLabelStore.getState().clearAll()
   useModelStore.setState(useModelStore.getInitialState(), true)
@@ -71,6 +111,53 @@ afterEach(() => {
 })
 
 describe('label project v3', () => {
+  it('round-trips physical metrics without changing bake dimensions', () => {
+    const project = parseLabelProject(physicalProjectFixture())
+    const serialized = serializeLabelProject('bottle.glb', project.areas)
+
+    expect(serialized.areas[0].canvas).toEqual({ width: 2048, height: 1024, aspect: 2 })
+    expect(serialized.areas[0].artboard).toEqual({ widthMm: 42, heightMm: 68, background: 'transparent' })
+    expect(serialized.areas[0].layers[0].designMetrics).toEqual({
+      boundsMm: { x: 4, y: 6, width: 34, height: 10 },
+      anchor: 'center', fontSizeMm: 4.2, letterSpacingEm: 0.08,
+      lineHeight: 1.1, wrapPolicy: 'none', maxLines: 1,
+    })
+    expect(serialized.areas[0]).toMatchObject({
+      carrier: 'applied_label', placementPolicy: 'fit', blueprintAreaId: 'front-blueprint',
+      substrate: { kind: 'transparent', opacity: 0.2, material: 'PET', adhesive: 'acrylic' },
+      designBinding: { blueprintRevision: 'lavira-v1' },
+    })
+    expect(serialized.areas[0].layers[0].processes).toEqual([
+      { process: 'screen_print', spotName: 'BRAND_BLACK', requiredMask: 'color' },
+    ])
+    expect(serialized.areas[0].layers[1]).toMatchObject({
+      kind: 'shape', shape: 'path', pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
+      processes: [{ process: 'hot_stamp_foil', requiredMask: 'metalness' }],
+    })
+  })
+
+  it('normalizes an old enabled paper area to applied_label without changing the paper appearance', () => {
+    const paper = { enabled: true, color: '#ede7dc', opacity: 0.84 }
+    const project = parseLabelProject({
+      version: 2,
+      modelFileName: 'legacy.glb',
+      areas: [{ ...makeArea(), paper }],
+    })
+
+    expect(project.areas[0].carrier).toBe('applied_label')
+    expect(project.areas[0].paper).toEqual(paper)
+  })
+
+  it('keeps a newly-authored direct print substrate-free', () => {
+    const project = parseLabelProject({
+      ...physicalProjectFixture(),
+      areas: [{ ...makeArea(), carrier: 'direct_surface_print' }],
+    })
+
+    expect(project.areas[0].carrier).toBe('direct_surface_print')
+    expect(project.areas[0].substrate).toBeUndefined()
+  })
+
   it('migrates a v2 rectangle and legacy font name', () => {
     const project = parseLabelProject({
       version: 2,

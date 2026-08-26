@@ -1,6 +1,8 @@
 import type { ErrorObject, ValidateFunction } from 'ajv'
 import labelSpecV2Schema from './label-spec-v2.schema.json'
 import validateV2 from './generated/labelSpecV2Validator'
+import type { CarrierMode, ProcessIntent } from './designContracts'
+import type { DesignBinding, LayerDesignMetrics, PhysicalArtboard, SubstrateSpec, TargetAspectPolicy } from '../label/types'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -16,6 +18,8 @@ export interface LabelSpecLayerV2 extends UnknownRecord {
   type: 'text' | 'image' | 'shape'
   x: number
   y: number
+  designMetrics?: LayerDesignMetrics
+  processes?: ProcessIntent[]
 }
 
 export interface LabelSpecAreaV2 extends UnknownRecord {
@@ -24,6 +28,12 @@ export interface LabelSpecAreaV2 extends UnknownRecord {
   target: LabelSpecTargetV2
   surfaceMode: 'overlay' | 'replace'
   side?: 'front' | 'back'
+  carrier?: CarrierMode
+  artboard?: PhysicalArtboard
+  substrate?: SubstrateSpec
+  placementPolicy?: TargetAspectPolicy
+  blueprintAreaId?: string
+  designBinding?: DesignBinding
   range: { uStart: number; uWidth: number; vStart: number; vHeight: number }
   layers: LabelSpecLayerV2[]
 }
@@ -168,9 +178,15 @@ export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
       warnings: migrated.warnings,
     }
   }
+  const normalized = structuredClone(migrated.spec) as LabelSpecV2
+  for (const area of normalized.areas) {
+    if (area.carrier === undefined && isRecord(area.paper) && area.paper.enabled === true) {
+      area.carrier = 'applied_label'
+    }
+  }
   return {
     ok: true,
-    spec: structuredClone(migrated.spec),
+    spec: normalized,
     issues: [],
     warnings: migrated.warnings,
   }
