@@ -35,8 +35,8 @@ export interface ExportAreaInput {
   fullRange: boolean
   remap: RemapOutput
   colorPng: Uint8Array
-  metalRoughPng: Uint8Array
-  normalPng: Uint8Array
+  metalRoughPng?: Uint8Array
+  normalPng?: Uint8Array
 }
 
 export interface ExportOptions {
@@ -230,8 +230,8 @@ export async function exportGlb(opts: ExportOptions): Promise<ExportResult> {
       fullRange: area.fullRange,
       remap: { positions: area.remap.positions, normals: area.remap.normals, uv: area.remap.uv, indices: area.remap.indices },
       colorPng: toArrayBuffer(area.colorPng),
-      metalRoughPng: toArrayBuffer(area.metalRoughPng),
-      normalPng: toArrayBuffer(area.normalPng),
+      ...(area.metalRoughPng ? { metalRoughPng: toArrayBuffer(area.metalRoughPng) } : {}),
+      ...(area.normalPng ? { normalPng: toArrayBuffer(area.normalPng) } : {}),
     }))
 
     const req: RebuildRequest = {

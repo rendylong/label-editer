@@ -22,10 +22,12 @@ export function selectBakeChannel(
   bake: Pick<BakeResult, ExportPngChannel>,
   channel: Exclude<ReturnType<typeof useUiStore.getState>['channelView'], undefined>,
 ): HTMLCanvasElement {
-  return channel === 'metalness' ? bake.metalness
+  const selected = channel === 'metalness' ? bake.metalness
     : channel === 'roughness' ? bake.roughness
       : channel === 'bump' ? bake.bump
         : bake.color
+  if (!selected) throw new Error(`当前设计没有 ${channel ?? 'color'} 烘焙通道`)
+  return selected
 }
 
 type ExportBakeRequest = () => boolean
@@ -282,7 +284,7 @@ export function exportPrintManifest(): void {
   const area = useLabelStore.getState().activeArea
   if (!area) { flashToast('尚无可导出的贴标区域', 'error'); return }
   try {
-    const artifact = createPrintArtifact(area)
+    const artifact = createPrintArtifact(area, useLabelStore.getState().bakeMap[area.id])
     const manifest = JSON.parse(new TextDecoder().decode(artifact.bytes)) as { separations: string[]; issues: unknown[] }
     downloadBytes(artifact.bytes, artifact.fileName, artifact.mimeType)
     flashToast(`已导出印刷清单（${manifest.separations.length} 个通道/专色版）`, manifest.issues.length ? 'info' : 'success')

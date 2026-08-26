@@ -1,6 +1,7 @@
 import type { LabelAreaConfig } from './types'
+import type { BakeInput } from '../app/exportTypes'
 import { carrierReadinessChecks, type CarrierReadinessCode } from './exportReadiness'
-import { resolveCarrierSurface } from './paper'
+import { resolveCarrierBoundary, resolveCarrierSurface } from './paper'
 
 export type CarrierInvariantIssueCode =
   | 'carrier-forbidden-substrate'
@@ -8,6 +9,9 @@ export type CarrierInvariantIssueCode =
   | 'missing-applied-boundary'
   | 'non-transparent-clear-substrate'
   | 'decoration-on-bare'
+  | 'invalid-custom-boundary'
+  | 'missing-clear-boundary'
+  | 'invalid-applied-substrate-opacity'
 
 export interface PrintReadinessIssue {
   code: 'missing-print-spec' | 'text-below-minimum-height' | 'foil-without-spot-name' | 'missing-bleed' | CarrierInvariantIssueCode | CarrierReadinessCode
@@ -30,6 +34,8 @@ export interface PrintManifest {
 
 function carrierInvariantIssues(area: LabelAreaConfig): PrintReadinessIssue[] {
   const issues: PrintReadinessIssue[] = []
+  const surface = resolveCarrierSurface(area)
+  const boundaryResolution = resolveCarrierBoundary(area)
   const forbiddenSubstrate = area.carrier === 'direct_surface_print'
     || area.carrier === 'in_mold'
     || area.carrier === 'foil_or_ink_only'
@@ -40,7 +46,7 @@ function carrierInvariantIssues(area: LabelAreaConfig): PrintReadinessIssue[] {
       message: `区域「${area.name}」的载体 ${area.carrier} 禁止 substrate 面板；渲染已忽略该字段。`,
     })
   }
-  if (area.carrier === 'applied_label') {
+  if (area.carrier === 'applied_label' && surface.carrier !== 'legacy') {
     if (!area.substrate || area.substrate.kind !== 'opaque') {
       issues.push({
         code: 'missing-applied-substrate', areaId: area.id, fields: ['substrate'],
@@ -51,6 +57,12 @@ function carrierInvariantIssues(area: LabelAreaConfig): PrintReadinessIssue[] {
       issues.push({
         code: 'missing-applied-boundary', areaId: area.id, fields: ['substrate.boundary'],
         message: `区域「${area.name}」的 applied_label 缺少实体边界。`,
+      })
+    }
+    if (area.substrate?.kind === 'opaque' && area.substrate.opacity <= 0) {
+      issues.push({
+        code: 'invalid-applied-substrate-opacity', areaId: area.id, fields: ['substrate.opacity'],
+        message: `区域「${area.name}」的 applied_label substrate opacity 必须大于 0。`,
       })
     }
   }
@@ -66,6 +78,18 @@ function carrierInvariantIssues(area: LabelAreaConfig): PrintReadinessIssue[] {
         message: `区域「${area.name}」的 clear_label substrate 不得为全不透明。`,
       })
     }
+    if (!area.substrate?.boundary) {
+      issues.push({
+        code: 'missing-clear-boundary', areaId: area.id, fields: ['substrate.boundary'],
+        message: `区域「${area.name}」的 clear_label 缺少透明膜材范围。`,
+      })
+    }
+  }
+  if (boundaryResolution.invalidField) {
+    issues.push({
+      code: 'invalid-custom-boundary', areaId: area.id, fields: [boundaryResolution.invalidField],
+      message: `区域「${area.name}」的 custom substrate boundary 无效，渲染不会回退为矩形。`,
+    })
   }
   if (area.carrier === 'bare' && area.layers.length > 0) {
     issues.push({
@@ -110,14 +134,18 @@ export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIss
   return issues
 }
 
-export function buildPrintManifest(area: LabelAreaConfig): PrintManifest {
+export function buildPrintManifest(area: LabelAreaConfig, bake?: BakeInput): PrintManifest {
   if (!area.printSpec && !area.carrier) throw new Error(`贴标区域「${area.name}」尚未设置印刷规格`)
   const spec = area.printSpec
   const foilNames = area.layers.flatMap((layer) => layer.craft.flatMap((effect) => effect.type === 'foil' && effect.params.foilSpotName ? [effect.params.foilSpotName] : []))
-  const declaredSeparations = area.layers.flatMap((layer) => (layer.processes ?? []).flatMap((process) => [
-    ...(process.requiredMask ? [process.requiredMask] : []),
-    ...(process.spotName ? [process.spotName] : []),
-  ]))
+  const declaredSeparations = area.layers.flatMap((layer) => (layer.processes ?? []).flatMap((process) => {
+    const whiteUnderbase = process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
+    if (whiteUnderbase && !bake?.whiteUnderbase) return []
+    return [
+      ...(process.requiredMask ? [process.requiredMask] : []),
+      ...(process.spotName ? [process.spotName] : []),
+    ]
+  }))
   const isLegacy = !area.carrier
   const separations = area.carrier === 'bare'
     ? []

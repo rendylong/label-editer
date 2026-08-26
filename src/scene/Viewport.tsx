@@ -121,7 +121,7 @@ export function Viewport({ showFrontMarker = false, readOnly = false }: { showFr
     for (const area of areas) {
       const bake = bakeMap[area.id]
       if (bake) {
-        ctrl.applyLabelBake(area.id, { color: bake.color, metalness: bake.metalness, roughness: bake.roughness, bump: bake.bump })
+        ctrl.applyLabelBake(area.id, bake)
       }
     }
     ctrl.setChannelView(useUiStore.getState().channelView)

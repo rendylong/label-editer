@@ -60,7 +60,10 @@ function applyTextures(doc: Document, material: Material, job: AreaJob): void {
   setTexture(`label_color${suffix}`, job.colorPng, (texture) => material.setBaseColorTexture(texture), () => material.getBaseColorTextureInfo())
   setTexture(`label_metalrough${suffix}`, job.metalRoughPng, (texture) => material.setMetallicRoughnessTexture(texture), () => material.getMetallicRoughnessTextureInfo())
   setTexture(`label_normal${suffix}`, job.normalPng, (texture) => material.setNormalTexture(texture), () => material.getNormalTextureInfo())
-  material.setBaseColorFactor([1, 1, 1, 1]).setMetallicFactor(1).setRoughnessFactor(1)
+  material
+    .setBaseColorFactor([1, 1, 1, 1])
+    .setMetallicFactor(job.metalRoughPng ? 1 : 0)
+    .setRoughnessFactor(1)
   configureTransparentLabelExport(material)
 }
 

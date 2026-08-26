@@ -12,9 +12,10 @@ import { assertPhysicalAreaPlacement, resolveLayersForCanvas } from '../app/phys
 
 export interface BakeResult {
   color: HTMLCanvasElement
-  metalness: HTMLCanvasElement
-  roughness: HTMLCanvasElement
-  bump: HTMLCanvasElement
+  metalness?: HTMLCanvasElement
+  roughness?: HTMLCanvasElement
+  bump?: HTMLCanvasElement
+  whiteUnderbase?: HTMLCanvasElement
   spec: CanvasSpec
   version: number
   /** Visible text layers whose approved copy did not fit the rendered layout. */
@@ -274,7 +275,8 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       if (bake === null) delete bakeMap[areaId]
       else {
         assertRasterAspect(bake.spec)
-        for (const canvas of [bake.color, bake.metalness, bake.roughness, bake.bump]) {
+        for (const canvas of [bake.color, bake.metalness, bake.roughness, bake.bump, bake.whiteUnderbase]) {
+          if (!canvas) continue
           assertRasterDimensions(canvas, bake.spec)
         }
         bakeMap[areaId] = bake

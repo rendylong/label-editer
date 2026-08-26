@@ -279,6 +279,8 @@ export interface LabelAreaConfig {
   paper?: LabelPaper
   /** Physical carrier selected by the approved design contract. */
   carrier?: CarrierMode
+  /** Runtime-only provenance for a no-carrier legacy project migrated from enabled paper. */
+  legacyPaperCarrier?: true
   artboard?: PhysicalArtboard
   substrate?: SubstrateSpec
   placementPolicy?: TargetAspectPolicy

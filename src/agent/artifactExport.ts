@@ -6,7 +6,7 @@ import { canvasToPngBytes } from '../glb/textures'
 import { buildPrintManifest } from '../label/printReadiness'
 import type { LabelAreaConfig } from '../label/types'
 
-export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump'
+export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase'
 
 export interface BrowserArtifact {
   id: string
@@ -41,22 +41,22 @@ export function createProjectArtifact(modelFileName: string, areas: LabelAreaCon
   }
 }
 
-export function createPrintArtifact(area: LabelAreaConfig): BrowserArtifact {
+export function createPrintArtifact(area: LabelAreaConfig, bake?: BakeInput): BrowserArtifact {
   return {
     id: `print-manifest-${area.id}`,
     fileName: `${sanitizeArtifactBaseName(area.name)}-print-manifest.json`,
     mimeType: 'application/json',
-    bytes: jsonBytes(buildPrintManifest(area)),
+    bytes: jsonBytes(buildPrintManifest(area, bake)),
     areaId: area.id,
   }
 }
 
-export function createAggregatePrintArtifact(areas: LabelAreaConfig[]): BrowserArtifact {
+export function createAggregatePrintArtifact(areas: LabelAreaConfig[], bakeMap?: Record<string, BakeInput>): BrowserArtifact {
   return {
     id: 'print-manifest',
     fileName: 'print-manifest.json',
     mimeType: 'application/json',
-    bytes: jsonBytes({ version: 1, areas: areas.map((area) => buildPrintManifest(area)) }),
+    bytes: jsonBytes({ version: 1, areas: areas.map((area) => buildPrintManifest(area, bakeMap?.[area.id])) }),
   }
 }
 
@@ -65,10 +65,11 @@ export async function createChannelArtifact(
   bake: BakeInput,
   channel: ArtifactChannel,
 ): Promise<BrowserArtifact> {
-  const canvas = bake[channel]
+  const canvas = channel === 'white_underbase' ? bake.whiteUnderbase : bake[channel]
+  if (!canvas) throw new Error(`贴标区域「${area.name}」没有 ${channel} 烘焙通道`)
   return {
     id: `${area.id}-${channel}`,
-    fileName: `${channel}.png`,
+    fileName: channel === 'white_underbase' ? 'white-underbase.png' : `${channel}.png`,
     mimeType: 'image/png',
     bytes: await canvasToPngBytes(canvas),
     width: canvas.width,
@@ -86,8 +87,9 @@ export async function createAreaChannelArtifacts(
   for (const area of areas) {
     const bake = bakeMap[area.id]
     if (!bake) throw new Error(`贴标区域「${area.name}」缺少烘焙结果`)
-    for (const channel of ['color', 'metalness', 'roughness', 'bump'] as const) {
-      artifacts.push(await createChannelArtifact(area, bake, channel))
+    for (const channel of ['color', 'metalness', 'roughness', 'bump', 'white_underbase'] as const) {
+      const present = channel === 'white_underbase' ? bake.whiteUnderbase : bake[channel]
+      if (present) artifacts.push(await createChannelArtifact(area, bake, channel))
     }
   }
   return artifacts
@@ -148,7 +150,7 @@ export async function createExportBundle(input: CreateGlbArtifactInput & { norma
   const artifacts = [
     glb.artifact,
     createProjectArtifact(input.modelName, input.areas),
-    createAggregatePrintArtifact(input.areas),
+    createAggregatePrintArtifact(input.areas, input.bakeMap),
     ...channels,
   ]
   if (input.normalizedSpec !== undefined) {

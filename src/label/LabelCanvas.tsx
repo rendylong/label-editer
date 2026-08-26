@@ -13,7 +13,7 @@ import { useDesignFontReadiness } from './designFontReadiness'
 import { designFontReadinessKey } from './exportReadiness'
 import { clearTransparentCanvasBorder } from './canvasBorder'
 import {
-  renderMasks,
+  renderCarrierMasks,
   applyPhysicalColorSurface,
   craftStrokePaint,
   drawImageMaskShape,
@@ -345,7 +345,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         if (image) drawImageMaskShape(ctx, layer, image, gray)
       } else drawShapeMask(ctx, layer, gray, mode)
     }
-    const masks = renderMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, renderLayers, renderGlobalCraft)
+    const masks = renderCarrierMasks(cfg.canvas.width, cfg.canvas.height, drawLayer, cfg)
     const textOverflowLayerIds = renderLayers.flatMap((layer) => {
       if (layer.kind !== 'text' || !layer.visible) return []
       const measurementCanvas = document.createElement('canvas')
@@ -360,9 +360,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     const version = Math.max(Date.now(), previousVersion + 1)
     setBake(cfg.id, {
       color,
-      metalness: masks.metalness,
-      roughness: masks.roughness,
-      bump: masks.bump,
+      ...masks,
       spec: cfg.canvas,
       version,
       areaOwner: cfg,
@@ -436,7 +434,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
 
   const sorted = [...layers].sort((a, b) => a.zIndex - b.zIndex)
   const carrierSurface = resolveCarrierSurface(config)
-  const substrateBoundary = config.carrier === 'applied_label' ? config.substrate?.boundary : undefined
+  const substrateBoundary = carrierSurface.boundary
   // 显示尺寸 → 画布坐标 1:1 缩放：Stage 显示 displayWidth×displayHeight，
   // 内部所有元素统一使用画布坐标（canvas.width×canvas.height），经 contentScale 映射。
   const contentScale = spec.width > 0 ? displayWidth / spec.width : 1
@@ -467,6 +465,10 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
             ) : carrierSurface.substrateVisible && substrateBoundary?.shape === 'custom' && substrateBoundary.pathData ? (
               <KPath
                 data={substrateBoundary.pathData}
+                x={-(substrateBoundary.pathBounds?.x ?? 0) * spec.width / Math.max(substrateBoundary.pathBounds?.width ?? spec.width, 1)}
+                y={-(substrateBoundary.pathBounds?.y ?? 0) * spec.height / Math.max(substrateBoundary.pathBounds?.height ?? spec.height, 1)}
+                scaleX={spec.width / Math.max(substrateBoundary.pathBounds?.width ?? spec.width, 1)}
+                scaleY={spec.height / Math.max(substrateBoundary.pathBounds?.height ?? spec.height, 1)}
                 fill={carrierSurface.substrateColor}
                 opacity={carrierSurface.substrateOpacity}
                 listening={false}

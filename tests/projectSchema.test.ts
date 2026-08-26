@@ -4,6 +4,7 @@ import { Document, NodeIO } from '@gltf-transform/core'
 import labelProjectV3Schema from '../src/agent/label-project-v3.schema.json'
 import { importProject } from '../src/app/actions'
 import { parseLabelProject, serializeLabelProject } from '../src/app/projectSchema'
+import { resolveCarrierSurface } from '../src/label/paper'
 import type { LabelAreaConfig, ShapeKind } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore } from '../src/state/stores'
 
@@ -164,6 +165,27 @@ describe('label project v3', () => {
 
     expect(project.areas[0].carrier).toBe('applied_label')
     expect(project.areas[0].paper).toEqual(paper)
+    expect(resolveCarrierSurface(project.areas[0])).toMatchObject({
+      carrier: 'legacy', substrateVisible: true, substrateColor: paper.color, substrateOpacity: paper.opacity,
+    })
+
+    const reparsed = parseLabelProject(serializeLabelProject('legacy.glb', project.areas))
+    expect(resolveCarrierSurface(reparsed.areas[0])).toMatchObject({ carrier: 'legacy', substrateVisible: true })
+  })
+
+  it('does not treat an explicit carrier-aware applied label as legacy paper fallback', () => {
+    const project = parseLabelProject({
+      version: 3,
+      modelFileName: 'canonical.glb',
+      areas: [{
+        ...makeArea(), carrier: 'applied_label',
+        paper: { enabled: true, color: '#ede7dc', opacity: 0.84 },
+      }],
+    })
+
+    expect(resolveCarrierSurface(project.areas[0])).toMatchObject({
+      carrier: 'applied_label', substrateVisible: false,
+    })
   })
 
   it('keeps a newly-authored direct print substrate-free', () => {

@@ -16,8 +16,8 @@ export interface PreparedArea {
   fullRange: boolean
   remap: RemapOutput
   colorPng: Uint8Array
-  metalRoughPng: Uint8Array
-  normalPng: Uint8Array
+  metalRoughPng?: Uint8Array
+  normalPng?: Uint8Array
 }
 
 /** 为所有区域准备导出数据（每个区域独立提取网格 + 重算 remap + 编码纹理）。 */
@@ -29,12 +29,22 @@ export async function prepareAllAreas(glbBytes: Uint8Array, areas: LabelAreaConf
     if (!bake) continue
     const mesh = extractMeshAccessors(doc, area.meshIndex)
     const remap: RemapOutput = computeRemap(mesh, area.remap, area.range, { exteriorOnly: area.surfaceMode === 'overlay' })
-    const [colorPng, metalRoughPng, normalPng] = await Promise.all([
-      canvasToPngBytes(bake.color),
-      canvasToPngBytes(packMetalRough(bake.metalness, bake.roughness)),
-      canvasToPngBytes(bumpToNormal(bake.bump)),
-    ])
-    out.push({ areaId: area.id, meshIndex: area.meshIndex, nodeName: area.nodeName, surfaceMode: area.surfaceMode ?? 'replace', fullRange: area.range.uWidth >= 0.999 && area.range.vHeight >= 0.999, remap, colorPng, metalRoughPng, normalPng })
+    const colorPng = await canvasToPngBytes(bake.color)
+    const metalRoughPng = bake.metalness && bake.roughness
+      ? await canvasToPngBytes(packMetalRough(bake.metalness, bake.roughness))
+      : undefined
+    const normalPng = bake.bump ? await canvasToPngBytes(bumpToNormal(bake.bump)) : undefined
+    out.push({
+      areaId: area.id,
+      meshIndex: area.meshIndex,
+      nodeName: area.nodeName,
+      surfaceMode: area.surfaceMode ?? 'replace',
+      fullRange: area.range.uWidth >= 0.999 && area.range.vHeight >= 0.999,
+      remap,
+      colorPng,
+      ...(metalRoughPng ? { metalRoughPng } : {}),
+      ...(normalPng ? { normalPng } : {}),
+    })
   }
   return out
 }

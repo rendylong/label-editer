@@ -533,6 +533,7 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     canvas,
     paper: resolveLabelPaper(paperInput),
     ...(carrier === undefined ? {} : { carrier }),
+    ...(raw.carrier === undefined && paperInput?.enabled === true ? { legacyPaperCarrier: true as const } : {}),
     ...(raw.artboard === undefined ? {} : { artboard: normalizeArtboard(raw.artboard) }),
     ...(substrate === undefined ? {} : { substrate }),
     ...(placementPolicy === undefined ? {} : { placementPolicy }),
@@ -570,9 +571,21 @@ export function serializeLabelProject(modelFileName: string, areas: Array<LabelA
     version: PROJECT_VERSION,
     modelFileName,
     areas: areas.map((area, index) => {
-      const withRuntimeFields = area as SerializedArea & Partial<Pick<LabelAreaConfig, 'undoStack' | 'redoStack' | 'referenceUrl'>>
-      const { undoStack: _undoStack, redoStack: _redoStack, referenceUrl: _referenceUrl, ...serializable } = withRuntimeFields
-      return normalizeArea(serializable, index, PROJECT_VERSION)
+      const withRuntimeFields = area as SerializedArea & Partial<Pick<LabelAreaConfig, 'undoStack' | 'redoStack' | 'referenceUrl' | 'legacyPaperCarrier'>>
+      const {
+        undoStack: _undoStack,
+        redoStack: _redoStack,
+        referenceUrl: _referenceUrl,
+        legacyPaperCarrier,
+        ...serializable
+      } = withRuntimeFields
+      const normalized = normalizeArea(
+        legacyPaperCarrier ? { ...serializable, carrier: undefined } : serializable,
+        index,
+        PROJECT_VERSION,
+      )
+      const { legacyPaperCarrier: _legacyPaperCarrier, carrier: normalizedCarrier, ...projectArea } = normalized
+      return legacyPaperCarrier ? projectArea : { ...projectArea, ...(normalizedCarrier ? { carrier: normalizedCarrier } : {}) }
     }),
   }
 }

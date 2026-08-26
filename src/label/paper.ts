@@ -1,4 +1,5 @@
 import type { CarrierMode, LabelAreaConfig, LabelPaper } from './types'
+import { hasOpenSvgSubpath, parseNormalizedSvgPath, svgPathBounds, type SvgPathBounds } from './svgPath'
 
 const DEFAULT_LABEL_PAPER: LabelPaper = {
   enabled: false,
@@ -27,9 +28,43 @@ export interface CarrierSurface {
   whiteUnderbaseApplicable: boolean
   renderDecoration: boolean
   diagnosticFilmExtent: boolean
+  boundary?: CarrierBoundary
 }
 
-type CarrierSurfaceInput = Pick<LabelAreaConfig, 'carrier' | 'substrate' | 'paper'>
+export interface CarrierBoundary {
+  shape: 'rectangle' | 'rounded_rectangle' | 'ellipse' | 'custom'
+  radiusMm?: number
+  pathData?: string
+  pathBounds?: SvgPathBounds
+}
+
+export interface CarrierBoundaryResolution {
+  boundary?: CarrierBoundary
+  invalidField?: 'substrate.boundary.pathData'
+}
+
+type CarrierSurfaceInput = Pick<LabelAreaConfig, 'carrier' | 'substrate' | 'paper' | 'legacyPaperCarrier'>
+
+export function resolveCarrierBoundary(area: Pick<LabelAreaConfig, 'substrate'>): CarrierBoundaryResolution {
+  const boundary = area.substrate?.boundary
+  if (!boundary) return {}
+  if (boundary.shape !== 'custom') {
+    return { boundary: { shape: boundary.shape, ...(boundary.radiusMm === undefined ? {} : { radiusMm: boundary.radiusMm }) } }
+  }
+  if (typeof boundary.pathData !== 'string' || boundary.pathData.length === 0) {
+    return { invalidField: 'substrate.boundary.pathData' }
+  }
+  try {
+    const commands = parseNormalizedSvgPath(boundary.pathData)
+    const pathBounds = svgPathBounds(commands)
+    if (hasOpenSvgSubpath(commands) || pathBounds.width <= 0 || pathBounds.height <= 0) {
+      return { invalidField: 'substrate.boundary.pathData' }
+    }
+    return { boundary: { shape: 'custom', pathData: boundary.pathData, pathBounds } }
+  } catch {
+    return { invalidField: 'substrate.boundary.pathData' }
+  }
+}
 
 /**
  * Resolves clean artwork geometry independently from production diagnostics.
@@ -37,7 +72,12 @@ type CarrierSurfaceInput = Pick<LabelAreaConfig, 'carrier' | 'substrate' | 'pape
  * but can never make this resolver synthesize a panel.
  */
 export function resolveCarrierSurface(area: CarrierSurfaceInput): CarrierSurface {
-  if (!area.carrier) {
+  if (!area.carrier || (
+    area.legacyPaperCarrier === true
+    && area.carrier === 'applied_label'
+    && area.substrate === undefined
+    && area.paper?.enabled === true
+  )) {
     const paper = resolveLabelPaper(area.paper)
     return {
       carrier: 'legacy',
@@ -57,6 +97,7 @@ export function resolveCarrierSurface(area: CarrierSurfaceInput): CarrierSurface
   }
 
   const substrate = area.substrate
+  const boundaryResolution = resolveCarrierBoundary(area)
   const base = {
     carrier: area.carrier,
     substrateColor: substrate?.color ?? '#ffffff',
@@ -68,13 +109,14 @@ export function resolveCarrierSurface(area: CarrierSurfaceInput): CarrierSurface
     case 'applied_label':
       return {
         ...base,
-        substrateVisible: substrate?.kind === 'opaque' && base.substrateOpacity > 0,
-        boundaryVisible: substrate?.boundary !== undefined,
+        substrateVisible: substrate?.kind === 'opaque' && base.substrateOpacity > 0 && boundaryResolution.boundary !== undefined,
+        boundaryVisible: boundaryResolution.boundary !== undefined,
         adhesiveApplicable: true,
         bleedApplicable: true,
         dieCutApplicable: true,
         whiteUnderbaseApplicable: false,
         diagnosticFilmExtent: false,
+        ...(boundaryResolution.boundary ? { boundary: boundaryResolution.boundary } : {}),
       }
     case 'clear_label':
       return {
@@ -85,7 +127,10 @@ export function resolveCarrierSurface(area: CarrierSurfaceInput): CarrierSurface
         bleedApplicable: false,
         dieCutApplicable: false,
         whiteUnderbaseApplicable: true,
-        diagnosticFilmExtent: true,
+        diagnosticFilmExtent: substrate?.kind === 'transparent'
+          && base.substrateOpacity < 1
+          && boundaryResolution.boundary !== undefined,
+        ...(boundaryResolution.boundary ? { boundary: boundaryResolution.boundary } : {}),
       }
     case 'direct_surface_print':
       return {

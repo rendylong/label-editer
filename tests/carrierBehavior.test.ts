@@ -190,4 +190,85 @@ describe('canonical carrier rendering and readiness', () => {
 
     expect(validatePrintReadiness(area).map((issue) => issue.code)).toEqual(['decoration-on-bare'])
   })
+
+  it.each([
+    ['rectangle', undefined],
+    ['rounded_rectangle', undefined],
+    ['ellipse', undefined],
+    ['custom', 'M0 0H40V60H0Z'],
+  ] as const)('accepts a valid %s physical boundary without changing its kind', (shape, pathData) => {
+    const area = carrierArea('applied_label', {
+      substrate: {
+        kind: 'opaque', color: '#f2efe4', opacity: 1,
+        boundary: { shape, ...(pathData ? { pathData } : {}) },
+      },
+    })
+
+    expect(resolveCarrierSurface(area)).toMatchObject({
+      substrateVisible: true, boundaryVisible: true,
+      boundary: expect.objectContaining({ shape }),
+    })
+    expect(validatePrintReadiness(area).map((issue) => issue.code)).not.toContain('invalid-custom-boundary')
+  })
+
+  it.each([
+    [undefined, 'substrate.boundary.pathData'],
+    ['', 'substrate.boundary.pathData'],
+    ['M0 0 L', 'substrate.boundary.pathData'],
+    ['M0 0H40V60', 'substrate.boundary.pathData'],
+    ['M0 0Z', 'substrate.boundary.pathData'],
+  ] as const)('never fabricates a rectangle for invalid custom boundary %j', (pathData, field) => {
+    const area = carrierArea('applied_label', {
+      substrate: {
+        kind: 'opaque', color: '#f2efe4', opacity: 1,
+        boundary: { shape: 'custom', ...(pathData === undefined ? {} : { pathData }) },
+      },
+    })
+
+    expect(resolveCarrierSurface(area)).toMatchObject({ substrateVisible: false, boundaryVisible: false })
+    expect(validatePrintReadiness(area)).toContainEqual(expect.objectContaining({
+      code: 'invalid-custom-boundary', areaId: area.id, fields: [field],
+    }))
+  })
+
+  it('requires a valid transparent film boundary for clear labels', () => {
+    const missing = carrierArea('clear_label', {
+      substrate: { kind: 'transparent', opacity: 0.08 },
+    })
+    const invalid = carrierArea('clear_label', {
+      substrate: { kind: 'transparent', opacity: 0.08, boundary: { shape: 'custom', pathData: 'M0 0L' } },
+    })
+
+    expect(resolveCarrierSurface(missing).diagnosticFilmExtent).toBe(false)
+    expect(validatePrintReadiness(missing)).toContainEqual(expect.objectContaining({
+      code: 'missing-clear-boundary', fields: ['substrate.boundary'],
+    }))
+    expect(resolveCarrierSurface(invalid).diagnosticFilmExtent).toBe(false)
+    expect(validatePrintReadiness(invalid)).toContainEqual(expect.objectContaining({
+      code: 'invalid-custom-boundary', fields: ['substrate.boundary.pathData'],
+    }))
+  })
+
+  it('rejects an opaque applied substrate with zero opacity', () => {
+    const area = carrierArea('applied_label', {
+      substrate: { ...appliedSubstrate, opacity: 0 },
+    })
+
+    expect(resolveCarrierSurface(area).substrateVisible).toBe(false)
+    expect(validatePrintReadiness(area)).toContainEqual(expect.objectContaining({
+      code: 'invalid-applied-substrate-opacity', areaId: area.id, fields: ['substrate.opacity'],
+    }))
+  })
+
+  it('lists white underbase only when a real baked separation channel exists', () => {
+    const area = carrierArea('clear_label', {
+      substrate: clearSubstrate,
+      processes: [{ process: 'white_underbase', spotName: 'WHITE', requiredMask: 'white_underbase' }],
+    })
+    const color = { width: 400, height: 600 } as HTMLCanvasElement
+    const whiteUnderbase = { width: 400, height: 600 } as HTMLCanvasElement
+
+    expect(buildPrintManifest(area).separations).not.toContain('white_underbase')
+    expect(buildPrintManifest(area, { color, whiteUnderbase }).separations).toEqual(['white_underbase', 'WHITE'])
+  })
 })

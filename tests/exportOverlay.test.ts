@@ -57,7 +57,11 @@ describe('GLB 贴标叠加导出', () => {
     expect(labelNode?.getTranslation()).toEqual([3, 4, 5])
     expect(labelNode?.getMesh()).not.toBe(bodyMesh)
     const labelPrimitive = labelNode?.getMesh()?.listPrimitives()[0]
-    expect(labelPrimitive?.getMaterial()).not.toBe(bodyMaterial)
+    const labelMaterial = labelPrimitive?.getMaterial()
+    expect(labelMaterial).not.toBe(bodyMaterial)
+    expect(labelMaterial?.getMetallicRoughnessTexture()).toBeNull()
+    expect(labelMaterial?.getNormalTexture()).toBeNull()
+    expect(labelMaterial?.getMetallicFactor()).toBe(0)
     const exportedPosition = labelPrimitive?.getAttribute('POSITION')?.getArray() as Float32Array
     expect(exportedPosition[2]).toBeGreaterThan(0)
   })

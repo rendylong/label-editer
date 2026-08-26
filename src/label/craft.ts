@@ -3,9 +3,10 @@
  * mask 语义：metalness（白=金属）、roughness（黑=光滑）、bump（0.5=平面）。
  */
 
-import type { CraftEffect, CraftType, ImageLayer, LabelLayer, ShapeLayer, TextLayer } from './types'
+import type { CraftEffect, CraftType, ImageLayer, LabelAreaConfig, LabelLayer, ShapeLayer, TextLayer } from './types'
 import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
+import { resolveCarrierSurface } from './paper'
 
 export type CraftScope = 'layer' | 'global'
 export type MaskChannel = 'metalness' | 'roughness' | 'bump'
@@ -821,4 +822,120 @@ export function renderMasks(
     }
   }
   return { metalness: metal, roughness: rough, bump }
+}
+
+export interface CarrierMaskResult {
+  metalness?: HTMLCanvasElement
+  roughness?: HTMLCanvasElement
+  bump?: HTMLCanvasElement
+  whiteUnderbase?: HTMLCanvasElement
+}
+
+/**
+ * Carrier-aware mask generation. Substrate-backed labels retain their legacy
+ * full-surface PBR defaults; carrier-free artwork allocates only channels with
+ * an explicit layer/global craft or process declaration.
+ */
+export function renderCarrierMasks(
+  width: number,
+  height: number,
+  drawLayer: (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode) => void,
+  area: Pick<LabelAreaConfig, 'carrier' | 'substrate' | 'paper' | 'legacyPaperCarrier' | 'layers' | 'globalCraft'>,
+): CarrierMaskResult {
+  const surface = resolveCarrierSurface(area)
+  if (!surface.renderDecoration) return {}
+  const substrateBacked = surface.carrier === 'legacy' || surface.substrateVisible
+  const result: CarrierMaskResult = substrateBacked
+    ? renderMasks(width, height, drawLayer, area.layers, area.globalCraft.craft)
+    : {}
+  if (substrateBacked) {
+    const underbaseLayers = area.layers.filter((layer) => layer.visible && (layer.processes ?? []).some(
+      (process) => process.process === 'white_underbase' || process.requiredMask === 'white_underbase',
+    ))
+    if (underbaseLayers.length > 0) {
+      const whiteUnderbase = document.createElement('canvas')
+      whiteUnderbase.width = width
+      whiteUnderbase.height = height
+      const context = whiteUnderbase.getContext('2d')!
+      context.fillStyle = 'rgb(0,0,0)'
+      context.fillRect(0, 0, width, height)
+      for (const layer of underbaseLayers) drawLayer(context, layer, 255, 'fill')
+      result.whiteUnderbase = whiteUnderbase
+    }
+    return result
+  }
+
+  const required = new Set<keyof CarrierMaskResult>()
+  for (const layer of area.layers) {
+    if (!layer.visible) continue
+    for (const contribution of layerMaskContributions(layer)) required.add(contribution.channel)
+    if (layer.craft.some((effect) => effect.type === 'matte')) {
+      required.add('roughness')
+      required.add('bump')
+    }
+    for (const process of layer.processes ?? []) {
+      if (process.requiredMask === 'metalness' || process.requiredMask === 'roughness' || process.requiredMask === 'bump') {
+        required.add(process.requiredMask)
+      }
+      if (process.process === 'white_underbase' || process.requiredMask === 'white_underbase') {
+        required.add('whiteUnderbase')
+      }
+    }
+  }
+  for (const effect of area.globalCraft.craft) {
+    if (effect.type === 'matte') {
+      required.add('roughness')
+      required.add('bump')
+    } else if (effect.type === 'uv') required.add('roughness')
+  }
+
+  const neutral: Record<keyof CarrierMaskResult, number> = {
+    metalness: 0,
+    roughness: 255,
+    bump: 128,
+    whiteUnderbase: 0,
+  }
+  const contexts = new Map<keyof CarrierMaskResult, CanvasRenderingContext2D>()
+  for (const channel of required) {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const context = canvas.getContext('2d')!
+    const tone = neutral[channel]
+    context.fillStyle = `rgb(${tone},${tone},${tone})`
+    context.fillRect(0, 0, width, height)
+    result[channel] = canvas
+    contexts.set(channel, context)
+  }
+
+  for (const layer of area.layers) {
+    if (!layer.visible) continue
+    for (const process of layer.processes ?? []) {
+      const channel = process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
+        ? 'whiteUnderbase'
+        : process.requiredMask === 'metalness' || process.requiredMask === 'roughness' || process.requiredMask === 'bump'
+          ? process.requiredMask
+          : undefined
+      if (channel) drawLayer(contexts.get(channel)!, layer, channel === 'roughness' ? 0 : 255, 'fill')
+    }
+    for (const contribution of layerMaskContributions(layer)) {
+      const context = contexts.get(contribution.channel)
+      if (context) drawLayer(context, layer, contribution.tone, contribution.mode)
+    }
+    const matte = layer.craft.find((effect) => effect.type === 'matte')
+    const roughness = contexts.get('roughness')
+    const bump = contexts.get('bump')
+    if (matte && roughness && bump) applyLayerMatteSurface(width, height, drawLayer, layer, matte, roughness, bump)
+  }
+  for (const effect of area.globalCraft.craft) {
+    const roughness = contexts.get('roughness')
+    const bump = contexts.get('bump')
+    if (effect.type === 'matte' && roughness && bump) applyGlobalMatteSurface(width, height, effect, roughness, bump)
+    if (effect.type === 'uv' && roughness) {
+      const tone = Math.round(8 + 96 * (1 - clamp01(effect.params.gloss ?? 0.5)))
+      roughness.fillStyle = `rgb(${tone},${tone},${tone})`
+      roughness.fillRect(0, 0, width, height)
+    }
+  }
+  return result
 }

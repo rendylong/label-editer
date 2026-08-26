@@ -48,7 +48,7 @@ export interface ArtifactDescriptor {
   width?: number
   height?: number
   areaId?: string
-  channel?: 'color' | 'metalness' | 'roughness' | 'bump' | 'preview'
+  channel?: 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase' | 'preview'
 }
 
 export type QcChannel = 'color' | 'metalness' | 'roughness' | 'bump'

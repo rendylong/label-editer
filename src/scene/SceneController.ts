@@ -48,9 +48,9 @@ interface SceneControllerOptions {
 
 interface LabelTextureSet {
   color: THREE.CanvasTexture
-  metal: THREE.CanvasTexture
-  rough: THREE.CanvasTexture
-  bump: THREE.CanvasTexture
+  metal?: THREE.CanvasTexture
+  rough?: THREE.CanvasTexture
+  bump?: THREE.CanvasTexture
   width: number
   height: number
 }
@@ -158,13 +158,13 @@ export function applyChannelViewToLabels(
     const mat = mesh.material as THREE.MeshStandardMaterial
     if (view === 'color' || view === null) {
       mat.map = texs.color
-      mat.metalnessMap = texs.metal
-      mat.roughnessMap = texs.rough
-      mat.bumpMap = texs.bump
-      mat.metalness = 1
+      mat.metalnessMap = texs.metal ?? null
+      mat.roughnessMap = texs.rough ?? null
+      mat.bumpMap = texs.bump ?? null
+      mat.metalness = texs.metal ? 1 : 0
       mat.roughness = 1
     } else {
-      mat.map = view === 'metalness' ? texs.metal : view === 'roughness' ? texs.rough : texs.bump
+      mat.map = (view === 'metalness' ? texs.metal : view === 'roughness' ? texs.rough : texs.bump) ?? null
       mat.metalnessMap = null
       mat.roughnessMap = null
       mat.bumpMap = null
@@ -222,12 +222,14 @@ export function installStudioEnvironment(scene: THREE.Scene, texture: THREE.Text
 /** 让编辑器烘焙完整接管标签表面，避免原 GLB 的 UV 贴图按重映射 UV 错位叠加。 */
 export function configureLabelMaterial(
   material: THREE.MeshStandardMaterial,
-  textures: { color: THREE.Texture; metal: THREE.Texture; rough: THREE.Texture; bump: THREE.Texture },
+  textures: { color: THREE.Texture; metal?: THREE.Texture; rough?: THREE.Texture; bump?: THREE.Texture },
 ): void {
   material.map = textures.color
-  material.metalnessMap = textures.metal
-  material.roughnessMap = textures.rough
-  material.bumpMap = textures.bump
+  material.metalnessMap = textures.metal ?? null
+  material.roughnessMap = textures.rough ?? null
+  material.bumpMap = textures.bump ?? null
+  material.metalness = textures.metal ? 1 : 0
+  material.roughness = 1
   // 几何 UV 已由贴标展开逻辑重建；原模型 normalMap 仍使用旧 UV，继续保留会产生
   // 条纹、污点与高光错位。预览改用编辑器生成的 bumpMap 作为唯一微表面来源。
   material.normalMap = null
@@ -361,7 +363,7 @@ export class SceneController {
   }>()
   private labelTextures = new Map<string, LabelTextureSet>()
   /** 待应用烘焙（mesh 未就绪时缓存） */
-  private pendingBakes = new Map<string, { color: HTMLCanvasElement; metalness: HTMLCanvasElement; roughness: HTMLCanvasElement; bump: HTMLCanvasElement }>()
+  private pendingBakes = new Map<string, { color: HTMLCanvasElement; metalness?: HTMLCanvasElement; roughness?: HTMLCanvasElement; bump?: HTMLCanvasElement }>()
   private frontMarker: THREE.Mesh | null = null
   private frontMarkerNode = ''
   /** 3D 区域控制框 */
@@ -762,7 +764,7 @@ export class SceneController {
   }
 
   /** 热更新标签纹理（同一 texture 对象换源，避免程序重编译）。mesh 未就绪时缓存。 */
-  applyLabelBake(areaId: string, bake: { color: HTMLCanvasElement; metalness: HTMLCanvasElement; roughness: HTMLCanvasElement; bump: HTMLCanvasElement } | null): void {
+  applyLabelBake(areaId: string, bake: { color: HTMLCanvasElement; metalness?: HTMLCanvasElement; roughness?: HTMLCanvasElement; bump?: HTMLCanvasElement } | null): void {
     if (this.failed) return
     const mesh = this.labelMeshes.get(areaId)
     if (!mesh) {
@@ -771,24 +773,36 @@ export class SceneController {
     }
     if (!bake) return
     let texs = this.labelTextures.get(areaId)
-    if (texs && !labelTextureSizeMatches(texs, bake)) {
+    const channelPresenceChanged = texs && (
+      Boolean(texs.metal) !== Boolean(bake.metalness)
+      || Boolean(texs.rough) !== Boolean(bake.roughness)
+      || Boolean(texs.bump) !== Boolean(bake.bump)
+    )
+    if (texs && (!labelTextureSizeMatches(texs, bake) || channelPresenceChanged)) {
       texs.color.dispose()
-      texs.metal.dispose()
-      texs.rough.dispose()
-      texs.bump.dispose()
+      texs.metal?.dispose()
+      texs.rough?.dispose()
+      texs.bump?.dispose()
       this.labelTextures.delete(areaId)
       texs = undefined
     }
     if (!texs) {
       const color = new THREE.CanvasTexture(bake.color)
-      const metal = new THREE.CanvasTexture(bake.metalness)
-      const rough = new THREE.CanvasTexture(bake.roughness)
-      const bump = new THREE.CanvasTexture(bake.bump)
+      const metal = bake.metalness ? new THREE.CanvasTexture(bake.metalness) : undefined
+      const rough = bake.roughness ? new THREE.CanvasTexture(bake.roughness) : undefined
+      const bump = bake.bump ? new THREE.CanvasTexture(bake.bump) : undefined
       configureLabelCanvasTexture(color, true)
-      configureLabelCanvasTexture(metal, false)
-      configureLabelCanvasTexture(rough, false)
-      configureLabelCanvasTexture(bump, false)
-      texs = { color, metal, rough, bump, width: bake.color.width, height: bake.color.height }
+      if (metal) configureLabelCanvasTexture(metal, false)
+      if (rough) configureLabelCanvasTexture(rough, false)
+      if (bump) configureLabelCanvasTexture(bump, false)
+      texs = {
+        color,
+        ...(metal ? { metal } : {}),
+        ...(rough ? { rough } : {}),
+        ...(bump ? { bump } : {}),
+        width: bake.color.width,
+        height: bake.color.height,
+      }
       this.labelTextures.set(areaId, texs)
       const mat = mesh.material as THREE.MeshStandardMaterial
       // 贴标区域闭合带：完整接管颜色/PBR/微表面，并强制不透明避免透过。
@@ -799,12 +813,18 @@ export class SceneController {
     if (source?.mode === 'replace') source.mesh.visible = false
     texs.color.image = bake.color
     texs.color.needsUpdate = true
-    texs.metal.image = bake.metalness
-    texs.metal.needsUpdate = true
-    texs.rough.image = bake.roughness
-    texs.rough.needsUpdate = true
-    texs.bump.image = bake.bump
-    texs.bump.needsUpdate = true
+    if (texs.metal && bake.metalness) {
+      texs.metal.image = bake.metalness
+      texs.metal.needsUpdate = true
+    }
+    if (texs.rough && bake.roughness) {
+      texs.rough.image = bake.roughness
+      texs.rough.needsUpdate = true
+    }
+    if (texs.bump && bake.bump) {
+      texs.bump.image = bake.bump
+      texs.bump.needsUpdate = true
+    }
     this.requestRender()
   }
 
