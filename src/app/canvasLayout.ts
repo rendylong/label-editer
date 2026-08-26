@@ -71,6 +71,15 @@ export function assertRasterDimensions(
   actual: { width: number; height: number },
   expected: { width: number; height: number; aspect: number },
 ): void {
+  if (!expected) {
+    throw new RasterAspectError({
+      declaredAspect: Number.NaN,
+      rasterAspect: actual.width / actual.height,
+      width: actual.width,
+      height: actual.height,
+      tolerance: 0,
+    })
+  }
   assertRasterAspect(expected)
   if (actual.width !== expected.width || actual.height !== expected.height) {
     throw new RasterAspectError({

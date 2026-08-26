@@ -66,6 +66,24 @@ function physicalSpec() {
 }
 
 describe('physical design rendering fidelity', () => {
+  it('requires every caller to supply the canonical capture canvas contract', () => {
+    const raster = { width: 4096, height: 6143 } as HTMLCanvasElement
+    const stage = { find: () => [] as [], draw: () => undefined, toCanvas: () => raster }
+    const unsafeCapture = labelCanvas.captureDesignCanvas as unknown as (
+      candidateStage: typeof stage,
+      pixelRatio: number,
+    ) => HTMLCanvasElement
+
+    expect(() => unsafeCapture(stage, 1)).toThrow(expect.objectContaining({
+      name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
+    }))
+
+    if (false) {
+      // @ts-expect-error The exported API requires an explicit canonical canvas contract.
+      labelCanvas.captureDesignCanvas(stage, 1)
+    }
+  })
+
   it('rejects a captured raster whose dimensions disagree with the canvas aspect', () => {
     const capture = (labelCanvas as typeof labelCanvas & {
       captureDesignCanvas: (
@@ -624,13 +642,6 @@ describe('3D 渲染细节保真', () => {
   })
 
   it('烘焙颜色贴图时应排除参考图、选框与定位辅助层，并在完成后恢复编辑视图', () => {
-    const capture = (labelCanvas as typeof labelCanvas & {
-      captureDesignCanvas?: (stage: {
-        find: (selector: string) => Array<{ visible: { (): boolean; (value: boolean): unknown } }>
-        draw: () => void
-        toCanvas: (options: { pixelRatio: number }) => HTMLCanvasElement
-      }, pixelRatio: number) => HTMLCanvasElement
-    }).captureDesignCanvas
     let guideVisible = true
     let transformerVisible = true
     let reliefShadowEnabled = true
@@ -641,7 +652,7 @@ describe('3D 渲染细节保真', () => {
     const reliefNodes = [
       { shadowEnabled: (value?: boolean) => value === undefined ? reliefShadowEnabled : (reliefShadowEnabled = value) },
     ]
-    const output = {} as HTMLCanvasElement
+    const output = { width: 1600, height: 2400 } as HTMLCanvasElement
     const stage = {
       find: (selector: string) => selector === '.non-export' ? nodes : selector === '.craft-relief' ? reliefNodes : [],
       draw: () => undefined,
@@ -652,10 +663,11 @@ describe('3D 渲染细节保真', () => {
         expect(reliefShadowEnabled).toBe(false)
         return output
       },
-    }
+    } as Parameters<typeof labelCanvas.captureDesignCanvas>[0]
 
-    expect(capture).toBeTypeOf('function')
-    expect(capture?.(stage, 4)).toBe(output)
+    expect(labelCanvas.captureDesignCanvas(stage, 4, {
+      width: 1600, height: 2400, aspect: 2 / 3,
+    })).toBe(output)
     expect(guideVisible).toBe(true)
     expect(transformerVisible).toBe(true)
     expect(reliefShadowEnabled).toBe(true)

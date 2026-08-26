@@ -71,7 +71,7 @@ interface ExportableStage {
 export function captureDesignCanvas(
   stage: ExportableStage,
   pixelRatio: number,
-  expectedCanvas?: { width: number; height: number; aspect: number },
+  expectedCanvas: { width: number; height: number; aspect: number },
 ): HTMLCanvasElement {
   const excluded = Array.from(stage.find('.non-export')).filter((node): node is ExportVisibilityNode => 'visible' in node)
   const relief = Array.from(stage.find('.craft-relief')).filter((node): node is ExportReliefNode => 'shadowEnabled' in node)
@@ -82,9 +82,7 @@ export function captureDesignCanvas(
     relief.forEach((node) => node.shadowEnabled(false))
     stage.draw()
     const captured = stage.toCanvas({ pixelRatio })
-    if (expectedCanvas) {
-      assertRasterDimensions(captured, expectedCanvas)
-    }
+    assertRasterDimensions(captured, expectedCanvas)
     return captured
   } finally {
     excluded.forEach((node, index) => node.visible(visibility[index]))
