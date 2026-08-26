@@ -516,7 +516,7 @@ function assertManifestIdentity(
   const areas = new Map(value.areas.map((area) => [area.id, area]))
   const evidenceByArea = new Map<string, Set<string>>()
   const areaScopedViewKinds = code === 'INVALID_DESIGN_REVIEW_MANIFEST'
-    ? new Set(['mockup-front', 'mockup-back', 'mockup-area'])
+    ? new Set(['mockup-area'])
     : new Set(['flat-artwork', 'surface-face'])
   for (const artifact of value.artifacts) {
     if (areaScopedViewKinds.has(artifact.viewKind) && (!artifact.areaId || !artifact.carrier)) {

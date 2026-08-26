@@ -102,7 +102,15 @@ function designReviewManifest(): DesignReviewManifestV1 {
     artifacts: [{
       id: 'mockup-front', path: 'mockup-front.png', sha256: SHA_A,
       mimeType: 'image/png', width: 1600, height: 1200,
-      viewKind: 'mockup-front', areaId: 'front', carrier: 'direct_surface_print',
+      viewKind: 'mockup-front',
+    }, {
+      id: 'mockup-back', path: 'mockup-back.png', sha256: SHA_B,
+      mimeType: 'image/png', width: 1600, height: 1200,
+      viewKind: 'mockup-back',
+    }, {
+      id: 'mockup-area-front', path: 'mockup-area-front.png', sha256: SHA_A,
+      mimeType: 'image/png', width: 1200, height: 1200,
+      viewKind: 'mockup-area', areaId: 'front', carrier: 'direct_surface_print',
     }],
   }
 }
@@ -304,10 +312,13 @@ describe('shared design contracts', () => {
     expect(() => validateReviewManifest(reviewManifest)).toThrow(/schema/i)
   })
 
-  it('requires area identity and complete per-area design-review evidence', () => {
+  it('allows global front/back mockups while requiring scoped evidence for every design area', () => {
+    expect(validateDesignReviewManifest(designReviewManifest()).version).toBe(1)
+
     const unbound = designReviewManifest()
-    delete unbound.artifacts[0].areaId
-    delete unbound.artifacts[0].carrier
+    const areaArtifact = unbound.artifacts.find((artifact) => artifact.viewKind === 'mockup-area')!
+    delete areaArtifact.areaId
+    delete areaArtifact.carrier
     expect(() => validateDesignReviewManifest(unbound)).toThrow(/areaId.*carrier/i)
 
     const incomplete = designReviewManifest()

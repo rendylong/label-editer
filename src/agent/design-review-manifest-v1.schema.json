@@ -60,7 +60,7 @@
       "required": ["id", "path", "sha256", "mimeType", "width", "height", "viewKind"],
       "allOf": [{
         "if": {
-          "properties": { "viewKind": { "enum": ["mockup-front", "mockup-back", "mockup-area"] } },
+          "properties": { "viewKind": { "const": "mockup-area" } },
           "required": ["viewKind"]
         },
         "then": {
