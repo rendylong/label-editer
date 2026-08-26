@@ -1004,13 +1004,18 @@ Run:
 
 ```bash
 qc_tmp_dir="$(mktemp -d)"
+label_spec_path="/absolute/path/to/local/label-spec-v2.json"
+label_glb_path="/absolute/path/to/local/model.glb"
 node scripts/label-cli.mjs qc \
-  input/lavira-mens-cleanser-2026-08-25/label-spec-v2.json \
-  --glb input/lavira-mens-cleanser-2026-08-25/17_pump_bottle_nurhadimli.glb \
+  "$label_spec_path" \
+  --glb "$label_glb_path" \
   --output "$qc_tmp_dir/round-0" \
   --preset qc-standard \
   --json
 ```
+
+Use a locally available model and matching label spec that are licensed for the
+tester. Real product assets and generated QC evidence are not committed.
 
 Open the six standard images and both close-ups for every manifest area with the local image viewer. Confirm the images are distinct, upright, and correctly framed; record the absolute manifest/image paths in the verification notes. Any visual defect blocks completion: correct it, regenerate the evidence directory, and rerun the affected focused tests.
 

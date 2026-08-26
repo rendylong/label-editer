@@ -11,6 +11,10 @@ coverage/
 .gstack/
 .playwright-cli/
 .superpowers/
+/.codex-*/
+
+# Local licensed QA fixtures
+/input/lavira-mens-cleanser-2026-08-25/
 
 # Environment and credentials
 .env
