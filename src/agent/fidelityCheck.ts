@@ -91,8 +91,19 @@ export function projectEditableArea(area: LabelAreaConfig): EditableAreaProjecti
   }
 }
 
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, nested]) => nested !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => [key, canonical(nested)]),
+  )
+}
+
 function same(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right))
 }
 
 function near(left: number | undefined, right: number | undefined, tolerance: number): boolean {
@@ -174,6 +185,8 @@ function vectorMatches(expected: LayoutBlueprintLayer, actual: EditableLayerProj
     && actual.pathData === (expected.pathData ?? polygon?.data)
     && same(actual.pathViewBox, expected.pathViewBox ?? polygon?.viewBox)
     && actual.fillRule === expected.fillRule
+    && actual.designMetrics?.strokeWidthMm === expected.strokeWidthMm
+    && actual.designMetrics?.cornerRadiusMm === expected.cornerRadiusMm
 }
 
 function issue(

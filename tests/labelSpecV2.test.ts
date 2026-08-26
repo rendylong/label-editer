@@ -88,6 +88,7 @@ describe('Label Spec v2', () => {
           pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
           designMetrics: {
             boundsMm: { x: 4, y: 6, width: 34, height: 56 }, anchor: 'center',
+            strokeWidthMm: 0.3, cornerRadiusMm: 1.5,
           },
           processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER', requiredMask: 'metalness' }],
         }],
@@ -119,6 +120,47 @@ describe('Label Spec v2', () => {
       designMetrics: { boundsMm: { x: 4, y: 6, width: 34, height: 56 }, anchor: 'center' },
       processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER', requiredMask: 'metalness' }],
     })
+  })
+
+  it('accepts bounded authoritative CSS color strings and rejects empty or overlong colors', () => {
+    const colors = ['rgba(125, 63, 42, 0.72)', 'copper', 'transparent']
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{ id: 'text', type: 'text', text: 'LABEL', x: 0.5, y: 0.4, color: colors[0] }, {
+          id: 'shape', type: 'shape', shape: 'rectangle', x: 0.5, y: 0.5, width: 0.5, height: 0.5,
+          fill: colors[1], stroke: colors[2],
+        }],
+      }],
+    }
+
+    expect(validateLabelSpec(spec).ok).toBe(true)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(spec)).toBe(true)
+    for (const color of ['', 'x'.repeat(65)]) {
+      const invalid = structuredClone(spec)
+      invalid.areas[0].layers[0].color = color
+      expect(validateLabelSpec(invalid).ok).toBe(false)
+    }
+  })
+
+  it.each(['auto', 'ltr'] as const)('preserves explicit Arabic writingDirection %s through apply and Project v3', (writingDirection) => {
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{
+          id: 'arabic', type: 'text', text: 'عطر', x: 0.5, y: 0.5,
+          language: 'ar', writingDirection, fontWeight: 'normal', color: 'currentColor',
+        }],
+      }],
+    }
+
+    const project = serializeLabelProject('bottle.glb', applyStructuredLabelSpec(baseArea, spec).areas)
+
+    expect(project.areas[0].layers[0]).toMatchObject({ kind: 'text', language: 'ar', writingDirection, fontWeight: 'normal' })
   })
 
   it.each([

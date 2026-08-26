@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { BlueprintCompilerError, compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
 import type { LayoutBlueprintV1 } from '../src/agent/designContracts'
 import { validateLabelSpec } from '../src/agent/labelSpecSchema'
+import { applyStructuredLabelSpec } from '../src/app/labelSpec'
+import { serializeLabelProject } from '../src/app/projectSchema'
+import type { LabelAreaConfig } from '../src/label/types'
+
+const shell: LabelAreaConfig = {
+  id: 'area-front', name: 'Front shell', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay',
+  remap: { mode: 'cylindrical', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0, planarBox: { min: [-1, -1, -1], max: [1, 1, 1] } },
+  range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }, canvas: { width: 1000, height: 500, aspect: 2 },
+  layers: [], globalCraft: { craft: [] }, fonts: [], referenceVisible: false, undoStack: [], redoStack: [],
+}
 
 function laviraBlueprint(): LayoutBlueprintV1 {
   const text = (
@@ -73,6 +83,7 @@ describe('blueprint compiler', () => {
     expect(front.layers.find((layer) => layer.id === 'copper-frame')).toMatchObject({
       type: 'shape', shape: 'path', fill: 'transparent',
       pathData: 'M 0 60 L 0 0 L 36 0 L 36 60', pathViewBox: [0, 0, 36, 60],
+      designMetrics: { strokeWidthMm: 0.3 },
       processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER' }],
       craft: [{ type: 'foil', params: { foilColor: 'custom', foilCustomColor: '#A5663B', foilSpotName: 'COPPER' } }],
     })
@@ -147,9 +158,39 @@ describe('blueprint compiler', () => {
     const areas = compileBlueprintToSpecAreas(blueprint)
 
     expect(areas[0].layers[0]).toMatchObject({
-      fontSize: 2048, fontWeight: 100, letterSpacing: 100, lineHeight: 5,
+      fontSize: 2048, fontWeight: 50, letterSpacing: 100, lineHeight: 5,
       designMetrics: { fontSizeMm: 1000, letterSpacingEm: 100, lineHeight: 100 },
     })
     expect(validateLabelSpec({ version: 2, areas }).ok).toBe(true)
+  })
+
+  it.each([50, 'normal', 'bold'] as const)('round-trips authoritative fontWeight %s through apply and Project v3', (fontWeight) => {
+    const blueprint = laviraBlueprint()
+    blueprint.areas[0].layers = [blueprint.areas[0].layers[0]]
+    blueprint.areas[0].layers[0].fontWeight = fontWeight
+
+    const specAreas = compileBlueprintToSpecAreas(blueprint)
+    const applied = applyStructuredLabelSpec(shell, { version: 2, areas: specAreas })
+    const project = serializeLabelProject('bottle.glb', applied.areas)
+
+    expect(specAreas[0].layers[0].fontWeight).toBe(fontWeight)
+    expect(project.areas[0].layers[0]).toMatchObject({ kind: 'text', fontWeight })
+  })
+
+  it('round-trips rgba, named, and transparent colors without rewriting source strings', () => {
+    const blueprint = laviraBlueprint()
+    blueprint.areas[0].layers[0].color = 'rgba(125, 63, 42, 0.72)'
+    const frame = blueprint.areas[0].layers.find((layer) => layer.id === 'copper-frame')!
+    frame.fill = 'transparent'
+    frame.stroke = 'copper'
+
+    const specAreas = compileBlueprintToSpecAreas(blueprint)
+    const project = serializeLabelProject('bottle.glb', applyStructuredLabelSpec(shell, { version: 2, areas: specAreas }).areas)
+
+    expect(specAreas[0].layers[0].color).toBe('rgba(125, 63, 42, 0.72)')
+    expect(project.areas[0].layers[0]).toMatchObject({ kind: 'text', color: 'rgba(125, 63, 42, 0.72)' })
+    expect(project.areas[0].layers.find((layer) => layer.id === 'copper-frame')).toMatchObject({
+      kind: 'shape', fill: 'transparent', stroke: 'copper',
+    })
   })
 })

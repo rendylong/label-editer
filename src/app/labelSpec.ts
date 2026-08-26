@@ -112,15 +112,21 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
     }
   }
   const language = typeof input.language === 'string' ? input.language : undefined
-  const rtl = input.writingDirection === 'rtl' || language?.toLowerCase().startsWith('ar')
+  const writingDirection = input.writingDirection === 'auto' || input.writingDirection === 'ltr' || input.writingDirection === 'rtl'
+    ? input.writingDirection
+    : language?.toLowerCase().startsWith('ar') ? 'rtl' : 'auto'
+  const prefersArabicFont = writingDirection === 'rtl' || language?.toLowerCase().startsWith('ar')
+  const fontWeight = typeof input.fontWeight === 'number' || input.fontWeight === 'normal' || input.fontWeight === 'bold'
+    ? input.fontWeight
+    : 400
   return {
     ...common, kind: 'text', text: typeof input.text === 'string' ? input.text : '',
-    fontFamily: typeof input.fontFamily === 'string' ? input.fontFamily : rtl ? 'noto-sans-arabic' : 'system-sans',
-    fontSize: Math.max(8, finite(input.fontSize, 64)), fontWeight: finite(input.fontWeight, 400),
+    fontFamily: typeof input.fontFamily === 'string' ? input.fontFamily : prefersArabicFont ? 'noto-sans-arabic' : 'system-sans',
+    fontSize: Math.max(8, finite(input.fontSize, 64)), fontWeight,
     letterSpacing: finite(input.letterSpacing, 0), lineHeight: Math.max(0.5, finite(input.lineHeight, 1.2)),
     width: Math.max(8, ratio(input.width, 0.7) * area.canvas.width), color: typeof input.color === 'string' ? input.color : '#111111',
     align: input.align === 'left' || input.align === 'right' ? input.align : 'center', italic: input.italic === true,
-    direction: input.direction === 'vertical' ? 'vertical' : 'horizontal', writingDirection: rtl ? 'rtl' : input.writingDirection === 'ltr' ? 'ltr' : 'auto', language,
+    direction: input.direction === 'vertical' ? 'vertical' : 'horizontal', writingDirection, language,
   }
 }
 

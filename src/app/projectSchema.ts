@@ -125,17 +125,18 @@ function normalizePhysicalBounds(value: unknown, path: string): { x: number; y: 
 function normalizeDesignMetrics(value: unknown): LayerDesignMetrics | undefined {
   if (value === undefined) return undefined
   const raw = areaRecord(value, 'designMetrics')
-  assertKnownFields(raw, ['boundsMm', 'normalizedBounds', 'anchor', 'fontSizeMm', 'letterSpacingEm', 'lineHeight', 'wrapPolicy', 'maxLines'], 'designMetrics')
+  assertKnownFields(raw, ['boundsMm', 'normalizedBounds', 'anchor', 'fontSizeMm', 'letterSpacingEm', 'lineHeight', 'wrapPolicy', 'maxLines', 'strokeWidthMm', 'cornerRadiusMm'], 'designMetrics')
   if (!['top_left', 'top_center', 'center', 'baseline_left', 'baseline_center'].includes(String(raw.anchor))) areaError('designMetrics.anchor', '无效')
   const result: LayerDesignMetrics = {
     ...(raw.boundsMm === undefined ? {} : { boundsMm: normalizePhysicalBounds(raw.boundsMm, 'designMetrics.boundsMm') }),
     ...(raw.normalizedBounds === undefined ? {} : { normalizedBounds: normalizePhysicalBounds(raw.normalizedBounds, 'designMetrics.normalizedBounds') }),
     anchor: raw.anchor as LayerDesignMetrics['anchor'],
   }
-  for (const field of ['fontSizeMm', 'letterSpacingEm', 'lineHeight'] as const) {
+  for (const field of ['fontSizeMm', 'letterSpacingEm', 'lineHeight', 'strokeWidthMm', 'cornerRadiusMm'] as const) {
     if (raw[field] !== undefined) {
       const number = areaFiniteNumber(raw[field], `designMetrics.${field}`)
       if ((field === 'fontSizeMm' || field === 'lineHeight') && number <= 0) areaError(`designMetrics.${field}`, '必须大于 0')
+      if ((field === 'strokeWidthMm' || field === 'cornerRadiusMm') && (number < 0 || number > 10000)) areaError(`designMetrics.${field}`, '必须在 0..10000 之间')
       result[field] = number
     }
   }
@@ -234,9 +235,10 @@ function layerError(message: string): never {
   throw new Error(`项目图层无效：${message}`)
 }
 
-function requiredString(raw: UnknownRecord, field: string, options?: { nonEmpty?: boolean }): string {
+function requiredString(raw: UnknownRecord, field: string, options?: { nonEmpty?: boolean; maximum?: number }): string {
   const value = raw[field]
   if (typeof value !== 'string' || (options?.nonEmpty === true && value.length === 0)) layerError(`${field} 必须是字符串`)
+  if (options?.maximum !== undefined && value.length > options.maximum) layerError(`${field} 长度不能超过 ${options.maximum}`)
   return value
 }
 
@@ -314,7 +316,7 @@ function normalizeLayer(raw: unknown): LabelLayer {
     requiredFiniteNumber(raw, 'letterSpacing')
     requiredFiniteNumber(raw, 'lineHeight')
     if (raw.width !== undefined && requiredFiniteNumber(raw, 'width') <= 0) layerError('width 必须大于 0')
-    requiredString(raw, 'color', { nonEmpty: true })
+    requiredString(raw, 'color', { nonEmpty: true, maximum: 64 })
     if (raw.align !== 'left' && raw.align !== 'center' && raw.align !== 'right') layerError('align 无效')
     requiredBoolean(raw, 'italic')
     if (raw.direction !== undefined && raw.direction !== 'horizontal' && raw.direction !== 'vertical') layerError('direction 无效')
@@ -343,8 +345,8 @@ function normalizeLayer(raw: unknown): LabelLayer {
     const shape = Object.prototype.hasOwnProperty.call(raw, 'shape') ? raw.shape : 'rectangle'
     if (!isShapeKind(shape)) layerError('shape 无效')
     for (const field of ['width', 'height', 'strokeWidth', 'cornerRadius']) requiredFiniteNumber(raw, field)
-    requiredString(raw, 'fill', { nonEmpty: true })
-    requiredString(raw, 'stroke', { nonEmpty: true })
+    requiredString(raw, 'fill', { nonEmpty: true, maximum: 64 })
+    requiredString(raw, 'stroke', { nonEmpty: true, maximum: 64 })
     if (shape === 'path') {
       requiredString(raw, 'pathData', { nonEmpty: true })
       if (!Array.isArray(raw.pathViewBox) || raw.pathViewBox.length !== 4) layerError('pathViewBox 必须是 4 个有限数字')

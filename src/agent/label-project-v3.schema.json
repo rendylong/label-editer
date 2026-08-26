@@ -12,6 +12,7 @@
   },
   "$defs": {
     "finiteNumber": { "type": "number" },
+    "color": { "type": "string", "minLength": 1, "maxLength": 64 },
     "vector3": {
       "type": "array",
       "prefixItems": [
@@ -63,7 +64,7 @@
       "required": ["kind", "opacity"],
       "properties": {
         "kind": { "enum": ["opaque", "transparent"] },
-        "color": { "type": "string", "maxLength": 64 },
+        "color": { "$ref": "#/$defs/color" },
         "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
         "boundary": { "$ref": "#/$defs/boundary" },
         "material": { "type": "string", "maxLength": 256 },
@@ -92,7 +93,9 @@
         "letterSpacingEm": { "$ref": "#/$defs/finiteNumber" },
         "lineHeight": { "type": "number", "exclusiveMinimum": 0 },
         "wrapPolicy": { "enum": ["none", "word", "character"] },
-        "maxLines": { "type": "integer", "minimum": 1 }
+        "maxLines": { "type": "integer", "minimum": 1 },
+        "strokeWidthMm": { "type": "number", "minimum": 0, "maximum": 10000 },
+        "cornerRadiusMm": { "type": "number", "minimum": 0, "maximum": 10000 }
       }
     },
     "designBinding": {
@@ -111,7 +114,7 @@
       "additionalProperties": false,
       "properties": {
         "foilColor": { "enum": ["gold", "silver", "rose", "champagne", "holographic", "custom"] },
-        "foilCustomColor": { "type": "string" },
+        "foilCustomColor": { "$ref": "#/$defs/color" },
         "foilSpotName": { "type": "string" },
         "gradientAngle": { "$ref": "#/$defs/finiteNumber" },
         "highlight": { "$ref": "#/$defs/finiteNumber" },
@@ -120,7 +123,7 @@
         "intensity": { "$ref": "#/$defs/finiteNumber" },
         "noise": { "$ref": "#/$defs/finiteNumber" },
         "gloss": { "$ref": "#/$defs/finiteNumber" },
-        "strokeColor": { "type": "string" },
+        "strokeColor": { "$ref": "#/$defs/color" },
         "strokeWidth": { "$ref": "#/$defs/finiteNumber" }
       }
     },
@@ -168,7 +171,7 @@
             "letterSpacing": { "$ref": "#/$defs/finiteNumber" },
             "lineHeight": { "$ref": "#/$defs/finiteNumber" },
             "width": { "type": "number", "exclusiveMinimum": 0 },
-            "color": { "type": "string", "minLength": 1 },
+            "color": { "$ref": "#/$defs/color" },
             "align": { "enum": ["left", "center", "right"] },
             "italic": { "type": "boolean" },
             "direction": { "enum": ["horizontal", "vertical"] },
@@ -250,8 +253,8 @@
             "geometry": { "$ref": "#/$defs/shapeGeometry" },
             "width": { "$ref": "#/$defs/finiteNumber" },
             "height": { "$ref": "#/$defs/finiteNumber" },
-            "fill": { "type": "string", "minLength": 1 },
-            "stroke": { "type": "string", "minLength": 1 },
+            "fill": { "$ref": "#/$defs/color" },
+            "stroke": { "$ref": "#/$defs/color" },
             "strokeWidth": { "$ref": "#/$defs/finiteNumber" },
             "cornerRadius": { "$ref": "#/$defs/finiteNumber" },
             "pathData": { "type": "string", "minLength": 1, "maxLength": 131072 },

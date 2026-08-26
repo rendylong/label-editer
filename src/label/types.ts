@@ -33,6 +33,8 @@ export interface LayerDesignMetrics {
   lineHeight?: number
   wrapPolicy?: 'none' | 'word' | 'character'
   maxLines?: number
+  strokeWidthMm?: number
+  cornerRadiusMm?: number
 }
 
 export interface LayerPhysicalMetadata {

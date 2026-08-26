@@ -22,7 +22,7 @@ const blueprint: LayoutBlueprintV1 = {
       rotation: 0, opacity: 0.8, visible: true, zIndex: 1,
       processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER', requiredMask: 'metalness' }],
       shape: 'path', pathData: 'M0 56V0H36V56', pathViewBox: [0, 0, 36, 56], fillRule: 'nonzero',
-      fill: 'transparent', stroke: '#A5663B', strokeWidthMm: 0.25,
+      fill: 'transparent', stroke: '#A5663B', strokeWidthMm: 0.25, cornerRadiusMm: 1.5,
     }],
   }],
 }
@@ -57,6 +57,8 @@ describe('blueprint structural fidelity', () => {
     ['font size', (areas: LabelAreaConfig[]) => { if (areas[0].layers[0].designMetrics) areas[0].layers[0].designMetrics.fontSizeMm = 4.5 }, 'TYPOGRAPHY_MISMATCH'],
     ['alpha', (areas: LabelAreaConfig[]) => { areas[0].layers[1].opacity = 0.4 }, 'COLOR_MISMATCH'],
     ['path data', (areas: LabelAreaConfig[]) => { if (areas[0].layers[1].kind === 'shape') areas[0].layers[1].pathData = 'M0 0H36' }, 'VECTOR_MISMATCH'],
+    ['stroke width mm', (areas: LabelAreaConfig[]) => { if (areas[0].layers[1].designMetrics) areas[0].layers[1].designMetrics.strokeWidthMm = 0.5 }, 'VECTOR_MISMATCH'],
+    ['corner radius mm', (areas: LabelAreaConfig[]) => { if (areas[0].layers[1].designMetrics) areas[0].layers[1].designMetrics.cornerRadiusMm = 2 }, 'VECTOR_MISMATCH'],
     ['process assignment', (areas: LabelAreaConfig[]) => { areas[0].layers[1].processes = [{ process: 'screen_print' }] }, 'PROCESS_MISMATCH'],
     ['artboard aspect', (areas: LabelAreaConfig[]) => { if (areas[0].artboard) areas[0].artboard.widthMm = 50 }, 'ARTBOARD_ASPECT_MISMATCH'],
   ] as const)('reports %s mutations against stable ids', (_name, mutate, expectedCode) => {
@@ -89,6 +91,21 @@ describe('blueprint structural fidelity', () => {
 
   it('reports a missing craft mask separately from retained process intent', () => {
     expect(codes((areas) => { areas[0].layers[1].craft = [] })).toContain('CRAFT_MASK_MISMATCH')
+  })
+
+  it('treats reordered object keys as equal while preserving array and value semantics', () => {
+    const areas = editableAreas()
+    areas[0].layers[1].processes = [{ requiredMask: 'metalness', spotName: 'COPPER', process: 'hot_stamp_foil' }]
+    areas[0].layers[1].craft = [{
+      params: { foilSpotName: 'COPPER', foilCustomColor: '#A5663B', foilColor: 'custom' }, type: 'foil',
+    }]
+    expect(compareBlueprintFidelity({ blueprint, editableAreas: areas })).toEqual({ pass: true, issues: [] })
+
+    areas[0].layers[1].processes = [{ requiredMask: 'metalness', spotName: 'BRASS', process: 'hot_stamp_foil' }]
+    expect(compareBlueprintFidelity({ blueprint, editableAreas: areas }).issues.map((item) => item.code)).toContain('PROCESS_MISMATCH')
+    areas[0].layers[1].processes = structuredClone(blueprint.areas[0].layers[1].processes)
+    if (areas[0].layers[1].craft[0]?.type === 'foil') areas[0].layers[1].craft[0].params.foilSpotName = 'BRASS'
+    expect(compareBlueprintFidelity({ blueprint, editableAreas: areas }).issues.map((item) => item.code)).toContain('CRAFT_MASK_MISMATCH')
   })
 
   it('treats carrier, artboard color, and extra editable areas as structural changes', () => {

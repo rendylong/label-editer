@@ -86,6 +86,8 @@ function designMetrics(layer: LayoutBlueprintLayer) {
     ...(layer.lineHeight === undefined ? {} : { lineHeight: layer.lineHeight }),
     ...(layer.wrapPolicy === undefined ? {} : { wrapPolicy: layer.wrapPolicy }),
     ...(layer.maxLines === undefined ? {} : { maxLines: layer.maxLines }),
+    ...(layer.strokeWidthMm === undefined ? {} : { strokeWidthMm: layer.strokeWidthMm }),
+    ...(layer.cornerRadiusMm === undefined ? {} : { cornerRadiusMm: layer.cornerRadiusMm }),
   }
 }
 
@@ -165,16 +167,13 @@ function compileLayer(blueprint: LayoutBlueprintV1, area: LayoutBlueprintArea, l
   if (layer.kind === 'text') {
     if (layer.alignment === 'justify') return unrepresentable(area, layer, 'justify alignment is not supported by editable text')
     const proxyFontSize = bounded((layer.fontSizeMm! / area.artboard.heightMm) * 1024, 1, 2048)
-    const proxyFontWeight = typeof layer.fontWeight === 'number'
-      ? bounded(layer.fontWeight, 100, 1000)
-      : layer.fontWeight!
     return {
       ...common,
       type: 'text',
       text: layer.text!,
       fontFamily: fontFamily(blueprint, area, layer),
       fontSize: proxyFontSize,
-      fontWeight: proxyFontWeight,
+      fontWeight: layer.fontWeight!,
       letterSpacing: bounded(layer.letterSpacingEm! * proxyFontSize, -100, 100),
       lineHeight: bounded(layer.lineHeight!, 0.5, 5),
       width: bounded(bounds.width, 0.001, 1),

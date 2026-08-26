@@ -97,7 +97,10 @@ function physicalProjectFixture(): Record<string, unknown> {
         {
           ...makeArea().layers[0], shape: 'path',
           pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
-          designMetrics: { normalizedBounds: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 }, anchor: 'center' },
+          designMetrics: {
+            normalizedBounds: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 }, anchor: 'center',
+            strokeWidthMm: 0.25, cornerRadiusMm: 1.5,
+          },
           processes: [{ process: 'hot_stamp_foil', requiredMask: 'metalness' }],
         },
       ],
@@ -134,6 +137,7 @@ describe('label project v3', () => {
     ])
     expect(serialized.areas[0].layers[1]).toMatchObject({
       kind: 'shape', shape: 'path', pathData: 'M 0 1 L 0 0 L 1 0 L 1 1', pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
+      designMetrics: { strokeWidthMm: 0.25, cornerRadiusMm: 1.5 },
       processes: [{ process: 'hot_stamp_foil', requiredMask: 'metalness' }],
     })
   })
