@@ -34,7 +34,7 @@ import { normalizeShapeLayer } from './shapeGeometry'
 import { commitLayerGesture, nextLayerSelection, type LayerNodeTransform } from './selection'
 import { useFlushableDebouncedBake } from './useFlushableDebouncedBake'
 import { registerExportBakeSurface } from '../app/actions'
-import { assertRasterAspect, assertRasterDimensions, fitRasterDisplayHeight } from '../app/canvasLayout'
+import { assertRasterAspect, assertRasterDimensions, fitRasterDisplayHeight, RasterAspectError } from '../app/canvasLayout'
 
 export { resolveLabelPaper } from './paper'
 
@@ -66,6 +66,48 @@ interface ExportableStage {
   toCanvas(options: { pixelRatio: number; width?: number; height?: number }): HTMLCanvasElement
 }
 
+const LOGICAL_CAPTURE_ULP_BUDGET = 16
+
+function equalWithinFloatingArithmetic(actual: number, expected: number): boolean {
+  if (!Number.isFinite(actual) || !Number.isFinite(expected)) return false
+  const scale = Math.max(Math.abs(actual), Math.abs(expected))
+  return Math.abs(actual - expected) <= Number.EPSILON * LOGICAL_CAPTURE_ULP_BUDGET * scale
+}
+
+function assertCanonicalStageGeometry(
+  stage: Pick<ExportableStage, 'width' | 'height'>,
+  pixelRatio: number,
+  expectedCanvas: { width: number; height: number; aspect: number },
+): void {
+  const stageWidth = stage.width()
+  const stageHeight = stage.height()
+  const scaledWidth = stageWidth * pixelRatio
+  const scaledHeight = stageHeight * pixelRatio
+
+  if (!expectedCanvas) {
+    assertRasterDimensions({ width: scaledWidth, height: scaledHeight }, expectedCanvas)
+    return
+  }
+  assertRasterDimensions(expectedCanvas, expectedCanvas)
+
+  // The quotient may accumulate a few binary floating-point roundings. Sixteen
+  // scale-relative epsilons cover that arithmetic while remaining many orders
+  // below one raster pixel; this is deliberately not a raster-rounding tolerance.
+  const expectedStageWidth = expectedCanvas.width / pixelRatio
+  const expectedStageHeight = expectedCanvas.height / pixelRatio
+  if (!Number.isFinite(pixelRatio) || pixelRatio <= 0
+    || !equalWithinFloatingArithmetic(stageWidth, expectedStageWidth)
+    || !equalWithinFloatingArithmetic(stageHeight, expectedStageHeight)) {
+    throw new RasterAspectError({
+      declaredAspect: expectedCanvas.aspect,
+      rasterAspect: scaledWidth / scaledHeight,
+      width: scaledWidth,
+      height: scaledHeight,
+      tolerance: 0,
+    })
+  }
+}
+
 /**
  * 只捕获可交付的标签内容。参考图、Transformer 和定位线属于编辑器 UI，
  * 必须在导出期间排除，并在异常情况下也恢复原有可见状态。
@@ -83,20 +125,23 @@ export function captureDesignCanvas(
     excluded.forEach((node) => node.visible(false))
     relief.forEach((node) => node.shadowEnabled(false))
     stage.draw()
-    const logicalCapture = {
-      width: Math.round(stage.width() * pixelRatio),
-      height: Math.round(stage.height() * pixelRatio),
-    }
-    assertRasterDimensions(logicalCapture, expectedCanvas)
+    assertCanonicalStageGeometry(stage, pixelRatio, expectedCanvas)
 
     const captured = stage.toCanvas({ pixelRatio })
     if (captured.width === expectedCanvas.width && captured.height === expectedCanvas.height) return captured
 
-    const isKonvaOnePixelShort = captured.width <= expectedCanvas.width
+    const widthShortfall = expectedCanvas.width - captured.width
+    const heightShortfall = expectedCanvas.height - captured.height
+    const isKonvaOnePixelShort = Number.isInteger(captured.width)
+      && Number.isInteger(captured.height)
+      && captured.width <= expectedCanvas.width
       && captured.height <= expectedCanvas.height
-      && expectedCanvas.width - captured.width <= 1
-      && expectedCanvas.height - captured.height <= 1
+      && widthShortfall <= 1
+      && heightShortfall <= 1
+      && (widthShortfall === 1 || heightShortfall === 1)
     if (isKonvaOnePixelShort) {
+      // Konva may floor a raw crop by one pixel. Retry only after the canonical
+      // logical geometry proof above, and require the retried raster to be exact.
       const recovered = stage.toCanvas({
         pixelRatio,
         width: expectedCanvas.width / pixelRatio,

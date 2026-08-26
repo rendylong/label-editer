@@ -112,13 +112,17 @@ describe('physical design rendering fidelity', () => {
   it.each([
     [4096, 6143],
     [4095, 6144],
-  ])('rejects a one-pixel capture mismatch at %ix%i', (width, height) => {
+  ])('rejects a permanent one-pixel-short capture at %ix%i after one retry', (width, height) => {
+    let captureCalls = 0
     const stage = {
       find: () => [] as [],
       draw: () => undefined,
       width: () => 4096,
       height: () => 6144,
-      toCanvas: () => ({ width, height }) as HTMLCanvasElement,
+      toCanvas: () => {
+        captureCalls += 1
+        return { width, height } as HTMLCanvasElement
+      },
     }
 
     expect(() => labelCanvas.captureDesignCanvas(stage, 1, {
@@ -127,15 +131,23 @@ describe('physical design rendering fidelity', () => {
       name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
       details: expect.objectContaining({ width, height, tolerance: 0 }),
     }))
+    expect(captureCalls).toBe(2)
   })
 
   it('recovers a canonical Konva one-pixel short capture without changing the stage transform', () => {
     const short = { width: 4096, height: 6143 } as HTMLCanvasElement
     const exact = { width: 4096, height: 6144 } as HTMLCanvasElement
     const calls: Array<{ pixelRatio: number; width?: number; height?: number }> = []
+    const artboardTransform = { x: 17, y: -9, scaleX: 0.8, scaleY: 1.25, rotation: 13 }
+    const transformBeforeCapture = { ...artboardTransform }
     const stage = {
       find: () => [] as [], draw: () => undefined,
       width: () => 400, height: () => 600,
+      x: (value?: number) => value === undefined ? artboardTransform.x : (artboardTransform.x = value),
+      y: (value?: number) => value === undefined ? artboardTransform.y : (artboardTransform.y = value),
+      scaleX: (value?: number) => value === undefined ? artboardTransform.scaleX : (artboardTransform.scaleX = value),
+      scaleY: (value?: number) => value === undefined ? artboardTransform.scaleY : (artboardTransform.scaleY = value),
+      rotation: (value?: number) => value === undefined ? artboardTransform.rotation : (artboardTransform.rotation = value),
       toCanvas: (options: { pixelRatio: number; width?: number; height?: number }) => {
         calls.push(options)
         return options.width === undefined ? short : exact
@@ -151,6 +163,114 @@ describe('physical design rendering fidelity', () => {
     ])
     expect(stage.width()).toBe(400)
     expect(stage.height()).toBe(600)
+    expect(artboardTransform).toEqual(transformBeforeCapture)
+  })
+
+  it('does not treat a fractional fake raster as the documented one-pixel Konva shortfall', () => {
+    let captureCalls = 0
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 400, height: () => 600,
+      toCanvas: () => {
+        captureCalls += 1
+        return (captureCalls === 1
+          ? { width: 4096, height: 6143.5 }
+          : { width: 4096, height: 6144 }) as HTMLCanvasElement
+      },
+    }
+
+    expect(() => labelCanvas.captureDesignCanvas(stage, 10.24, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toThrow(expect.objectContaining({ code: 'RASTER_ASPECT_MISMATCH' }))
+    expect(captureCalls).toBe(1)
+  })
+
+  it('rejects the concrete near-boundary logical stage mismatch before Konva recovery', () => {
+    let captureCalls = 0
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 400, height: () => 599.96,
+      toCanvas: ({ width }: { pixelRatio: number; width?: number }) => {
+        captureCalls += 1
+        return (width === undefined
+          ? { width: 4096, height: 6143 }
+          : { width: 4096, height: 6144 }) as HTMLCanvasElement
+      },
+    }
+
+    expect(() => labelCanvas.captureDesignCanvas(stage, 10.24, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toThrow(expect.objectContaining({
+      name: 'RasterAspectError', code: 'RASTER_ASPECT_MISMATCH',
+    }))
+    expect(captureCalls).toBe(0)
+  })
+
+  it('rejects logical geometry just outside machine-scale floating arithmetic error', () => {
+    let captureCalls = 0
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 400,
+      // 2.3e-12 is just beyond a 16-epsilon, scale-aware bound at logical height 600.
+      height: () => 600 + 2.3e-12,
+      toCanvas: () => {
+        captureCalls += 1
+        return { width: 4096, height: 6144 } as HTMLCanvasElement
+      },
+    }
+
+    expect(() => labelCanvas.captureDesignCanvas(stage, 10.24, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toThrow(expect.objectContaining({ code: 'RASTER_ASPECT_MISMATCH' }))
+    expect(captureCalls).toBe(0)
+  })
+
+  it('keeps the arithmetic allowance far below one raster pixel for tiny logical stages', () => {
+    const pixelRatio = 4.096e15
+    let captureCalls = 0
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 4096 / pixelRatio,
+      // This logical drift is only 0.004096 raster pixels, but is not machine-scale error.
+      height: () => 6144 / pixelRatio + 1e-18,
+      toCanvas: () => {
+        captureCalls += 1
+        return { width: 4096, height: 6144 } as HTMLCanvasElement
+      },
+    }
+
+    expect(() => labelCanvas.captureDesignCanvas(stage, pixelRatio, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toThrow(expect.objectContaining({ code: 'RASTER_ASPECT_MISMATCH' }))
+    expect(captureCalls).toBe(0)
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['zero', 0],
+    ['negative', -1],
+    ['NaN', Number.NaN],
+    ['infinite', Number.POSITIVE_INFINITY],
+  ])('rejects a %s pixel ratio before capture', (_label, pixelRatio) => {
+    let captureCalls = 0
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 400, height: () => 600,
+      toCanvas: () => {
+        captureCalls += 1
+        return { width: 4096, height: 6144 } as HTMLCanvasElement
+      },
+    }
+    const unsafeCapture = labelCanvas.captureDesignCanvas as unknown as (
+      candidateStage: typeof stage,
+      candidatePixelRatio: number | undefined,
+      expected: { width: number; height: number; aspect: number },
+    ) => HTMLCanvasElement
+
+    expect(() => unsafeCapture(stage, pixelRatio, {
+      width: 4096, height: 6144, aspect: 2 / 3,
+    })).toThrow(expect.objectContaining({ code: 'RASTER_ASPECT_MISMATCH' }))
+    expect(captureCalls).toBe(0)
   })
 
   it('rejects an arbitrary fake stage/raw mismatch before recovery', () => {
@@ -167,21 +287,33 @@ describe('physical design rendering fidelity', () => {
 
   it('accepts an exact 4096x6144 capture', () => {
     const raster = { width: 4096, height: 6144 } as HTMLCanvasElement
+    const calls: Array<{ pixelRatio: number; width?: number; height?: number }> = []
     const stage = {
       find: () => [] as [], draw: () => undefined,
-      width: () => 400, height: () => 600, toCanvas: () => raster,
+      width: () => 400, height: () => 600,
+      toCanvas: (options: { pixelRatio: number; width?: number; height?: number }) => {
+        calls.push(options)
+        return raster
+      },
     }
 
     expect(labelCanvas.captureDesignCanvas(stage, 10.24, {
       width: 4096, height: 6144, aspect: 2 / 3,
     })).toBe(raster)
+    expect(calls).toEqual([{ pixelRatio: 10.24 }])
   })
 
-  it('accepts the canonical capture dimensions for a non-integer ideal height', () => {
+  it('accepts non-integer logical stage dimensions derived by canonical division', () => {
+    const pixelRatio = 7.3
     const raster = { width: 2048, height: 1032 } as HTMLCanvasElement
-    const stage = { find: () => [] as [], draw: () => undefined, width: () => 2048, height: () => 1032, toCanvas: () => raster }
+    const stage = {
+      find: () => [] as [], draw: () => undefined,
+      width: () => 2048 / pixelRatio,
+      height: () => 1032 / pixelRatio,
+      toCanvas: () => raster,
+    }
 
-    expect(labelCanvas.captureDesignCanvas(stage, 1, {
+    expect(labelCanvas.captureDesignCanvas(stage, pixelRatio, {
       width: 2048, height: 1032, aspect: 1.9846801867572283,
     })).toBe(raster)
   })
