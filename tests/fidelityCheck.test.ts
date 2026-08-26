@@ -55,6 +55,7 @@ describe('blueprint structural fidelity', () => {
     ['exact copy', (areas: LabelAreaConfig[]) => { if (areas[0].layers[0].kind === 'text') areas[0].layers[0].text = 'ASH' }, 'TEXT_MISMATCH'],
     ['z-index', (areas: LabelAreaConfig[]) => { areas[0].layers[0].zIndex = 2 }, 'LAYER_ORDER_MISMATCH'],
     ['font size', (areas: LabelAreaConfig[]) => { if (areas[0].layers[0].designMetrics) areas[0].layers[0].designMetrics.fontSizeMm = 4.5 }, 'TYPOGRAPHY_MISMATCH'],
+    ['font stack', (areas: LabelAreaConfig[]) => { if (areas[0].layers[0].kind === 'text') areas[0].layers[0].fontStack = ['Arial', 'serif'] }, 'TYPOGRAPHY_MISMATCH'],
     ['alpha', (areas: LabelAreaConfig[]) => { areas[0].layers[1].opacity = 0.4 }, 'COLOR_MISMATCH'],
     ['path data', (areas: LabelAreaConfig[]) => { if (areas[0].layers[1].kind === 'shape') areas[0].layers[1].pathData = 'M0 0H36' }, 'VECTOR_MISMATCH'],
     ['stroke width mm', (areas: LabelAreaConfig[]) => { if (areas[0].layers[1].designMetrics) areas[0].layers[1].designMetrics.strokeWidthMm = 0.5 }, 'VECTOR_MISMATCH'],

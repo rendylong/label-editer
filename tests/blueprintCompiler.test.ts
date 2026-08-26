@@ -77,6 +77,7 @@ describe('blueprint compiler', () => {
     ])
     expect(front.layers.find((layer) => layer.id === 'product-cn')).toMatchObject({
       type: 'text', text: '烬木之息', language: 'zh-Hans', color: '#7D3F2A',
+      fontFamily: 'Noto Sans CJK SC', fontStack: ['Noto Sans CJK SC', 'sans-serif'],
       designMetrics: { fontSizeMm: 5.6, letterSpacingEm: 0.04, anchor: 'top_center' },
       processes: [{ process: 'screen_print' }],
     })
@@ -175,6 +176,22 @@ describe('blueprint compiler', () => {
 
     expect(specAreas[0].layers[0].fontWeight).toBe(fontWeight)
     expect(project.areas[0].layers[0]).toMatchObject({ kind: 'text', fontWeight })
+  })
+
+  it('round-trips the approved safe font stack without collapsing it into an opaque comma string', () => {
+    const blueprint = laviraBlueprint()
+    blueprint.areas[0].layers = [blueprint.areas[0].layers[0]]
+
+    const specAreas = compileBlueprintToSpecAreas(blueprint)
+    const applied = applyStructuredLabelSpec(shell, { version: 2, areas: specAreas })
+    const project = serializeLabelProject('bottle.glb', applied.areas)
+
+    expect(specAreas[0].layers[0]).toMatchObject({
+      fontFamily: 'Noto Sans CJK SC', fontStack: ['Noto Sans CJK SC', 'sans-serif'],
+    })
+    expect(project.areas[0].layers[0]).toMatchObject({
+      kind: 'text', fontFamily: 'Noto Sans CJK SC', fontStack: ['Noto Sans CJK SC', 'sans-serif'],
+    })
   })
 
   it('round-trips rgba, named, and transparent colors without rewriting source strings', () => {

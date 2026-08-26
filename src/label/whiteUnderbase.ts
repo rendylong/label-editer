@@ -89,6 +89,7 @@ function contributorProjection(layer: LabelLayer): unknown {
       ...common,
       text: layer.text,
       fontFamily: layer.fontFamily,
+      fontStack: layer.fontStack,
       fontSize: layer.fontSize,
       fontWeight: layer.fontWeight,
       letterSpacing: layer.letterSpacing,

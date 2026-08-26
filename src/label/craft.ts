@@ -7,6 +7,7 @@ import type { CraftEffect, CraftType, ImageLayer, LabelAreaConfig, LabelLayer, S
 import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
 import { resolveCarrierSurface } from './paper'
+import { resolvePortableLayerTransform } from '../../scripts/lib/layer-transform-core.mjs'
 import {
   canRenderMaskLayer,
   isRenderableWhiteUnderbaseLayer,
@@ -43,40 +44,7 @@ export interface LayerRenderTransform {
 
 /** Resolve local content offsets while keeping the declared anchor as the rotation origin. */
 export function resolveLayerRenderTransform(input: LayerRenderTransformInput): LayerRenderTransform {
-  const anchor = input.anchor ?? 'center'
-  const baselineFromTop = input.baselineFromTop ?? input.height / 2
-  const box = {
-    x: anchor === 'top_left' || anchor === 'baseline_left' ? 0 : -input.width / 2,
-    y: anchor === 'top_left' || anchor === 'top_center'
-      ? 0
-      : anchor === 'center' ? -input.height / 2 : -baselineFromTop,
-    width: input.width,
-    height: input.height,
-  }
-  const radians = input.rotation * Math.PI / 180
-  const cosine = Math.cos(radians)
-  const sine = Math.sin(radians)
-  const corners = [
-    [box.x, box.y],
-    [box.x + box.width, box.y],
-    [box.x + box.width, box.y + box.height],
-    [box.x, box.y + box.height],
-  ].map(([x, y]) => ({
-    x: input.x + x * cosine - y * sine,
-    y: input.y + x * sine + y * cosine,
-  }))
-  const xs = corners.map((corner) => corner.x)
-  const ys = corners.map((corner) => corner.y)
-  const minimumX = Math.min(...xs)
-  const maximumX = Math.max(...xs)
-  const minimumY = Math.min(...ys)
-  const maximumY = Math.max(...ys)
-  return {
-    origin: { x: input.x, y: input.y },
-    rotation: input.rotation,
-    box,
-    worldBounds: { x: minimumX, y: minimumY, width: maximumX - minimumX, height: maximumY - minimumY },
-  }
+  return resolvePortableLayerTransform(input) as LayerRenderTransform
 }
 
 /** 全局工艺只允许整面材质属性；字形工艺必须绑定具体图层。 */

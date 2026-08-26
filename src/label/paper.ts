@@ -1,5 +1,6 @@
 import type { CarrierMode, LabelAreaConfig, LabelPaper } from './types'
-import { hasOpenSvgSubpath, parseNormalizedSvgPath, svgPathBounds, type SvgPathBounds } from './svgPath'
+import type { SvgPathBounds } from './svgPath'
+import { resolveCustomCarrierBoundary } from '../../scripts/lib/carrier-boundary-core.mjs'
 
 const DEFAULT_LABEL_PAPER: LabelPaper = {
   enabled: false,
@@ -64,16 +65,10 @@ export function resolveCarrierBoundary(area: Pick<LabelAreaConfig, 'substrate'>)
   if (typeof boundary.pathData !== 'string' || boundary.pathData.length === 0) {
     return { invalidField: 'substrate.boundary.pathData' }
   }
-  try {
-    const commands = parseNormalizedSvgPath(boundary.pathData)
-    const pathBounds = svgPathBounds(commands)
-    if (hasOpenSvgSubpath(commands) || pathBounds.width <= 0 || pathBounds.height <= 0) {
-      return { invalidField: 'substrate.boundary.pathData' }
-    }
-    return { boundary: { shape: 'custom', pathData: boundary.pathData, pathBounds } }
-  } catch {
-    return { invalidField: 'substrate.boundary.pathData' }
-  }
+  const resolved = resolveCustomCarrierBoundary(boundary.pathData)
+  return resolved
+    ? { boundary: { shape: 'custom', pathData: resolved.pathData, pathBounds: resolved.pathBounds } }
+    : { invalidField: 'substrate.boundary.pathData' }
 }
 
 export interface CarrierBoundaryTransform {

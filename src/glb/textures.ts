@@ -10,12 +10,24 @@ export function configureTransparentLabelExport(material: { setAlphaMode(mode: '
 
 export function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   return new Promise((res, rej) => {
-    canvas.toBlob(async (blob) => {
+    canvas.toBlob((blob) => {
       if (!blob) {
         rej(new Error('PNG 编码失败'))
         return
       }
-      res(new Uint8Array(await blob.arrayBuffer()))
+      try {
+        void blob.arrayBuffer().then((buffer) => {
+          const bytes = new Uint8Array(buffer)
+          const signature = [137, 80, 78, 71, 13, 10, 26, 10]
+          if (bytes.length < signature.length || signature.some((value, index) => bytes[index] !== value)) {
+            rej(new Error('PNG 编码返回了无效数据'))
+            return
+          }
+          res(bytes)
+        }, rej)
+      } catch (error) {
+        rej(error)
+      }
     }, 'image/png')
   })
 }

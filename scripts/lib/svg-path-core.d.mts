@@ -26,3 +26,9 @@ export function traceValidatedSvgPath(
   height: number,
 ): readonly PortableSvgPathCommand[]
 export function hasOpenSvgSubpath(commands: readonly PortableSvgPathCommand[]): boolean
+export function validatedSvgGeometry(
+  source: string,
+  viewBox: readonly [number, number, number, number] | undefined,
+  width: number,
+  height: number,
+): { readonly commands: readonly PortableSvgPathCommand[]; readonly pathData: string; readonly viewBox: readonly [number, number, number, number] }

@@ -7,7 +7,11 @@ import designReviewManifestSchema from '../../src/agent/design-review-manifest-v
 import layoutBlueprintSchema from '../../src/agent/layout-blueprint-v1.schema.json' with { type: 'json' }
 import { publishAtomically, sanitizeArtifactName, sha256Bytes } from './files.mjs'
 import { isStrictRfc3339DateTime, validateManifestSemantics } from './design-manifest-core.mjs'
-import { traceValidatedSvgPath } from './svg-path-core.mjs'
+import { validatedSvgGeometry } from './svg-path-core.mjs'
+import { resolveCustomCarrierBoundary } from './carrier-boundary-core.mjs'
+import { resolvePortableLayerTransform, fallbackTextBaselineFromTop } from './layer-transform-core.mjs'
+import { resolvePortableTextDirection } from './text-direction-core.mjs'
+import { portableFontStackCss, validatePortableFontStack } from './font-stack-core.mjs'
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024
 
@@ -53,18 +57,13 @@ function assertSafeColor(value, field) {
 
 function validatePathData(pathData, viewBox, width, height, field) {
   try {
-    traceValidatedSvgPath({
-      moveTo: () => undefined,
-      lineTo: () => undefined,
-      bezierCurveTo: () => undefined,
-      closePath: () => undefined,
-    }, pathData, viewBox, width, height)
+    return validatedSvgGeometry(pathData, viewBox, width, height)
   } catch (error) {
     throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${field} is not a supported bounded SVG path: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
-function validateBlueprintSemantics(blueprint) {
+function validateBlueprintSemantics(blueprint, pxPerMm = 1, geometry = { layers: new Map(), boundaries: new Map() }) {
   assertUnique(blueprint.assets.map((asset) => asset.id), 'asset id')
   assertUnique(blueprint.areas.map((area) => area.id), 'area id')
   const front = blueprint.areas.filter((area) => area.side === 'front')
@@ -91,9 +90,9 @@ function validateBlueprintSemantics(blueprint) {
     if (area.substrate) {
       assertSafeColor(area.substrate.color, `${area.id}.substrate.color`)
       if (area.substrate.boundary?.shape === 'custom') {
-        const width = area.artboard.widthMm * 100
-        const height = area.artboard.heightMm * 100
-        validatePathData(area.substrate.boundary.pathData, [0, 0, width, height], width, height, `${area.id}.substrate.boundary.pathData`)
+        const resolved = resolveCustomCarrierBoundary(area.substrate.boundary.pathData)
+        if (!resolved) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `${area.id}.substrate.boundary.pathData must be closed with positive finite bounds`)
+        geometry.boundaries.set(area.id, validatePathData(resolved.pathData, [resolved.pathBounds.x, resolved.pathBounds.y, resolved.pathBounds.width, resolved.pathBounds.height], area.artboard.widthMm * pxPerMm, area.artboard.heightMm * pxPerMm, `${area.id}.substrate.boundary.pathData`))
       }
     }
     for (const layer of area.layers) {
@@ -117,11 +116,7 @@ function validateBlueprintSemantics(blueprint) {
         if (layer.fontAsset && !['font/woff', 'font/woff2'].includes(assetsById.get(layer.fontAsset)?.mimeType)) {
           throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${area.id}/${layer.id} fontAsset must reference WOFF or WOFF2`)
         }
-        for (const family of layer.fontStack ?? []) {
-          if (!/^[\p{L}\p{N} ._-]+$/u.test(family)) {
-            throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${area.id}/${layer.id} fontStack contains an unsafe font family`)
-          }
-        }
+        if (layer.fontStack && !validatePortableFontStack(layer.fontStack)) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${area.id}/${layer.id} fontStack is unsafe or unbounded`)
       }
       if (layer.kind === 'image' && !layer.assetId) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Image layer ${area.id}/${layer.id} requires assetId`)
       if (layer.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp'].includes(assetsById.get(layer.assetId)?.mimeType)) {
@@ -140,7 +135,7 @@ function validateBlueprintSemantics(blueprint) {
           width: layer.normalizedBounds.width * area.artboard.widthMm,
           height: layer.normalizedBounds.height * area.artboard.heightMm,
         }
-        validatePathData(layer.pathData, layer.pathViewBox, bounds.width * 100, bounds.height * 100, `${area.id}/${layer.id}.pathData`)
+        geometry.layers.set(layer.id, validatePathData(layer.pathData, layer.pathViewBox, bounds.width * pxPerMm, bounds.height * pxPerMm, `${area.id}/${layer.id}.pathData`))
       }
       if (layer.kind === 'shape' && !['rectangle', 'rounded_rectangle', 'ellipse', 'line', 'polygon', 'path'].includes(layer.shape)) {
         throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Unsupported shape ${layer.shape} on ${area.id}/${layer.id}`)
@@ -164,10 +159,16 @@ function validateBlueprintSemantics(blueprint) {
   }
 }
 
-export function validateLayoutBlueprint(blueprint) {
+function prepareLayoutBlueprint(blueprint, pxPerMm = 1) {
   if (!validateBlueprintSchema(blueprint)) throw schemaError('INVALID_LAYOUT_BLUEPRINT', 'Layout blueprint', validateBlueprintSchema)
-  validateBlueprintSemantics(blueprint)
-  return structuredClone(blueprint)
+  const validated = structuredClone(blueprint)
+  const geometry = { layers: new Map(), boundaries: new Map() }
+  validateBlueprintSemantics(validated, pxPerMm, geometry)
+  return { blueprint: validated, geometry }
+}
+
+export function validateLayoutBlueprint(blueprint, pxPerMm = 1) {
+  return prepareLayoutBlueprint(blueprint, pxPerMm).blueprint
 }
 
 function escapeHtml(value) {
@@ -185,7 +186,7 @@ function cssNumber(value) {
 }
 
 function cssFontStack(fontStack) {
-  return (fontStack ?? ['sans-serif']).map((font) => `'${font}'`).join(',')
+  return portableFontStackCss(fontStack ?? ['sans-serif'])
 }
 
 function layerBounds(layer, area, pxPerMm) {
@@ -198,17 +199,12 @@ function layerBounds(layer, area, pxPerMm) {
   return Object.fromEntries(Object.entries(bounds).map(([key, value]) => [key, value * pxPerMm]))
 }
 
-function anchorOrigin(anchor, bounds) {
-  if (anchor === 'top_center' || anchor === 'baseline_center') return `${cssNumber(bounds.width / 2)}px 0px`
-  if (anchor === 'center') return `${cssNumber(bounds.width / 2)}px ${cssNumber(bounds.height / 2)}px`
-  return '0px 0px'
-}
-
-function renderShape(layer, bounds, pxPerMm) {
+function renderShape(layer, bounds, pxPerMm, preparedGeometry) {
   const strokeWidth = (layer.strokeWidthMm ?? 0) * pxPerMm
   const common = `fill="${attr(layer.fill ?? 'transparent')}" stroke="${attr(layer.stroke ?? 'transparent')}" stroke-width="${cssNumber(strokeWidth)}" vector-effect="non-scaling-stroke"`
   if (layer.shape === 'path') {
-    return `<svg class="shape-geometry" viewBox="${attr(layer.pathViewBox.join(' '))}" preserveAspectRatio="none"><path d="${attr(layer.pathData)}" fill-rule="${attr(layer.fillRule ?? 'nonzero')}" ${common}/></svg>`
+    const geometry = preparedGeometry ?? validatedSvgGeometry(layer.pathData, layer.pathViewBox, bounds.width, bounds.height)
+    return `<svg class="shape-geometry" viewBox="${attr(geometry.viewBox.join(' '))}" preserveAspectRatio="none"><path d="${attr(geometry.pathData)}" fill-rule="${attr(layer.fillRule ?? 'nonzero')}" ${common}/></svg>`
   }
   if (layer.shape === 'ellipse') return `<svg class="shape-geometry" viewBox="0 0 100 100" preserveAspectRatio="none"><ellipse cx="50" cy="50" rx="49" ry="49" ${common}/></svg>`
   if (layer.shape === 'line') return `<svg class="shape-geometry" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M0 50L100 50" ${common}/></svg>`
@@ -223,23 +219,27 @@ function renderShape(layer, bounds, pxPerMm) {
 function renderLayer(layer, area, options) {
   if (!layer.visible || layer.opacity <= 0) return ''
   const bounds = layerBounds(layer, area, options.pxPerMm)
+  const baselineFromTop = layer.kind === 'text' ? fallbackTextBaselineFromTop(layer.fontSizeMm * options.pxPerMm, layer.lineHeight) : bounds.height / 2
+  const anchorX = bounds.x + (layer.anchor === 'top_center' || layer.anchor === 'center' || layer.anchor === 'baseline_center' ? bounds.width / 2 : 0)
+  const anchorY = bounds.y + (layer.anchor === 'center' ? bounds.height / 2 : 0)
+  const resolved = resolvePortableLayerTransform({ x: anchorX, y: anchorY, rotation: layer.rotation, width: bounds.width, height: bounds.height, anchor: layer.anchor, baselineFromTop })
   const transform = layer.rotation ? `rotate(${cssNumber(layer.rotation)}deg)` : ''
-  const style = `left:${cssNumber(bounds.x)}px;top:${cssNumber(bounds.y)}px;width:${cssNumber(bounds.width)}px;height:${cssNumber(bounds.height)}px;opacity:${cssNumber(layer.opacity)};z-index:${layer.zIndex};transform-origin:${anchorOrigin(layer.anchor, bounds)};${transform ? `transform:${transform};` : ''}`
+  const style = `left:${cssNumber(resolved.origin.x + resolved.box.x)}px;top:${cssNumber(resolved.origin.y + resolved.box.y)}px;width:${cssNumber(bounds.width)}px;height:${cssNumber(bounds.height)}px;opacity:${cssNumber(layer.opacity)};z-index:${layer.zIndex};transform-origin:${cssNumber(-resolved.box.x)}px ${cssNumber(-resolved.box.y)}px;${transform ? `transform:${transform};` : ''}`
   let content = ''
   if (layer.kind === 'text') {
-    const fontFamily = layer.fontAsset ? `'review-font-${layer.fontAsset}'` : cssFontStack(layer.fontStack)
+    const fontFamily = layer.fontAsset ? `"review-font-${layer.fontAsset}"` : cssFontStack(layer.fontStack)
     const wrapping = layer.wrapPolicy === 'none'
       ? 'white-space:nowrap;overflow-wrap:normal;'
       : layer.wrapPolicy === 'character'
         ? 'white-space:pre-wrap;overflow-wrap:anywhere;'
         : 'white-space:pre-wrap;overflow-wrap:normal;'
     const textStyle = `font-family:${fontFamily};font-size:${cssNumber(layer.fontSizeMm * options.pxPerMm)}px;font-weight:${layer.fontWeight};letter-spacing:${cssNumber(layer.letterSpacingEm)}em;line-height:${cssNumber(layer.lineHeight)};text-align:${layer.alignment === 'justify' ? 'justify' : layer.alignment};color:${layer.color};max-height:${cssNumber(layer.lineHeight * layer.maxLines)}em;overflow:hidden;${wrapping}`
-    content = `<div class="text-geometry" lang="${attr(layer.language)}" dir="${attr(layer.writingDirection)}" data-wrap-policy="${attr(layer.wrapPolicy)}" data-max-lines="${attr(layer.maxLines)}"${layer.fontAsset ? ` data-font-family="review-font-${attr(layer.fontAsset)}"` : ''} style="${attr(textStyle)}">${escapeHtml(layer.text)}</div>`
+    content = `<div class="text-geometry" lang="${attr(layer.language)}" dir="${resolvePortableTextDirection(layer.writingDirection, layer.text)}" data-writing-direction="${attr(layer.writingDirection)}" data-wrap-policy="${attr(layer.wrapPolicy)}" data-max-lines="${attr(layer.maxLines)}"${layer.fontAsset ? ` data-font-family="review-font-${attr(layer.fontAsset)}"` : ''} style="${attr(textStyle)}">${escapeHtml(layer.text)}</div>`
   } else if (layer.kind === 'image') {
     const asset = options.assets.get(layer.assetId)
     const objectFit = layer.fit === 'stretch' ? 'fill' : (layer.fit ?? 'contain')
     content = asset ? `<img alt="" src="${attr(asset.dataUrl)}" style="object-fit:${objectFit}">` : ''
-  } else content = renderShape(layer, bounds, options.pxPerMm)
+  } else content = renderShape(layer, bounds, options.pxPerMm, options.geometry.layers.get(layer.id))
   return `<div class="art-layer" data-layer-id="${attr(layer.id)}" data-kind="${layer.kind}" style="${attr(style)}">${content}</div>`
 }
 
@@ -258,7 +258,7 @@ function renderArea(area, options) {
   const opaqueSubstrate = area.substrate?.kind === 'opaque'
   const filmSubstrate = area.substrate?.kind === 'transparent'
   const substrate = customBoundary
-    ? `<svg class="carrier-boundary-path" viewBox="0 0 ${cssNumber(width)} ${cssNumber(height)}" preserveAspectRatio="none"><path d="${attr(area.substrate.boundary.pathData)}" fill="${opaqueSubstrate ? attr(area.substrate.color ?? '#ffffff') : 'transparent'}" fill-opacity="${cssNumber(area.substrate.opacity)}"${filmSubstrate ? ' stroke="rgba(70,110,130,.35)"' : ''}/></svg>`
+    ? (() => { const geometry = options.geometry.boundaries.get(area.id); if (!geometry) return ''; return `<svg class="carrier-boundary-path" viewBox="${attr(geometry.viewBox.join(' '))}" preserveAspectRatio="none"><path d="${attr(geometry.pathData)}" fill="${opaqueSubstrate ? attr(area.substrate.color ?? '#ffffff') : 'transparent'}" fill-opacity="${cssNumber(area.substrate.opacity)}"${filmSubstrate ? ' stroke="rgba(70,110,130,.35)"' : ''}/></svg>` })()
     : opaqueSubstrate
       ? `<div class="carrier-panel carrier-panel--opaque" style="background:${attr(area.substrate.color ?? '#ffffff')};opacity:${cssNumber(area.substrate.opacity)};${boundaryStyle(area, options.pxPerMm)}"></div>`
       : filmSubstrate
@@ -276,11 +276,12 @@ function renderView(side, area, options, revision) {
 }
 
 export function renderBlueprintHtml(blueprint, options) {
-  const validated = validateLayoutBlueprint(blueprint)
   assertDimension(options.width, 'width'); assertDimension(options.height, 'height')
   if (typeof options.pxPerMm !== 'number' || !Number.isFinite(options.pxPerMm) || options.pxPerMm <= 0 || options.pxPerMm > 100) {
     throw new DesignReviewError('INVALID_USAGE', 'pxPerMm must be a positive number at most 100')
   }
+  const prepared = prepareLayoutBlueprint(blueprint, options.pxPerMm)
+  const validated = prepared.blueprint
   if (!(options.assets instanceof Map)) throw new DesignReviewError('INVALID_USAGE', 'assets must be a resolved asset map')
   const front = validated.areas.find((area) => area.side === 'front')
   const back = validated.areas.find((area) => area.side === 'back')
@@ -292,9 +293,10 @@ export function renderBlueprintHtml(blueprint, options) {
     const format = asset.mimeType === 'font/woff2' ? 'woff2' : 'woff'
     return [`@font-face{font-family:'review-font-${asset.id}';src:url('${resolved.dataUrl}') format('${format}')}`]
   }).join('')
+  const renderOptions = { ...options, geometry: prepared.geometry }
   return `<!doctype html><html lang="en" data-blueprint-revision="${revision}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Label design review ${revision}</title><style>
 ${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry,.text-geometry{display:block;width:100%;height:100%}.text-geometry{overflow:hidden}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{border-color:rgba(70,110,130,.18)}
-</style></head><body>${renderView('front', front, options, validated.revision)}${renderView('back', back, options, validated.revision)}</body></html>`
+</style></head><body>${renderView('front', front, renderOptions, validated.revision)}${renderView('back', back, renderOptions, validated.revision)}</body></html>`
 }
 
 function isWithin(root, target) {
@@ -355,7 +357,8 @@ function webpDimensions(bytes) {
       return { width: data.readUIntLE(start + 4, 3) + 1, height: data.readUIntLE(start + 7, 3) + 1 }
     }
     if (kind === 'VP8 ' && size >= 10 && data[start + 3] === 0x9d && data[start + 4] === 0x01 && data[start + 5] === 0x2a) {
-      return { width: data.readUInt16LE(start + 6) & 0x3fff, height: data.readUInt16LE(start + 8) & 0x3fff }
+      const width = data.readUInt16LE(start + 6) & 0x3fff; const height = data.readUInt16LE(start + 8) & 0x3fff
+      return width > 0 && height > 0 ? { width, height } : undefined
     }
     if (kind === 'VP8L' && size >= 5 && data[start] === 0x2f) {
       const packed = data.readUInt32LE(start + 1)
@@ -523,7 +526,7 @@ export async function renderDesignReview({
   const blueprintBytes = await readFile(resolvedBlueprintPath)
   let parsed
   try { parsed = JSON.parse(blueprintBytes.toString('utf8')) } catch (error) { throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Blueprint JSON is invalid: ${error.message}`) }
-  const blueprint = validateLayoutBlueprint(parsed)
+  const blueprint = validateLayoutBlueprint(parsed, pxPerMm)
   const resolvedOutputDir = path.resolve(outputDir)
   if (!force && await stat(resolvedOutputDir).then(() => true, (error) => {
     if (error?.code === 'ENOENT') return false

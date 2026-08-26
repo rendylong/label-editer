@@ -124,6 +124,7 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
   return {
     ...common, kind: 'text', text: typeof input.text === 'string' ? input.text : '',
     fontFamily: typeof input.fontFamily === 'string' ? input.fontFamily : prefersArabicFont ? 'noto-sans-arabic' : 'system-sans',
+    ...(Array.isArray(input.fontStack) ? { fontStack: structuredClone(input.fontStack) as string[] } : {}),
     fontSize: Math.max(8, finite(input.fontSize, 64)), fontWeight,
     letterSpacing: finite(input.letterSpacing, 0), lineHeight: Math.max(0.5, finite(input.lineHeight, 1.2)),
     width: Math.max(8, ratio(input.width, 0.7) * area.canvas.width), color: typeof input.color === 'string' ? input.color : '#111111',

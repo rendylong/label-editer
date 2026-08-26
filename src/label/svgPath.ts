@@ -6,6 +6,7 @@ import {
   traceNormalizedSvgPath as portableTraceNormalizedSvgPath,
   traceValidatedSvgPath as portableTraceValidatedSvgPath,
   validateSvgPathViewBox as portableValidateSvgPathViewBox,
+  validatedSvgGeometry as portableValidatedSvgGeometry,
 } from '../../scripts/lib/svg-path-core.mjs'
 
 export interface SvgMoveTo { readonly kind: 'moveTo'; readonly x: number; readonly y: number }
@@ -62,3 +63,9 @@ export const traceValidatedSvgPath = portableTraceValidatedSvgPath as (
   height: number,
 ) => NormalizedSvgPath
 export const hasOpenSvgSubpath = portableHasOpenSvgSubpath as (commands: readonly NormalizedSvgPathCommand[]) => boolean
+export const validatedSvgGeometry = portableValidatedSvgGeometry as (
+  source: string,
+  viewBox: readonly [number, number, number, number] | undefined,
+  width: number,
+  height: number,
+) => { readonly commands: NormalizedSvgPath; readonly pathData: string; readonly viewBox: readonly [number, number, number, number] }

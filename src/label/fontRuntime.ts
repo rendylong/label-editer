@@ -1,5 +1,6 @@
 import { FONT_STACKS, type LabelLayer, type UploadedFontRecord } from './types'
 import { fontEntry, legacyFontId, type FontCatalogEntry } from './fontCatalog'
+import { fontStackCss } from './fontStack'
 
 export interface FontLoadResult {
   id: string
@@ -183,6 +184,7 @@ export function deriveDesignFontRequests(layers: LabelLayer[], uploaded: Uploade
 
   for (const layer of layers) {
     if (layer.kind !== 'text') continue
+    if (layer.fontStack?.length) continue
 
     const record = uploadedFontRecord(layer.fontFamily, uploaded)
     if (record) {
@@ -237,7 +239,8 @@ export async function waitForDesignFonts(layers: LabelLayer[], uploaded: Uploade
 }
 
 /** Resolve a serialized font reference to a deterministic CSS fallback chain. */
-export function fontCssFor(ref: string, uploaded: UploadedFontRecord[]): string {
+export function fontCssFor(ref: string, uploaded: UploadedFontRecord[], fontStack?: string[]): string {
+  if (fontStack?.length) return fontStackCss(fontStack)
   const record = uploadedFontRecord(ref, uploaded)
   if (record) return `"${uploadFamily(record.name)}", sans-serif`
 

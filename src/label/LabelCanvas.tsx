@@ -9,6 +9,7 @@ import type Konva from 'konva'
 import { useLabelStore, useUiStore } from '../state/stores'
 import type { LabelLayer, TextLayer, ImageLayer } from './types'
 import { fontCssFor } from './fonts'
+import { resolvedTextDirection } from './textDirection'
 import { useDesignFontReadiness } from './designFontReadiness'
 import { designFontReadinessKey } from './exportReadiness'
 import { clearTransparentCanvasBorder } from './canvasBorder'
@@ -242,12 +243,6 @@ function drawTextShape(ctx: CanvasRenderingContext2D, layer: TextLayer, gray: nu
   ctx.restore()
 }
 
-function resolvedTextDirection(layer: TextLayer): CanvasDirection {
-  if (layer.writingDirection === 'rtl') return 'rtl'
-  if (layer.writingDirection === 'ltr') return 'ltr'
-  return /[\u0590-\u08ff]/u.test(layer.text) ? 'rtl' : 'ltr'
-}
-
 interface ImageBits {
   src: string
   original: HTMLImageElement
@@ -351,7 +346,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     const drawLayer = (ctx: CanvasRenderingContext2D, layer: LabelLayer, gray: number, mode: MaskDrawMode): boolean => {
       if (layer.kind === 'text') {
         if (layer.text.trim().length === 0) return false
-        drawTextShape(ctx, layer, gray, fontCssFor(layer.fontFamily, cfg.fonts), mode)
+        drawTextShape(ctx, layer, gray, fontCssFor(layer.fontFamily, cfg.fonts, layer.fontStack), mode)
       }
       else if (layer.kind === 'image') {
         const bits = imgBits.get(layer.id)
@@ -368,7 +363,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       const measurementCanvas = document.createElement('canvas')
       const measurementContext = measurementCanvas.getContext('2d')
       if (!measurementContext) return []
-      measurementContext.font = fontString(layer, fontCssFor(layer.fontFamily, cfg.fonts))
+      measurementContext.font = fontString(layer, fontCssFor(layer.fontFamily, cfg.fonts, layer.fontStack))
       return measureTextLayerLayout(layer, (line) => measureTextWidth(measurementContext, layer, line)).overflow
         ? [layer.id]
         : []
@@ -504,7 +499,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
               />
             ) : null}
             {carrierSurface.renderDecoration && sorted.map((layer) => {
-              const css = layer.kind === 'text' ? fontCssFor(layer.fontFamily, uploadedFonts) : ''
+              const css = layer.kind === 'text' ? fontCssFor(layer.fontFamily, uploadedFonts, layer.fontStack) : ''
               const foil = layer.craft.find((c) => c.type === 'foil')
               const emboss = layer.craft.find((c) => c.type === 'emboss')
               const deboss = layer.craft.find((c) => c.type === 'deboss')

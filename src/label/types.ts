@@ -84,6 +84,8 @@ export interface TextLayer extends LayerPhysicalMetadata {
   text: string
   /** Stable catalog id. Legacy display names are migrated at project import. */
   fontFamily: string
+  /** Ordered, approved CSS fallback stack for blueprint-derived editable text. */
+  fontStack?: string[]
   fontSize: number
   fontWeight: number | 'normal' | 'bold'
   letterSpacing: number

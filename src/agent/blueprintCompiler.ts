@@ -127,7 +127,7 @@ function assetPath(blueprint: LayoutBlueprintV1, layer: LayoutBlueprintLayer, ar
 
 function fontFamily(blueprint: LayoutBlueprintV1, area: LayoutBlueprintArea, layer: LayoutBlueprintLayer): string {
   if (layer.fontAsset) return assetPath(blueprint, { ...layer, assetId: layer.fontAsset }, area)
-  if (layer.fontStack?.length) return layer.fontStack.join(', ')
+  if (layer.fontStack?.length) return layer.fontStack[0]
   return unrepresentable(area, layer, 'text has no editable font asset or font stack')
 }
 
@@ -172,6 +172,7 @@ function compileLayer(blueprint: LayoutBlueprintV1, area: LayoutBlueprintArea, l
       type: 'text',
       text: layer.text!,
       fontFamily: fontFamily(blueprint, area, layer),
+      ...(layer.fontStack?.length ? { fontStack: structuredClone(layer.fontStack) } : {}),
       fontSize: proxyFontSize,
       fontWeight: layer.fontWeight!,
       letterSpacing: bounded(layer.letterSpacingEm! * proxyFontSize, -100, 100),

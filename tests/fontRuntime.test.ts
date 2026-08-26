@@ -226,6 +226,15 @@ describe('font runtime', () => {
     expect(fontCssFor('Unknown Legacy Face', [])).toBe('ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif')
   })
 
+  it('uses the approved safe stack verbatim without loading its fallback families as assets', async () => {
+    const { deriveDesignFontRequests, fontCssFor } = await freshRuntime()
+    const layer = { ...(textLayer('Noto Sans CJK SC') as Extract<LabelLayer, { kind: 'text' }>), fontStack: ['Noto Sans CJK SC', 'system-ui', 'sans-serif'] }
+
+    expect(fontCssFor(layer.fontFamily, [], layer.fontStack)).toBe('"Noto Sans CJK SC",system-ui,sans-serif')
+    expect(deriveDesignFontRequests([layer], [])).toEqual([])
+    expect(FontFaceDouble.created).toEqual([])
+  })
+
   it('preserves every legacy system stack including the dedicated Hei stack', async () => {
     const { fontCssFor, SYSTEM_FONT_ENTRIES } = await freshRuntime()
 

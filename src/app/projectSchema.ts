@@ -3,6 +3,7 @@
 import { legacyFontId } from '../label/fontCatalog'
 import { hasValidLegacyPaperCarrierProvenance, resolveLabelPaper } from '../label/paper'
 import { validateVectorPath } from '../label/vectorPathValidation'
+import { validateFontStack } from '../label/fontStack'
 import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
@@ -323,6 +324,7 @@ function normalizeLayer(raw: unknown): LabelLayer {
     validateCommonLayerFields(raw)
     requiredString(raw, 'text')
     const fontFamily = requiredString(raw, 'fontFamily', { nonEmpty: true })
+    if (raw.fontStack !== undefined && !validateFontStack(raw.fontStack)) layerError('fontStack 必须是安全且不超过 16 项的字体数组')
     requiredFiniteNumber(raw, 'fontSize')
     if (!(typeof raw.fontWeight === 'number' && Number.isFinite(raw.fontWeight)) && raw.fontWeight !== 'normal' && raw.fontWeight !== 'bold') {
       layerError('fontWeight 无效')

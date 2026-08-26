@@ -43,6 +43,7 @@ export interface EditableLayerProjection {
   language?: string
   writingDirection?: string
   fontFamily?: string
+  fontStack?: string[]
   fontWeight?: number | 'normal' | 'bold'
   color?: string
   align?: string
@@ -79,7 +80,7 @@ export function projectEditableArea(area: LabelAreaConfig): EditableAreaProjecti
       craft: structuredClone(layer.craft),
       ...(layer.kind === 'text' ? {
         text: layer.text, language: layer.language, writingDirection: layer.writingDirection,
-        fontFamily: layer.fontFamily, fontWeight: layer.fontWeight, color: layer.color, align: layer.align,
+        fontFamily: layer.fontFamily, fontStack: layer.fontStack ? structuredClone(layer.fontStack) : undefined, fontWeight: layer.fontWeight, color: layer.color, align: layer.align,
       } : {}),
       ...(layer.kind === 'shape' ? {
         shape: layer.shape, pathData: layer.pathData,
@@ -132,7 +133,7 @@ function sameBounds(expected: LayoutBlueprintLayer, actual: EditableLayerProject
 }
 
 function expectedFont(blueprint: LayoutBlueprintV1, layer: LayoutBlueprintLayer): string | undefined {
-  if (layer.fontStack) return layer.fontStack.join(', ')
+  if (layer.fontStack) return layer.fontStack[0]
   return blueprint.assets.find((asset) => asset.id === layer.fontAsset)?.path
 }
 
@@ -141,6 +142,7 @@ function typographyMatches(blueprint: LayoutBlueprintV1, expected: LayoutBluepri
   return actual.language === expected.language
     && actual.writingDirection === expected.writingDirection
     && actual.fontFamily === expectedFont(blueprint, expected)
+    && same(actual.fontStack, expected.fontStack)
     && actual.fontWeight === expected.fontWeight
     && actual.align === expected.alignment
     && actual.designMetrics?.fontSizeMm === expected.fontSizeMm

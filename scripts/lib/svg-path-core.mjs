@@ -295,7 +295,7 @@ function validateSvgPathViewBox(viewBox) {
   }
   viewBox.forEach((value) => assertSafeNumber(value, "viewBox value"));
 }
-function traceNormalizedSvgPath(context, commands, viewBox, width, height) {
+function mappedSvgPathCommands(commands, viewBox, width, height) {
   validateSvgPathViewBox(viewBox);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw pathError("layer dimensions must be finite and positive");
   assertSafeNumber(width, "layer width");
@@ -356,7 +356,10 @@ function traceNormalizedSvgPath(context, commands, viewBox, width, height) {
         break;
     }
   }
-  for (const operation of operations) {
+  return Object.freeze(operations.map(Object.freeze));
+}
+function traceNormalizedSvgPath(context, commands, viewBox, width, height) {
+  for (const operation of mappedSvgPathCommands(commands, viewBox, width, height)) {
     switch (operation.kind) {
       case "moveTo":
         context.moveTo(operation.x, operation.y);
@@ -372,6 +375,16 @@ function traceNormalizedSvgPath(context, commands, viewBox, width, height) {
         break;
     }
   }
+}
+function validatedSvgGeometry(source, viewBox, width, height) {
+  const commands = parseNormalizedSvgPath(source);
+  svgPathBounds(commands);
+  const mappedCommands = mappedSvgPathCommands(commands, viewBox, width, height);
+  return Object.freeze({
+    commands: mappedCommands,
+    pathData: serializeNormalizedSvgPath(mappedCommands),
+    viewBox: Object.freeze([-width / 2, -height / 2, width, height])
+  });
 }
 function rootsInUnitInterval(a, b, c) {
   if (Math.abs(a) < 1e-14) {
@@ -507,6 +520,7 @@ export {
   parseNormalizedSvgPath,
   serializeNormalizedSvgPath,
   svgPathBounds,
+  validatedSvgGeometry,
   traceNormalizedSvgPath,
   traceValidatedSvgPath,
   validateSvgPathViewBox

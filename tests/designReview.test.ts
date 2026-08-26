@@ -3,6 +3,8 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resolveLayerRenderTransform } from '../src/label/craft'
+import { traceValidatedSvgPath } from '../src/label/svgPath'
 import { validateVectorPath } from '../src/label/vectorPathValidation'
 // @ts-expect-error Pure Node ESM module is consumed directly by the internal renderer.
 import { buildDesignReviewManifest, renderBlueprintHtml, renderDesignReview } from '../scripts/lib/design-review.mjs'
@@ -20,16 +22,8 @@ function pngWithDimensions(width: number, height: number): Buffer {
   return bytes
 }
 
-function jpegWithDimensions(width: number, height: number): Buffer {
-  return Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x0b, 0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, 0x01, 0x01, 0x11, 0x00, 0xff, 0xd9])
-}
-
-function webpWithDimensions(width: number, height: number): Buffer {
-  const bytes = Buffer.alloc(30)
-  bytes.write('RIFF', 0); bytes.writeUInt32LE(22, 4); bytes.write('WEBP', 8); bytes.write('VP8X', 12); bytes.writeUInt32LE(10, 16)
-  bytes.writeUIntLE(width - 1, 24, 3); bytes.writeUIntLE(height - 1, 27, 3)
-  return bytes
-}
+const JPEG_1X1 = Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAEf/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=', 'base64')
+const WEBP_1X1 = Buffer.from('UklGRjwAAABXRUJQVlA4IDAAAADQAQCdASoBAAEAAUAmJaACdLoB+AADsAD+8ut//NgVzXPv9//S4P0uD9Lg/9KQAAA=', 'base64')
 
 function headerValidButUndecodableWoff2(): Buffer {
   const bytes = Buffer.alloc(49)
@@ -135,7 +129,7 @@ describe('blueprint-derived design review', () => {
     expect(result.html).not.toMatch(/\son[a-z]+=/i)
     expect(result.html).toContain(`data:image/png;base64,${PNG.toString('base64')}`)
     expect(result.html).not.toContain('assets/mark.png')
-    expect(result.html).toContain('d="M0 1 L0 0 L1 0 L1 1"')
+    expect(result.html).toContain('d="M -85 135 L -85 -135 L 85 -135 L 85 135"')
     expect(result.html).toContain('vector-effect="non-scaling-stroke"')
     expect(result.html).toContain('left:20px;top:30px;width:160px;height:40px')
   })
@@ -153,23 +147,62 @@ describe('blueprint-derived design review', () => {
       .toThrow(/fontStack|font family|unsafe/i)
   })
 
+  it('quotes normal approved font families but leaves CSS generic fallbacks unquoted', () => {
+    const source = blueprint()
+    source.areas[0].layers[0].fontStack = ['Noto Sans CJK SC', 'system-ui', 'sans-serif']
+
+    const html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
+
+    expect(html).toContain('font-family:&quot;Noto Sans CJK SC&quot;,system-ui,sans-serif')
+    expect(html).not.toContain('&#39;system-ui&#39;')
+    expect(html).not.toContain('&#39;sans-serif&#39;')
+  })
+
   it.each([
-    ['top_left', '0px 0px'],
-    ['top_center', '80px 0px'],
-    ['center', '80px 20px'],
-    ['baseline_left', '0px 0px'],
-    ['baseline_center', '80px 0px'],
-  ] as const)('keeps top-left blueprint bounds and rotates %s around its declared origin', (anchor, transformOrigin) => {
+    ['top_left', 20, 30, '0px 0px', undefined],
+    ['top_center', 20, 30, '80px 0px', undefined],
+    ['center', 20, 30, '80px 20px', undefined],
+    ['baseline_left', 20, 13, '0px 17px', 17],
+    ['baseline_center', 20, 13, '80px 17px', 17],
+  ] as const)('matches the editor transform for rotated %s anchors', (anchor, left, top, transformOrigin, baselineFromTop) => {
     const source = blueprint()
     source.areas[0].layers = [{ ...source.areas[0].layers[0], anchor, rotation: 30 }]
 
     const html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
     const layerMarkup = html.match(/<div class="art-layer"[^>]+>/)?.[0] ?? ''
+    const anchorX = anchor === 'top_center' || anchor === 'baseline_center' || anchor === 'center' ? 100 : 20
+    const anchorY = anchor === 'center' ? 50 : 30
+    const editor = resolveLayerRenderTransform({
+      x: anchorX, y: anchorY, rotation: 30, width: 160, height: 40, anchor,
+      ...(baselineFromTop === undefined ? {} : { baselineFromTop }),
+    })
 
-    expect(layerMarkup).toContain('left:20px;top:30px;width:160px;height:40px')
+    expect(editor.box).toMatchObject({ x: left - anchorX, y: top - anchorY, width: 160, height: 40 })
+    expect(layerMarkup).toContain(`left:${left}px;top:${top}px;width:160px;height:40px`)
     expect(layerMarkup).toContain(`transform-origin:${transformOrigin}`)
     expect(layerMarkup).toContain('transform:rotate(30deg)')
     expect(layerMarkup).not.toContain('translate')
+  })
+
+  it.each([
+    ['baseline_left', 1, -45],
+    ['baseline_center', 1, 90],
+    ['baseline_left', 8, 135],
+    ['baseline_center', 8, -180],
+  ] as const)('keeps %s on the compiler baseline across %s mm type and %s degree rotation', (anchor, fontSizeMm, rotation) => {
+    const source = blueprint()
+    source.areas[0].layers = [{ ...source.areas[0].layers[0], anchor, fontSizeMm, rotation }]
+    const baselineFromTop = ((fontSizeMm * 5 * 1.1) - fontSizeMm * 5) / 2 + fontSizeMm * 5 * 0.8
+    const anchorX = anchor === 'baseline_center' ? 100 : 20
+    const editor = resolveLayerRenderTransform({ x: anchorX, y: 30, rotation, width: 160, height: 40, anchor, baselineFromTop })
+
+    const html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
+    const layerMarkup = html.match(/<div class="art-layer"[^>]+>/)?.[0] ?? ''
+    const css = (value: number) => Number(value.toFixed(6)).toString()
+
+    expect(layerMarkup).toContain(`left:${css(editor.origin.x + editor.box.x)}px;top:${css(editor.origin.y + editor.box.y)}px`)
+    expect(layerMarkup).toContain(`transform-origin:${css(-editor.box.x)}px ${css(-editor.box.y)}px`)
+    expect(layerMarkup).toContain(`transform:rotate(${rotation}deg)`)
   })
 
   it('applies the authoritative blueprint schema even on direct HTML rendering', () => {
@@ -300,8 +333,46 @@ describe('blueprint-derived design review', () => {
     const back = html.slice(html.indexOf('data-side="back"'))
 
     expect(back).toContain('class="carrier-boundary-path"')
-    expect(back).toContain('d="M0 0H190V290H0Z"')
+    expect(back).toContain('d="M -95 -145 L 95 -145 L 95 145 L -95 145 Z"')
     expect(back).not.toContain('carrier-panel--opaque')
+  })
+
+  it.each(['applied_label', 'clear_label'] as const)('rejects open and zero-area custom %s boundaries while accepting a closed curve', (carrier) => {
+    const source = blueprint()
+    source.areas[1].carrier = carrier
+    source.areas[1].substrate = carrier === 'applied_label'
+      ? { kind: 'opaque', color: '#ffffff', opacity: 1, boundary: { shape: 'custom', pathData: 'M0 0H190V290H0' } }
+      : { kind: 'transparent', opacity: 0.08, boundary: { shape: 'custom', pathData: 'M0 0H190V290H0' } }
+    expect(() => renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })).toThrow(/custom|boundary|closed/i)
+
+    source.areas[1].substrate.boundary.pathData = 'M0 0H190Z'
+    expect(() => renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })).toThrow(/custom|boundary|area|bounds/i)
+
+    source.areas[1].substrate.boundary.pathData = 'M0 145C0 65 190 65 190 145C190 225 0 225 0 145Z'
+    expect(renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })).toContain('carrier-boundary-path')
+  })
+
+  it('renders the exact shared mapped arc geometry at the requested 36x62 mm, 5 px/mm size', () => {
+    const source = blueprint()
+    const layer = source.areas[0].layers[1]
+    Object.assign(layer, {
+      boundsMm: { x: 3, y: 3, width: 36, height: 62 },
+      pathData: 'M0 31A18 31 0 0 1 36 31', pathViewBox: [0, 0, 36, 62],
+    })
+    const operations: string[] = []
+    traceValidatedSvgPath({
+      moveTo: (x, y) => operations.push(`M ${x} ${y}`),
+      lineTo: (x, y) => operations.push(`L ${x} ${y}`),
+      bezierCurveTo: (...values) => operations.push(`C ${values.join(' ')}`),
+      closePath: () => operations.push('Z'),
+    }, layer.pathData, layer.pathViewBox, 180, 310)
+
+    const html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
+    const pathMarkup = html.match(/<svg class="shape-geometry"[^>]*><path[^>]+>/)?.[0] ?? ''
+
+    expect(pathMarkup).toContain('viewBox="-90 -155 180 310"')
+    expect(pathMarkup).toContain(`d="${operations.join(' ')}"`)
+    expect(pathMarkup).not.toContain('A18 31')
   })
 
   it('uses the shared mapped SVG route and rejects overflow at the actual physical render size', () => {
@@ -339,7 +410,8 @@ describe('blueprint-derived design review', () => {
     const html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
 
     expect(html).toContain('lang="ar"')
-    expect(html).toContain('dir="auto"')
+    expect(html).toContain('dir="rtl"')
+    expect(html).toContain('data-writing-direction="auto"')
     expect(html).toContain('data-wrap-policy="character"')
     expect(html).toContain('data-max-lines="2"')
     expect(html).toContain('max-height:2.2em')
@@ -374,28 +446,46 @@ describe('blueprint-derived design review', () => {
   })
 
   it.each([
-    ['image/jpeg', 'mark.jpg', jpegWithDimensions, 3, 2],
-    ['image/webp', 'mark.webp', webpWithDimensions, 4, 3],
-  ] as const)('accepts valid %s dimensions and rejects a declared mismatch', async (mimeType, fileName, makeBytes, width, height) => {
+    ['image/jpeg', 'mark.jpg', JPEG_1X1],
+    ['image/webp', 'mark.webp', WEBP_1X1],
+  ] as const)('browser-decodes valid %s dimensions and rejects a declared mismatch', async (mimeType, fileName, bytes) => {
     const root = await temporaryDirectory()
     const source = blueprint()
-    const bytes = makeBytes(width, height)
     Object.assign(source.assets[0], {
-      path: `assets/${fileName}`, mimeType, width, height,
+      path: `assets/${fileName}`, mimeType, width: 1, height: 1,
       sha256: createHash('sha256').update(bytes).digest('hex'),
     })
     const blueprintPath = await writeFixture(root, source)
     await writeFile(path.join(root, 'assets', fileName), bytes)
 
     await expect(renderDesignReview({
-      blueprintPath, outputDir: path.join(root, 'valid-image'), width: 640, height: 480, pxPerMm: 5, capture: fakeCapture(),
+      blueprintPath, outputDir: path.join(root, 'valid-image'), width: 640, height: 480, pxPerMm: 5,
     })).resolves.toMatchObject({ outputDir: path.join(root, 'valid-image') })
 
-    source.assets[0].width = width + 1
+    source.assets[0].width = 2
     await writeFile(blueprintPath, `${JSON.stringify(source, null, 2)}\n`)
     await expect(renderDesignReview({
       blueprintPath, outputDir: path.join(root, 'mismatch-image'), width: 640, height: 480, pxPerMm: 5, capture: fakeCapture(),
     })).rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
+  })
+
+  it.each([
+    ['truncated raw VP8', Buffer.from('UklGRhAAAABXRUJQVlA4IAoAAAAwAQCd', 'base64')],
+    ['zero-width raw VP8', (() => { const bytes = Buffer.from(WEBP_1X1); bytes.writeUInt16LE(0, 26); return bytes })()],
+  ])('rejects %s WebP before browser capture', async (_label, bytes) => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    Object.assign(source.assets[0], {
+      path: 'assets/mark.webp', mimeType: 'image/webp', width: 1, height: 1,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    })
+    const blueprintPath = await writeFixture(root, source)
+    await writeFile(path.join(root, 'assets/mark.webp'), bytes)
+    const capture = fakeCapture()
+
+    await expect(renderDesignReview({ blueprintPath, outputDir: path.join(root, 'bad-webp'), width: 640, height: 480, pxPerMm: 5, capture }))
+      .rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
+    expect(capture).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -428,7 +518,7 @@ describe('blueprint-derived design review', () => {
     ['unsafe vector path', (value: any) => { value.areas[0].layers[1].pathData = 'M0 0 R1 1' }],
     ['incomplete vector path', (value: any) => { value.areas[0].layers[1].pathData = 'M0 0 L' }],
     ['coincident arc endpoint', (value: any) => { value.areas[0].layers[1].pathData = 'M0 0 A1 1 0 0 1 0 0' }],
-    ['unsafe derived vector coordinate', (value: any) => { value.areas[0].layers[1].pathData = 'M1000000000 0 l1000000000 0' }],
+    ['unsafe derived vector coordinate', (value: any) => { value.areas[0].layers[1].pathData = 'M100000000000 0 l100000000000 0' }],
   ] as const)('rejects %s before browser capture or publication', async (_label, mutate) => {
     const root = await temporaryDirectory()
     const value = blueprint(); mutate(value)

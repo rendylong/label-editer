@@ -44,11 +44,26 @@ function makeArea(): LabelAreaConfig {
 
 function makeTextLayer(): Record<string, unknown> {
   return {
-    id: 't1', kind: 'text', text: 'Aesop', fontFamily: 'Arial', fontSize: 80, fontWeight: 400,
+    id: 't1', kind: 'text', text: 'Aesop', fontFamily: 'Arial', fontStack: ['Arial', 'Helvetica', 'sans-serif'], fontSize: 80, fontWeight: 400,
     letterSpacing: 0, lineHeight: 1.2, color: '#000000', align: 'left', italic: false,
     x: 100, y: 100, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, craft: [],
   }
 }
+
+describe('project font stack contract', () => {
+  it('preserves a bounded safe stack and rejects CSS-bearing or oversized families', () => {
+    const project = projectWithLayers([makeTextLayer()])
+    expect(parseLabelProject(project).areas[0].layers[0]).toMatchObject({
+      kind: 'text', fontFamily: 'arial', fontStack: ['Arial', 'Helvetica', 'sans-serif'],
+    })
+
+    ;((project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>)[0].fontStack = ['Arial;url(https://evil.example)']
+    expect(() => parseLabelProject(project)).toThrow(/fontStack/i)
+
+    ;((project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>)[0].fontStack = Array.from({ length: 17 }, () => 'Arial')
+    expect(() => parseLabelProject(project)).toThrow(/fontStack/i)
+  })
+})
 
 function makeImageLayer(): Record<string, unknown> {
   return {
