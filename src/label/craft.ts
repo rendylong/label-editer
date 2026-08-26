@@ -5,8 +5,7 @@
 
 import type { CraftEffect, CraftType, ImageLayer, LabelLayer, ShapeLayer, TextLayer } from './types'
 import { FOIL_COLORS } from './types'
-import { normalizeShapeLayer, traceShape, type ShapeDrawingContext } from './shapeGeometry'
-import { hasOpenSvgSubpath, parseNormalizedSvgPath } from './svgPath'
+import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
 
 export type CraftScope = 'layer' | 'global'
 export type MaskChannel = 'metalness' | 'roughness' | 'bump'
@@ -162,13 +161,40 @@ export function rectangleRenderProps(layer: Pick<ShapeLayer, 'width' | 'height' 
   }
 }
 
-const OPEN_SHAPE_KINDS = new Set<ShapeLayer['shape']>(['line', 'wave', 'bracket'])
+interface ShapeCommandPartitions {
+  closed: ShapeCommand[]
+  open: ShapeCommand[]
+}
 
-export function shapeUsesOpenStroke(layer: Pick<ShapeLayer, 'shape' | 'pathData'>): boolean {
-  if (OPEN_SHAPE_KINDS.has(layer.shape)) return true
-  if (layer.shape !== 'path') return false
-  if (!layer.pathData) throw new Error('Path shapes require pathData')
-  return hasOpenSvgSubpath(parseNormalizedSvgPath(layer.pathData))
+/** Keep closed contours together for fill-rule evaluation and open contours isolated from fill. */
+function partitionShapeCommands(commands: readonly ShapeCommand[]): ShapeCommandPartitions {
+  const subpaths: ShapeCommand[][] = []
+  let current: ShapeCommand[] = []
+  for (const command of commands) {
+    if (command.type === 'moveTo' && current.length > 0) {
+      subpaths.push(current)
+      current = []
+    }
+    current.push(command)
+  }
+  if (current.length > 0) subpaths.push(current)
+
+  const partitions: ShapeCommandPartitions = { closed: [], open: [] }
+  for (const subpath of subpaths) {
+    const drawable = subpath.some((command) => command.type !== 'moveTo' && command.type !== 'close')
+    if (!drawable) continue
+    const target = subpath.at(-1)?.type === 'close' ? partitions.closed : partitions.open
+    target.push(...subpath)
+  }
+  return partitions
+}
+
+function shapeCommandPartitions(layer: ShapeLayer): ShapeCommandPartitions {
+  return partitionShapeCommands(shapeCommands(layer))
+}
+
+export function shapeUsesOpenStroke(layer: ShapeLayer): boolean {
+  return shapeCommandPartitions(layer).open.length > 0
 }
 
 export interface GenericShapePaintProps {
@@ -210,6 +236,7 @@ export function genericShapePaintProps(layer: ShapeLayer, foil: CraftEffect | un
   }
   const gradient = foilKonvaGradient(foil, normalized.width, normalized.height)
   if (!gradient) return base
+  const partitions = shapeCommandPartitions(normalized)
 
   const start = {
     x: gradient.start.x - normalized.width / 2,
@@ -219,7 +246,7 @@ export function genericShapePaintProps(layer: ShapeLayer, foil: CraftEffect | un
     x: gradient.end.x - normalized.width / 2,
     y: gradient.end.y - normalized.height / 2,
   }
-  if (shapeUsesOpenStroke(normalized)) {
+  if (partitions.open.length > 0 && partitions.closed.length === 0) {
     return {
       ...base,
       strokeLinearGradientStartPoint: start,
@@ -227,12 +254,18 @@ export function genericShapePaintProps(layer: ShapeLayer, foil: CraftEffect | un
       strokeLinearGradientColorStops: gradient.colorStops,
     }
   }
-  return {
+  const fillPaint = {
     ...base,
-    fillPriority: 'linear-gradient',
+    fillPriority: 'linear-gradient' as const,
     fillLinearGradientStartPoint: start,
     fillLinearGradientEndPoint: end,
     fillLinearGradientColorStops: gradient.colorStops,
+  }
+  return partitions.open.length === 0 ? fillPaint : {
+    ...fillPaint,
+    strokeLinearGradientStartPoint: start,
+    strokeLinearGradientEndPoint: end,
+    strokeLinearGradientColorStops: gradient.colorStops,
   }
 }
 
@@ -245,10 +278,17 @@ export interface ShapePreviewContext<ShapeNode> extends ShapeDrawingContext {
 
 /** Replay the shared path for the visible preview without fill-closing open decorations. */
 export function drawShapePreview<ShapeNode>(context: ShapePreviewContext<ShapeNode>, layer: ShapeLayer, shape: ShapeNode): void {
-  context.beginPath()
-  traceShape(context, layer)
-  if (shapeUsesOpenStroke(layer)) context.strokeShape(shape)
-  else context.fillStrokeShape(shape)
+  const partitions = shapeCommandPartitions(layer)
+  if (partitions.closed.length > 0) {
+    context.beginPath()
+    traceShapeCommands(context, partitions.closed)
+    context.fillStrokeShape(shape)
+  }
+  if (partitions.open.length > 0) {
+    context.beginPath()
+    traceShapeCommands(context, partitions.open)
+    context.strokeShape(shape)
+  }
 }
 
 /** Draw the shared path into a PBR craft mask at the layer transform. */
@@ -272,14 +312,27 @@ export function drawShapeMask(
   ctx.rotate((transform.rotation * Math.PI) / 180)
   ctx.translate(transform.box.x + normalized.width / 2, transform.box.y + normalized.height / 2)
   ctx.globalAlpha *= normalized.opacity
-  ctx.beginPath()
-  traceShape(ctx, normalized)
   ctx.fillStyle = `rgb(${gray},${gray},${gray})`
   ctx.strokeStyle = ctx.fillStyle
   ctx.lineWidth = Math.max(1, normalized.strokeWidth)
   ctx.setLineDash(normalized.geometry?.dash ?? [])
-  if (mode === 'stroke' || shapeUsesOpenStroke(normalized)) ctx.stroke()
-  else ctx.fill(normalized.fillRule ?? 'nonzero')
+  if (mode === 'stroke') {
+    ctx.beginPath()
+    traceShapeCommands(ctx, shapeCommands(normalized))
+    ctx.stroke()
+  } else {
+    const partitions = shapeCommandPartitions(normalized)
+    if (partitions.closed.length > 0) {
+      ctx.beginPath()
+      traceShapeCommands(ctx, partitions.closed)
+      ctx.fill(normalized.fillRule ?? 'nonzero')
+    }
+    if (partitions.open.length > 0) {
+      ctx.beginPath()
+      traceShapeCommands(ctx, partitions.open)
+      ctx.stroke()
+    }
+  }
   ctx.restore()
 }
 

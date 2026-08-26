@@ -19,6 +19,7 @@ vi.mock('react-konva', async () => {
   ) {
     useImperativeHandle(ref, () => ({
       width: () => width,
+      height: () => height,
       find: () => [],
       findOne: () => undefined,
       draw: () => undefined,

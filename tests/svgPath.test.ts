@@ -49,6 +49,14 @@ describe('normalized SVG path data', () => {
   })
 
   it.each([
+    'M0 0 A1e308 1e308 0 0 1 1 0',
+    'M0 0 L1e308 1',
+    'M0 0 C0 0 1e308 1 2 2',
+  ])('rejects finite but unsafe geometry before it can overflow derived coordinates: %s', (source) => {
+    expect(() => parseNormalizedSvgPath(source)).toThrow(/safe geometry range/)
+  })
+
+  it.each([
     'M 0 0 S 1 1 2 2',
     'M 0 0 L 1',
     'M 0 0 A 2 2 0 2 0 4 4',
@@ -101,6 +109,21 @@ describe('normalized SVG path data', () => {
     ])
   })
 
+  it('rejects unsafe viewBoxes and mapped coordinates instead of emitting NaN or Infinity', () => {
+    const commands = parseNormalizedSvgPath('M0 0L1 1')
+    const calls: string[] = []
+    const context = {
+      moveTo: () => { calls.push('moveTo') },
+      lineTo: () => { calls.push('lineTo') },
+      bezierCurveTo: () => { calls.push('bezierCurveTo') },
+      closePath: () => { calls.push('closePath') },
+    }
+
+    expect(() => traceNormalizedSvgPath(context, commands, [0, 0, 1e308, 1], 100, 100)).toThrow(/safe geometry range/)
+    expect(() => traceNormalizedSvgPath(context, commands, [0, 0, 1e-300, 1], 100, 100)).toThrow(/safe geometry range/)
+    expect(calls).toEqual([])
+  })
+
   it('includes quadratic, cubic, and arc extrema in finite bounds', () => {
     expect(svgPathBounds(parseNormalizedSvgPath('M0 0 Q50 100 100 0'))).toEqual({ x: 0, y: 0, width: 100, height: 50 })
     expect(svgPathBounds(parseNormalizedSvgPath('M0 0 C0 100 100 100 100 0'))).toEqual({ x: 0, y: 0, width: 100, height: 75 })
@@ -112,6 +135,14 @@ describe('normalized SVG path data', () => {
     expect(Object.values(arcBounds).every(Number.isFinite)).toBe(true)
   })
 
+  it('rejects unsafe caller-created commands before bounds extrema calculations', () => {
+    const commands: NormalizedSvgPathCommand[] = [
+      { kind: 'moveTo', x: 0, y: 0 },
+      { kind: 'cubicTo', cp1x: 0, cp1y: 1, cp2x: 1e308, cp2y: 1, x: 2, y: 2 },
+    ]
+    expect(() => svgPathBounds(commands)).toThrow(/safe geometry range/)
+  })
+
   it('serializes a caller-constructed inert command list deterministically', () => {
     const commands: NormalizedSvgPathCommand[] = [
       { kind: 'moveTo', x: 0, y: 0 },
@@ -119,5 +150,20 @@ describe('normalized SVG path data', () => {
       { kind: 'close' },
     ]
     expect(serializeNormalizedSvgPath(commands)).toBe('M 0 0 L 1 1 Z')
+  })
+
+  it('deeply freezes parsed commands so lossless source serialization cannot become stale', () => {
+    const source = 'M .1 .2 L .8 .9'
+    const commands = parseNormalizedSvgPath(source)
+
+    expect(Object.isFrozen(commands)).toBe(true)
+    expect(commands.every(Object.isFrozen)).toBe(true)
+    expect(() => {
+      (commands[1] as unknown as { x: number }).x = 0.5
+    }).toThrow(TypeError)
+    expect(() => {
+      (commands as unknown as NormalizedSvgPathCommand[]).push({ kind: 'close' })
+    }).toThrow(TypeError)
+    expect(serializeNormalizedSvgPath(commands)).toBe(source)
   })
 })

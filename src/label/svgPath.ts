@@ -1,24 +1,29 @@
 const MAX_PATH_LENGTH = 131_072
 const MAX_COMMANDS = 4_096
+// Label paths are normalized/viewBox-relative and ultimately become Canvas pixels.
+// This ceiling is vastly above either domain while keeping every arc/extrema
+// intermediate many orders below IEEE-754 overflow and unsafe Canvas precision.
+const MAX_SAFE_GEOMETRY_MAGNITUDE = 1e12
+const MAX_SAFE_DERIVED_MAGNITUDE = MAX_SAFE_GEOMETRY_MAGNITUDE * 4
 
-export interface SvgMoveTo { kind: 'moveTo'; x: number; y: number }
-export interface SvgLineTo { kind: 'lineTo'; x: number; y: number }
-export interface SvgCubicTo { kind: 'cubicTo'; cp1x: number; cp1y: number; cp2x: number; cp2y: number; x: number; y: number }
-export interface SvgQuadraticTo { kind: 'quadraticTo'; cpx: number; cpy: number; x: number; y: number }
+export interface SvgMoveTo { readonly kind: 'moveTo'; readonly x: number; readonly y: number }
+export interface SvgLineTo { readonly kind: 'lineTo'; readonly x: number; readonly y: number }
+export interface SvgCubicTo { readonly kind: 'cubicTo'; readonly cp1x: number; readonly cp1y: number; readonly cp2x: number; readonly cp2y: number; readonly x: number; readonly y: number }
+export interface SvgQuadraticTo { readonly kind: 'quadraticTo'; readonly cpx: number; readonly cpy: number; readonly x: number; readonly y: number }
 export interface SvgArcTo {
-  kind: 'arcTo'
-  rx: number
-  ry: number
-  rotation: number
-  largeArc: boolean
-  sweep: boolean
-  x: number
-  y: number
+  readonly kind: 'arcTo'
+  readonly rx: number
+  readonly ry: number
+  readonly rotation: number
+  readonly largeArc: boolean
+  readonly sweep: boolean
+  readonly x: number
+  readonly y: number
 }
-export interface SvgClose { kind: 'close' }
+export interface SvgClose { readonly kind: 'close' }
 
 export type NormalizedSvgPathCommand = SvgMoveTo | SvgLineTo | SvgCubicTo | SvgQuadraticTo | SvgArcTo | SvgClose
-export type NormalizedSvgPath = NormalizedSvgPathCommand[]
+export type NormalizedSvgPath = readonly NormalizedSvgPathCommand[]
 
 export interface SvgPathTraceContext {
   moveTo(x: number, y: number): void
@@ -44,6 +49,17 @@ const COMMAND_PARAMETERS: Record<string, number> = { M: 2, L: 2, H: 1, V: 1, C: 
 
 function pathError(message: string): Error {
   return new Error(`Invalid SVG path: ${message}`)
+}
+
+function assertSafeNumber(value: number, label: string, maximum = MAX_SAFE_GEOMETRY_MAGNITUDE): number {
+  if (!Number.isFinite(value) || Math.abs(value) > maximum) throw pathError(`${label} exceeds the safe geometry range`)
+  return value
+}
+
+function assertSafePoint(point: Point, label: string, maximum = MAX_SAFE_DERIVED_MAGNITUDE): Point {
+  assertSafeNumber(point.x, `${label} x`, maximum)
+  assertSafeNumber(point.y, `${label} y`, maximum)
+  return point
 }
 
 function tokenize(source: string): Token[] {
@@ -72,7 +88,7 @@ function tokenize(source: string): Token[] {
     const match = NUMBER_PATTERN.exec(source.slice(index))
     if (!match) throw pathError(`unexpected token at offset ${index}`)
     const value = Number(match[0])
-    if (!Number.isFinite(value)) throw pathError('numbers must be finite')
+    assertSafeNumber(value, 'number')
     tokens.push({ type: 'number', value, raw: match[0] })
     index += match[0].length
   }
@@ -85,16 +101,17 @@ function numberAt(tokens: Token[], index: number, command: string): NumberToken 
   return token
 }
 
-function attachSource(commands: NormalizedSvgPath, source: string): NormalizedSvgPath {
+function attachSource(commands: NormalizedSvgPathCommand[], source: string): NormalizedSvgPath {
+  commands.forEach(Object.freeze)
   Object.defineProperty(commands, SOURCE_PATH, { value: source, enumerable: false, configurable: false, writable: false })
-  return commands
+  return Object.freeze(commands)
 }
 
 /** Parse the supported SVG path subset into absolute, inert commands. */
 export function parseNormalizedSvgPath(source: string): NormalizedSvgPath {
   if (typeof source !== 'string') throw pathError('path data must be a string')
   const tokens = tokenize(source)
-  const commands: NormalizedSvgPath = []
+  const commands: NormalizedSvgPathCommand[] = []
   let index = 0
   let activeCommand: string | undefined
   let currentX = 0
@@ -104,6 +121,9 @@ export function parseNormalizedSvgPath(source: string): NormalizedSvgPath {
 
   const emit = (command: NormalizedSvgPathCommand): void => {
     if (commands.length >= MAX_COMMANDS) throw pathError(`path emits more than ${MAX_COMMANDS} commands`)
+    for (const value of Object.values(command)) {
+      if (typeof value === 'number') assertSafeNumber(value, `${command.kind} coordinate`)
+    }
     commands.push(command)
   }
 
@@ -213,7 +233,7 @@ export function parseNormalizedSvgPath(source: string): NormalizedSvgPath {
 }
 
 function numberText(value: number): string {
-  if (!Number.isFinite(value)) throw pathError('commands must contain finite numbers')
+  assertSafeNumber(value, 'command number')
   return Object.is(value, -0) ? '0' : String(value)
 }
 
@@ -248,8 +268,9 @@ function vectorAngle(ux: number, uy: number, vx: number, vy: number): number {
   return Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy)
 }
 
-function arcCenter(start: Point, command: SvgArcTo): ArcCenter | null {
-  if (start.x === command.x && start.y === command.y) return null
+function arcCenter(start: Point, command: SvgArcTo): ArcCenter {
+  assertSafePoint(start, 'arc start')
+  if (start.x === command.x && start.y === command.y) throw pathError('arc endpoints must differ')
   const phi = (command.rotation % 360) * Math.PI / 180
   const cosine = Math.cos(phi)
   const sine = Math.sin(phi)
@@ -280,21 +301,22 @@ function arcCenter(start: Point, command: SvgArcTo): ArcCenter | null {
   let deltaAngle = vectorAngle(ux, uy, vx, vy)
   if (!command.sweep && deltaAngle > 0) deltaAngle -= Math.PI * 2
   if (command.sweep && deltaAngle < 0) deltaAngle += Math.PI * 2
-  return { cx, cy, rx, ry, phi, startAngle, deltaAngle }
+  const result = { cx, cy, rx, ry, phi, startAngle, deltaAngle }
+  for (const [label, value] of Object.entries(result)) assertSafeNumber(value, `arc ${label}`, MAX_SAFE_DERIVED_MAGNITUDE)
+  return result
 }
 
 function pointOnArc(arc: ArcCenter, angle: number): Point {
   const cosine = Math.cos(arc.phi)
   const sine = Math.sin(arc.phi)
-  return {
+  return assertSafePoint({
     x: arc.cx + arc.rx * cosine * Math.cos(angle) - arc.ry * sine * Math.sin(angle),
     y: arc.cy + arc.rx * sine * Math.cos(angle) + arc.ry * cosine * Math.sin(angle),
-  }
+  }, 'arc point')
 }
 
 function arcCubics(start: Point, command: SvgArcTo): SvgCubicTo[] {
   const arc = arcCenter(start, command)
-  if (!arc) return []
   const segmentCount = Math.max(1, Math.ceil(Math.abs(arc.deltaAngle) / (Math.PI / 2)))
   const segmentAngle = arc.deltaAngle / segmentCount
   const commands: SvgCubicTo[] = []
@@ -312,7 +334,7 @@ function arcCubics(start: Point, command: SvgArcTo): SvgCubicTo[] {
     })
     const derivative1 = derivative(angle1)
     const derivative2 = derivative(angle2)
-    commands.push({
+    const cubic: SvgCubicTo = {
       kind: 'cubicTo',
       cp1x: point1.x + alpha * derivative1.x,
       cp1y: point1.y + alpha * derivative1.y,
@@ -320,7 +342,11 @@ function arcCubics(start: Point, command: SvgArcTo): SvgCubicTo[] {
       cp2y: point2.y - alpha * derivative2.y,
       x: segment === segmentCount - 1 ? command.x : point2.x,
       y: segment === segmentCount - 1 ? command.y : point2.y,
-    })
+    }
+    for (const value of Object.values(cubic)) {
+      if (typeof value === 'number') assertSafeNumber(value, 'arc cubic coordinate', MAX_SAFE_DERIVED_MAGNITUDE)
+    }
+    commands.push(cubic)
   }
   return commands
 }
@@ -329,6 +355,7 @@ function validateViewBox(viewBox: readonly number[] | undefined): asserts viewBo
   if (!viewBox || viewBox.length !== 4 || !viewBox.every(Number.isFinite) || !(viewBox[2] > 0) || !(viewBox[3] > 0)) {
     throw pathError('viewBox must contain four finite values with positive width and height')
   }
+  viewBox.forEach((value) => assertSafeNumber(value, 'viewBox value'))
 }
 
 /** Replay one parsed command list into the centered local layer box. */
@@ -341,11 +368,14 @@ export function traceNormalizedSvgPath(
 ): void {
   validateViewBox(viewBox)
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) throw pathError('layer dimensions must be finite and positive')
+  assertSafeNumber(width, 'layer width')
+  assertSafeNumber(height, 'layer height')
   const [minimumX, minimumY, viewBoxWidth, viewBoxHeight] = viewBox
-  const map = (point: Point): Point => ({
+  const map = (point: Point): Point => assertSafePoint({
     x: (point.x - minimumX) / viewBoxWidth * width - width / 2,
     y: (point.y - minimumY) / viewBoxHeight * height - height / 2,
-  })
+  }, 'mapped coordinate')
+  const operations: Array<SvgMoveTo | SvgLineTo | SvgCubicTo | SvgClose> = []
   let current: Point = { x: 0, y: 0 }
   let subpath: Point = current
   for (const command of commands) {
@@ -354,13 +384,13 @@ export function traceNormalizedSvgPath(
         current = { x: command.x, y: command.y }
         subpath = current
         const point = map(current)
-        context.moveTo(point.x, point.y)
+        operations.push({ kind: 'moveTo', x: point.x, y: point.y })
         break
       }
       case 'lineTo': {
         current = { x: command.x, y: command.y }
         const point = map(current)
-        context.lineTo(point.x, point.y)
+        operations.push({ kind: 'lineTo', x: point.x, y: point.y })
         break
       }
       case 'quadraticTo': {
@@ -368,7 +398,7 @@ export function traceNormalizedSvgPath(
         const cp1 = map({ x: current.x + 2 / 3 * (command.cpx - current.x), y: current.y + 2 / 3 * (command.cpy - current.y) })
         const cp2 = map({ x: end.x + 2 / 3 * (command.cpx - end.x), y: end.y + 2 / 3 * (command.cpy - end.y) })
         const mappedEnd = map(end)
-        context.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, mappedEnd.x, mappedEnd.y)
+        operations.push({ kind: 'cubicTo', cp1x: cp1.x, cp1y: cp1.y, cp2x: cp2.x, cp2y: cp2.y, x: mappedEnd.x, y: mappedEnd.y })
         current = end
         break
       }
@@ -376,7 +406,7 @@ export function traceNormalizedSvgPath(
         const cp1 = map({ x: command.cp1x, y: command.cp1y })
         const cp2 = map({ x: command.cp2x, y: command.cp2y })
         const end = map({ x: command.x, y: command.y })
-        context.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y)
+        operations.push({ kind: 'cubicTo', cp1x: cp1.x, cp1y: cp1.y, cp2x: cp2.x, cp2y: cp2.y, x: end.x, y: end.y })
         current = { x: command.x, y: command.y }
         break
       }
@@ -385,15 +415,23 @@ export function traceNormalizedSvgPath(
           const cp1 = map({ x: cubic.cp1x, y: cubic.cp1y })
           const cp2 = map({ x: cubic.cp2x, y: cubic.cp2y })
           const end = map({ x: cubic.x, y: cubic.y })
-          context.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y)
+          operations.push({ kind: 'cubicTo', cp1x: cp1.x, cp1y: cp1.y, cp2x: cp2.x, cp2y: cp2.y, x: end.x, y: end.y })
         }
         current = { x: command.x, y: command.y }
         break
       }
       case 'close':
-        context.closePath()
+        operations.push({ kind: 'close' })
         current = subpath
         break
+    }
+  }
+  for (const operation of operations) {
+    switch (operation.kind) {
+      case 'moveTo': context.moveTo(operation.x, operation.y); break
+      case 'lineTo': context.lineTo(operation.x, operation.y); break
+      case 'cubicTo': context.bezierCurveTo(operation.cp1x, operation.cp1y, operation.cp2x, operation.cp2y, operation.x, operation.y); break
+      case 'close': context.closePath(); break
     }
   }
 }
@@ -429,10 +467,12 @@ export function svgPathBounds(commands: readonly NormalizedSvgPathCommand[]): Sv
   let current: Point = { x: 0, y: 0 }
   let subpath = current
   const include = (point: Point): void => {
-    if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) throw pathError('bounds are not finite')
-    points.push(point)
+    points.push(assertSafePoint(point, 'bounds point'))
   }
   for (const command of commands) {
+    for (const value of Object.values(command)) {
+      if (typeof value === 'number') assertSafeNumber(value, `${command.kind} bounds coordinate`)
+    }
     switch (command.kind) {
       case 'moveTo':
       case 'lineTo':
@@ -482,12 +522,10 @@ export function svgPathBounds(commands: readonly NormalizedSvgPathCommand[]): Sv
       case 'arcTo': {
         const arc = arcCenter(current, command)
         include({ x: command.x, y: command.y })
-        if (arc) {
-          const xAngle = Math.atan2(-arc.ry * Math.sin(arc.phi), arc.rx * Math.cos(arc.phi))
-          const yAngle = Math.atan2(arc.ry * Math.cos(arc.phi), arc.rx * Math.sin(arc.phi))
-          for (const angle of [arc.startAngle, arc.startAngle + arc.deltaAngle, xAngle, xAngle + Math.PI, yAngle, yAngle + Math.PI]) {
-            if (angleWithinArc(angle, arc)) include(pointOnArc(arc, angle))
-          }
+        const xAngle = Math.atan2(-arc.ry * Math.sin(arc.phi), arc.rx * Math.cos(arc.phi))
+        const yAngle = Math.atan2(arc.ry * Math.cos(arc.phi), arc.rx * Math.sin(arc.phi))
+        for (const angle of [arc.startAngle, arc.startAngle + arc.deltaAngle, xAngle, xAngle + Math.PI, yAngle, yAngle + Math.PI]) {
+          if (angleWithinArc(angle, arc)) include(pointOnArc(arc, angle))
         }
         current = { x: command.x, y: command.y }
         break
@@ -505,7 +543,7 @@ export function svgPathBounds(commands: readonly NormalizedSvgPathCommand[]): Sv
   const minimumY = Math.min(...ys)
   const maximumY = Math.max(...ys)
   const bounds = { x: minimumX, y: minimumY, width: maximumX - minimumX, height: maximumY - minimumY }
-  if (!Object.values(bounds).every(Number.isFinite)) throw pathError('bounds are not finite')
+  for (const [label, value] of Object.entries(bounds)) assertSafeNumber(value, `bounds ${label}`, MAX_SAFE_DERIVED_MAGNITUDE)
   return bounds
 }
 

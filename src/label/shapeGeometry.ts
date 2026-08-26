@@ -360,9 +360,9 @@ export function shapeCommands(layer: ShapeLayer): ShapeCommand[] {
   }
 }
 
-/** Replay shared shape commands onto a Konva or Canvas-compatible path context. */
-export function traceShape(ctx: ShapeDrawingContext, layer: ShapeLayer): void {
-  for (const command of shapeCommands(layer)) {
+/** Replay an already-derived command list without rebuilding or mutating it. */
+export function traceShapeCommands(ctx: ShapeDrawingContext, commands: readonly ShapeCommand[]): void {
+  for (const command of commands) {
     switch (command.type) {
       case 'moveTo': ctx.moveTo(command.x, command.y); break
       case 'lineTo': ctx.lineTo(command.x, command.y); break
@@ -371,4 +371,9 @@ export function traceShape(ctx: ShapeDrawingContext, layer: ShapeLayer): void {
       case 'close': ctx.closePath(); break
     }
   }
+}
+
+/** Replay shared shape commands onto a Konva or Canvas-compatible path context. */
+export function traceShape(ctx: ShapeDrawingContext, layer: ShapeLayer): void {
+  traceShapeCommands(ctx, shapeCommands(layer))
 }

@@ -781,6 +781,36 @@ describe('形状预览与工艺遮罩保真', () => {
     expect(mask.fillRules).toEqual(['evenodd'])
   })
 
+  it('fills compound closed contours while keeping a mixed open subpath stroke-only', () => {
+    const layer = makeShape({
+      shape: 'path',
+      pathData: 'M0 0H1V1H0Z M.2 .2H.8V.8H.2Z M.25 .25L.75 .75',
+      pathViewBox: [0, 0, 1, 1],
+      fillRule: 'evenodd',
+      fill: '#111111',
+      stroke: '#a5663b',
+    })
+    const { preview, mask } = drawRecordedShape(layer)
+
+    expect(preview.pathCalls).toEqual(mask.pathCalls)
+    expect(preview.pathCalls.filter(([operation]) => operation === 'closePath')).toHaveLength(2)
+    expect(preview.paintCalls).toEqual(['fillStrokeShape', 'strokeShape'])
+    expect(mask.paintCalls).toContain('fill')
+    expect(mask.paintCalls).toContain('stroke')
+    expect(mask.fillRules).toEqual(['evenodd'])
+  })
+
+  it('routes mixed-path foil to both closed fills and open strokes', () => {
+    const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
+    const props = paintProps?.(makeShape({
+      shape: 'path', pathData: 'M0 0H1V1H0Z M0 .5L1 .5', pathViewBox: [0, 0, 1, 1],
+    }), foil)
+
+    expect(props?.fillPriority).toBe('linear-gradient')
+    expect(props?.fillLinearGradientColorStops.length).toBeGreaterThan(4)
+    expect(props?.strokeLinearGradientColorStops?.length).toBeGreaterThan(4)
+  })
+
   it('routes foil paint to the stroke of an open path instead of filling its gap', () => {
     const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
     const props = paintProps?.(makeShape({
