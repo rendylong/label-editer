@@ -12,6 +12,11 @@ export interface SplitPointerInput {
   containerWidth: number
 }
 
+export interface BakeCanvasSize {
+  width: number
+  height: number
+}
+
 export const INITIAL_SPLIT_PERCENT = 65
 export const MIN_SPLIT_PERCENT = 25
 export const MAX_SPLIT_PERCENT = 80
@@ -41,4 +46,15 @@ export function fitCanvasDisplayWidth(input: CanvasDisplayFitInput): number {
   const availableHeight = Math.max(1, input.containerHeight - input.padding)
   const aspect = Math.max(input.aspect, 1e-6)
   return Math.min(availableWidth, input.maxWidth, availableHeight * aspect)
+}
+
+/** Change only raster resolution; the model-derived target aspect remains authoritative. */
+export function withBakeCanvasSize<T extends { width: number; height: number; aspect: number }>(
+  canvas: T,
+  size: BakeCanvasSize,
+): T {
+  if (!Number.isInteger(size.width) || size.width <= 0 || !Number.isInteger(size.height) || size.height <= 0) {
+    throw new RangeError('Bake canvas width and height must be positive integers')
+  }
+  return { ...canvas, width: size.width, height: size.height }
 }

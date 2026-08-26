@@ -3,7 +3,7 @@
  * 所有数据模型必须 JSON 可序列化（.lbl 项目文件依赖）。
  */
 
-import type { CarrierMode, LabelSubstrate, PhysicalBounds, ProcessIntent } from '../agent/designContracts'
+import type { CarrierMode, LabelSubstrate, NormalizedBounds, PhysicalBounds, ProcessIntent } from '../agent/designContracts'
 
 export type { CarrierMode, ProcessIntent } from '../agent/designContracts'
 
@@ -26,7 +26,7 @@ export interface DesignBinding {
 
 export interface LayerDesignMetrics {
   boundsMm?: PhysicalBounds
-  normalizedBounds?: PhysicalBounds
+  normalizedBounds?: NormalizedBounds
   anchor: 'top_left' | 'top_center' | 'center' | 'baseline_left' | 'baseline_center'
   fontSizeMm?: number
   letterSpacingEm?: number

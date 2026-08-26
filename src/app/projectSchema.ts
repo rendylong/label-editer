@@ -122,6 +122,15 @@ function normalizePhysicalBounds(value: unknown, path: string): { x: number; y: 
   }
 }
 
+function normalizeUnitBounds(value: unknown, path: string): { x: number; y: number; width: number; height: number } {
+  const bounds = normalizePhysicalBounds(value, path)
+  if (bounds.x < 0 || bounds.x > 1 || bounds.y < 0 || bounds.y > 1
+    || bounds.width > 1 || bounds.height > 1) {
+    areaError(path, '位置和尺寸必须在 0..1 之间')
+  }
+  return bounds
+}
+
 function normalizeDesignMetrics(value: unknown): LayerDesignMetrics | undefined {
   if (value === undefined) return undefined
   const raw = areaRecord(value, 'designMetrics')
@@ -129,7 +138,7 @@ function normalizeDesignMetrics(value: unknown): LayerDesignMetrics | undefined 
   if (!['top_left', 'top_center', 'center', 'baseline_left', 'baseline_center'].includes(String(raw.anchor))) areaError('designMetrics.anchor', '无效')
   const result: LayerDesignMetrics = {
     ...(raw.boundsMm === undefined ? {} : { boundsMm: normalizePhysicalBounds(raw.boundsMm, 'designMetrics.boundsMm') }),
-    ...(raw.normalizedBounds === undefined ? {} : { normalizedBounds: normalizePhysicalBounds(raw.normalizedBounds, 'designMetrics.normalizedBounds') }),
+    ...(raw.normalizedBounds === undefined ? {} : { normalizedBounds: normalizeUnitBounds(raw.normalizedBounds, 'designMetrics.normalizedBounds') }),
     anchor: raw.anchor as LayerDesignMetrics['anchor'],
   }
   for (const field of ['fontSizeMm', 'letterSpacingEm', 'lineHeight', 'strokeWidthMm', 'cornerRadiusMm'] as const) {

@@ -29,6 +29,9 @@ export interface PhysicalBounds {
   height: number
 }
 
+/** PhysicalBounds shape constrained by contract validators to the normalized 0..1 domain. */
+export interface NormalizedBounds extends PhysicalBounds {}
+
 export interface FlattenedFallback {
   accepted: boolean
   nonEditableLayerIds: string[]
@@ -41,7 +44,7 @@ export interface LayoutBlueprintLayer {
   id: string
   kind: 'text' | 'image' | 'shape'
   boundsMm?: PhysicalBounds
-  normalizedBounds?: PhysicalBounds
+  normalizedBounds?: NormalizedBounds
   anchor: 'top_left' | 'top_center' | 'center' | 'baseline_left' | 'baseline_center'
   rotation: number
   opacity: number

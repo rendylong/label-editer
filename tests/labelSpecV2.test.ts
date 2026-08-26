@@ -77,7 +77,7 @@ describe('Label Spec v2', () => {
           kind: 'opaque', color: '#f8f4ea', opacity: 0.92,
           boundary: { shape: 'rounded_rectangle', radiusMm: 2 }, material: 'paper', adhesive: 'acrylic',
         },
-        placementPolicy: 'block',
+        placementPolicy: 'fit',
         blueprintAreaId: 'front-blueprint',
         designBinding: {
           blueprintRevision: 'lavira-v2', blueprintSha256: 'a'.repeat(64), reviewManifestSha256: 'b'.repeat(64),
@@ -109,7 +109,7 @@ describe('Label Spec v2', () => {
         kind: 'opaque', color: '#f8f4ea', opacity: 0.92,
         boundary: { shape: 'rounded_rectangle', radiusMm: 2 }, material: 'paper', adhesive: 'acrylic',
       },
-      placementPolicy: 'block', blueprintAreaId: 'front-blueprint',
+      placementPolicy: 'fit', blueprintAreaId: 'front-blueprint',
       designBinding: {
         blueprintRevision: 'lavira-v2', blueprintSha256: 'a'.repeat(64), reviewManifestSha256: 'b'.repeat(64),
         approvedCrop: { x: 1, y: 2, width: 40, height: 64 },
@@ -273,6 +273,19 @@ describe('Label Spec v2', () => {
     expect(result.revision).not.toBe(result.previousRevision)
     expect(result.value.areas[0]).toMatchObject({ carrier: 'applied_label', blueprintAreaId: 'front-blueprint' })
     expect(result.value.areas[0].layers[0].designMetrics.fontSizeMm).toBe(4.2)
+  })
+
+  it('rejects normalized design bounds outside the normalized 0..1 domain', () => {
+    const input = structuredClone(existingPerfumeFixture) as unknown as {
+      areas: Array<{ layers: Array<Record<string, unknown>> }>
+    }
+    input.areas[0].layers[0].designMetrics = {
+      normalizedBounds: { x: -0.1, y: 0.1, width: 1.1, height: 0.8 },
+      anchor: 'center',
+    }
+
+    expect(validateLabelSpec(input).ok).toBe(false)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(input)).toBe(false)
   })
 
   it('accepts deterministic front and back areas', () => {

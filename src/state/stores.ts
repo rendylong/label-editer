@@ -7,6 +7,8 @@ import { create } from 'zustand'
 import type { GlbAnalysis, LabelAreaConfig, LabelLayer, PartNode, RemapParams, CanvasSpec, CraftEffect, AreaSnapshot, LabelAreaRange } from '../label/types'
 import { computeRemap, deriveCanvasSpec, deriveSurfaceCanvasSpec, type MeshAccessors, type RemapOutput } from '../glb/uvRemap'
 import { normalizeAreaRange } from '../glb/areaMath'
+import { withBakeCanvasSize } from '../app/canvasLayout'
+import { assertPhysicalAreaPlacement, resolvePhysicalLayer } from '../app/physicalLayout'
 
 export interface BakeResult {
   color: HTMLCanvasElement
@@ -99,6 +101,8 @@ interface LabelState {
   toggleLayerSelection: (id: string) => void
   clearLayerSelection: () => void
   setBake: (areaId: string, bake: BakeResult | null) => void
+  /** Change raster bake resolution without mutating approved physical source metadata. */
+  setAreaBakeSize: (areaId: string, width: number, height: number) => void
   /** 拖拽合并：显式推入撤销快照（prev 为拖拽开始前状态） */
   pushAreaHistory: (areaId: string, prev: AreaSnapshot, next: AreaSnapshot) => void
   setAreaData: (remapOutput: RemapOutput | null, meshAccessors: MeshAccessors | null) => void
@@ -269,6 +273,22 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       else bakeMap[areaId] = bake
       return { bakeMap }
     }),
+  setAreaBakeSize: (areaId, width, height) =>
+    set((s) => {
+      const areas = s.areas.map((area) => {
+        if (area.id !== areaId) return area
+        const canvas = withBakeCanvasSize(area.canvas, { width, height })
+        const next = { ...area, canvas }
+        assertPhysicalAreaPlacement(next)
+        return { ...next, layers: next.layers.map((layer) => resolvePhysicalLayer(next, layer)) }
+      })
+      const updated = areas.find((area) => area.id === areaId)
+      return {
+        areas,
+        activeArea: s.activeAreaId === areaId && updated ? updated : s.activeArea,
+        bakeMap: updated ? omitKey(s.bakeMap, areaId) : s.bakeMap,
+      }
+    }),
   pushAreaHistory: (areaId, prev, next) =>
     set((s) => {
       const areas = s.areas.map((a) => (a.id === areaId ? { ...a, undoStack: [...a.undoStack.slice(-199), prev], redoStack: [] } : a))
@@ -297,7 +317,12 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       const fallbackCanvas = deriveCanvasSpec(area.remap.radius, cylinderHeight(mesh, area.remap), area.remap.wrap, range.uWidth, range.vHeight)
       canvas = deriveSurfaceCanvasSpec(remapOutput, fallbackCanvas.aspect)
     }
-    const areas = s.areas.map((a) => (a.id === areaId ? { ...a, range, canvas } : a))
+    const areas = s.areas.map((a) => {
+      if (a.id !== areaId) return a
+      const next = { ...a, range, canvas }
+      assertPhysicalAreaPlacement(next)
+      return { ...next, layers: next.layers.map((layer) => resolvePhysicalLayer(next, layer)) }
+    })
     const updated = areas.find((a) => a.id === areaId)!
     set({
       areas,

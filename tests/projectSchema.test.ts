@@ -142,6 +142,18 @@ describe('label project v3', () => {
     })
   })
 
+  it('rejects normalized design bounds outside the normalized 0..1 domain', () => {
+    const project = physicalProjectFixture()
+    const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>
+    layers[1].designMetrics = {
+      normalizedBounds: { x: 0.1, y: 0.1, width: 1.2, height: 0.8 },
+      anchor: 'center',
+    }
+
+    expect(() => parseLabelProject(project)).toThrow(/designMetrics\.normalizedBounds/)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(project)).toBe(false)
+  })
+
   it('normalizes an old enabled paper area to applied_label without changing the paper appearance', () => {
     const paper = { enabled: true, color: '#ede7dc', opacity: 0.84 }
     const project = parseLabelProject({

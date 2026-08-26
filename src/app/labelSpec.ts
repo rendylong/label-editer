@@ -15,6 +15,7 @@ import type {
   TargetAspectPolicy,
 } from '../label/types'
 import { validateLabelSpec } from '../agent/labelSpecSchema'
+import { assertPhysicalAreaPlacement, resolvePhysicalLayer } from './physicalLayout'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -173,7 +174,10 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
     // Validation above rejects a forbidden carrier with source substrate. Only
     // remove stale substrate inherited from the editable base during transition.
     if (substrateForbidden && input.substrate === undefined) delete next.substrate
-    if (Array.isArray(input.layers)) next.layers = input.layers.map((layer, layerIndex) => mapLayer(layer, next, layerIndex))
+    assertPhysicalAreaPlacement(next)
+    if (Array.isArray(input.layers)) {
+      next.layers = input.layers.map((layer, layerIndex) => resolvePhysicalLayer(next, mapLayer(layer, next, layerIndex)))
+    }
     else warnings.push(`区域「${next.name}」没有 layers，已创建空白区域`)
     return next
   })

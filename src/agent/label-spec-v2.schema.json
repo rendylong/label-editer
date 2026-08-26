@@ -112,6 +112,17 @@
         "height": { "type": "number", "exclusiveMinimum": 0 }
       }
     },
+    "normalizedBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
     "artboard": {
       "type": "object",
       "additionalProperties": false,
@@ -161,7 +172,7 @@
       "required": ["anchor"],
       "properties": {
         "boundsMm": { "$ref": "#/$defs/physicalBounds" },
-        "normalizedBounds": { "$ref": "#/$defs/physicalBounds" },
+        "normalizedBounds": { "$ref": "#/$defs/normalizedBounds" },
         "anchor": { "enum": ["top_left", "top_center", "center", "baseline_left", "baseline_center"] },
         "fontSizeMm": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000 },
         "letterSpacingEm": { "type": "number" },
