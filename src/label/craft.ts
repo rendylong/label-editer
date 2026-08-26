@@ -166,26 +166,60 @@ interface ShapeCommandPartitions {
   open: ShapeCommand[]
 }
 
+interface ShapeCommandPoint { x: number; y: number }
+
+function shapeCommandEndpoint(command: Exclude<ShapeCommand, { type: 'close' }>): ShapeCommandPoint {
+  if (command.type === 'arc') {
+    return {
+      x: command.x + command.radius * Math.cos(command.endAngle),
+      y: command.y + command.radius * Math.sin(command.endAngle),
+    }
+  }
+  return { x: command.x, y: command.y }
+}
+
 /** Keep closed contours together for fill-rule evaluation and open contours isolated from fill. */
 function partitionShapeCommands(commands: readonly ShapeCommand[]): ShapeCommandPartitions {
-  const subpaths: ShapeCommand[][] = []
+  const partitions: ShapeCommandPartitions = { closed: [], open: [] }
   let current: ShapeCommand[] = []
+  let currentPoint: ShapeCommandPoint | undefined
+  let subpathStart: ShapeCommandPoint | undefined
+
+  const hasDrawableCommand = (): boolean => current.some((command) => command.type !== 'moveTo' && command.type !== 'close')
+  const flushOpen = (): void => {
+    if (hasDrawableCommand()) partitions.open.push(...current)
+    current = []
+  }
+
   for (const command of commands) {
-    if (command.type === 'moveTo' && current.length > 0) {
-      subpaths.push(current)
-      current = []
+    if (command.type === 'moveTo') {
+      flushOpen()
+      current.push(command)
+      currentPoint = shapeCommandEndpoint(command)
+      subpathStart = currentPoint
+      continue
+    }
+    if (command.type === 'close') {
+      if (current.length > 0) {
+        current.push(command)
+        if (hasDrawableCommand()) partitions.closed.push(...current)
+        current = []
+      }
+      currentPoint = subpathStart
+      continue
+    }
+
+    // SVG keeps the current subpath start after Z. A following drawable command
+    // therefore begins an open continuation there even without another M.
+    if (current.length === 0) {
+      if (!currentPoint) throw new Error('Shape drawing command requires an initial moveTo')
+      current.push({ type: 'moveTo', x: currentPoint.x, y: currentPoint.y })
+      subpathStart = currentPoint
     }
     current.push(command)
+    currentPoint = shapeCommandEndpoint(command)
   }
-  if (current.length > 0) subpaths.push(current)
-
-  const partitions: ShapeCommandPartitions = { closed: [], open: [] }
-  for (const subpath of subpaths) {
-    const drawable = subpath.some((command) => command.type !== 'moveTo' && command.type !== 'close')
-    if (!drawable) continue
-    const target = subpath.at(-1)?.type === 'close' ? partitions.closed : partitions.open
-    target.push(...subpath)
-  }
+  flushOpen()
   return partitions
 }
 

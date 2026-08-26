@@ -811,6 +811,32 @@ describe('形状预览与工艺遮罩保真', () => {
     expect(props?.strokeLinearGradientColorStops?.length).toBeGreaterThan(4)
   })
 
+  it.each([
+    ['line', 'M0 0H1V1H0Z L.5 .5', 'lineTo'],
+    ['cubic', 'M0 0H1V1H0Z C.1 .1 .4 .4 .5 .5', 'bezierCurveTo'],
+    ['quadratic', 'M0 0H1V1H0Z Q.25 .75 .5 .5', 'bezierCurveTo'],
+    ['arc', 'M0 0H1V1H0Z A.2 .2 0 0 1 .5 .5', 'bezierCurveTo'],
+  ] as const)('keeps a closed fill and starts a stroke-only %s segment from the post-close current point', (_label, pathData, finalOperation) => {
+    const layer = makeShape({
+      shape: 'path', pathData, pathViewBox: [0, 0, 1, 1], fillRule: 'evenodd',
+      fill: '#111111', stroke: '#a5663b', strokeWidth: 3, opacity: 0.55,
+    })
+    const { preview, mask } = drawRecordedShape(layer)
+
+    expect(preview.pathCalls).toEqual(mask.pathCalls)
+    expect(preview.paintCalls).toEqual(['fillStrokeShape', 'strokeShape'])
+    expect(mask.paintCalls.filter((operation) => operation === 'fill')).toHaveLength(1)
+    expect(mask.paintCalls.filter((operation) => operation === 'stroke')).toHaveLength(1)
+    expect(mask.fillRules).toEqual(['evenodd'])
+    expect(mask.globalAlpha).toBeCloseTo(0.55)
+    expect(preview.pathCalls.filter(([operation]) => operation === 'closePath')).toHaveLength(1)
+    expect(preview.pathCalls.filter(([operation]) => operation === 'moveTo')).toEqual([
+      ['moveTo', -60, -40],
+      ['moveTo', -60, -40],
+    ])
+    expect(preview.pathCalls.at(-1)?.[0]).toBe(finalOperation)
+  })
+
   it('routes foil paint to the stroke of an open path instead of filling its gap', () => {
     const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
     const props = paintProps?.(makeShape({
