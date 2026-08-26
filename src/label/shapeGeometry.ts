@@ -1,4 +1,5 @@
 import type { ShapeGeometry, ShapeLayer } from './types'
+import { parseNormalizedSvgPath, traceNormalizedSvgPath } from './svgPath'
 
 export interface MoveTo {
   type: 'moveTo'
@@ -313,9 +314,17 @@ export function shapeCommands(layer: ShapeLayer): ShapeCommand[] {
   const { width, height } = normalized
   const geometry = normalized.geometry as Required<ShapeGeometry>
   switch (normalized.shape) {
-    // Task 5 adds normalized SVG tracing. Until then, retain path metadata
-    // without inventing native fallback geometry.
-    case 'path': return []
+    case 'path': {
+      if (!normalized.pathData || !normalized.pathViewBox) throw new Error('Path shapes require pathData and pathViewBox')
+      const commands: ShapeCommand[] = []
+      traceNormalizedSvgPath({
+        moveTo: (x, y) => commands.push({ type: 'moveTo', x, y }),
+        lineTo: (x, y) => commands.push({ type: 'lineTo', x, y }),
+        bezierCurveTo: (cp1x, cp1y, cp2x, cp2y, x, y) => commands.push({ type: 'bezierTo', cp1x, cp1y, cp2x, cp2y, x, y }),
+        closePath: () => commands.push({ type: 'close' }),
+      }, parseNormalizedSvgPath(normalized.pathData), normalized.pathViewBox, width, height)
+      return commands
+    }
     case 'rectangle': return rectangleCommands(width, height, normalized.cornerRadius)
     case 'ellipse': return ellipseCommands(width, height)
     case 'triangle': return [

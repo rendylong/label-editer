@@ -178,6 +178,39 @@ describe('shape geometry', () => {
     ])
   })
 
+  it('replays normalized path geometry without mutating its editable source metadata', () => {
+    const source = makeShape({
+      shape: 'path',
+      width: 100,
+      height: 50,
+      pathData: 'M 0.08 0.92 L 0.08 0.08 L 0.92 0.08 L 0.92 0.92',
+      pathViewBox: [0, 0, 1, 1],
+      fillRule: 'evenodd',
+    })
+    const before = structuredClone(source)
+
+    expect(recordShape(source)).toEqual([
+      ['moveTo', -42, 21],
+      ['lineTo', -42, -21],
+      ['lineTo', 42, -21],
+      ['lineTo', 42, 21],
+    ])
+    expect(source).toEqual(before)
+  })
+
+  it('replays the same normalized path at every bake size without persisting derived points', () => {
+    const source = makeShape({
+      shape: 'path', pathData: 'M0 0L1 1', pathViewBox: [0, 0, 1, 1], width: 1024, height: 512,
+    })
+    const small = recordShape(source)
+    const large = recordShape({ ...source, width: 4096, height: 2048 })
+
+    expect(small).toEqual([['moveTo', -512, -256], ['lineTo', 512, 256]])
+    expect(large).toEqual([['moveTo', -2048, -1024], ['lineTo', 2048, 1024]])
+    expect(source.pathData).toBe('M0 0L1 1')
+    expect(source.pathViewBox).toEqual([0, 0, 1, 1])
+  })
+
   it('replays ellipse bezier commands with literal control points', () => {
     expect(recordShape(makeShape({ shape: 'ellipse', width: 100, height: 60 }))).toEqual([
       ['moveTo', 50, 0],

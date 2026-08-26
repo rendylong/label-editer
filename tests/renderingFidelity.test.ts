@@ -572,9 +572,11 @@ type PathCall = [operation: string, ...values: unknown[]]
 class RecordingShapeContext {
   readonly pathCalls: PathCall[] = []
   readonly paintCalls: string[] = []
+  readonly fillRules: CanvasFillRule[] = []
   fillStyle = ''
   strokeStyle = ''
   lineWidth = 0
+  globalAlpha = 1
 
   save(): void {}
   restore(): void {}
@@ -587,7 +589,10 @@ class RecordingShapeContext {
   bezierCurveTo(...values: [number, number, number, number, number, number]): void { this.pathCalls.push(['bezierCurveTo', ...values]) }
   arc(...values: [number, number, number, number, number, boolean?]): void { this.pathCalls.push(['arc', ...values]) }
   closePath(): void { this.pathCalls.push(['closePath']) }
-  fill(): void { this.paintCalls.push('fill') }
+  fill(rule?: CanvasFillRule): void {
+    this.paintCalls.push('fill')
+    if (rule) this.fillRules.push(rule)
+  }
   stroke(): void { this.paintCalls.push('stroke') }
   fillStrokeShape(): void { this.paintCalls.push('fillStrokeShape') }
   strokeShape(): void { this.paintCalls.push('strokeShape') }
@@ -736,6 +741,55 @@ describe('形状预览与工艺遮罩保真', () => {
     expect(arcs.every(([, , , , start, end]) => start === 0 && end === Math.PI * 2)).toBe(true)
     expect(mask.pathCalls.filter(([operation]) => operation === 'closePath')).toHaveLength(6)
     expect(mask.paintCalls).toContain('fill')
+  })
+
+  it('keeps an open path frame stroke-only and identical in preview and craft masks', () => {
+    const layer = makeShape({
+      shape: 'path',
+      pathData: 'M 0.08 0.92 L 0.08 0.08 L 0.92 0.08 L 0.92 0.92',
+      pathViewBox: [0, 0, 1, 1],
+      fill: 'transparent',
+      stroke: '#a5663b',
+      strokeWidth: 3,
+      opacity: 0.4,
+    })
+    const { preview, mask } = drawRecordedShape(layer)
+
+    expect(preview.pathCalls).toEqual(mask.pathCalls)
+    expect(preview.pathCalls.some(([operation]) => operation === 'closePath')).toBe(false)
+    expect(preview.paintCalls).toEqual(['strokeShape'])
+    expect(mask.paintCalls).toContain('stroke')
+    expect(mask.paintCalls).not.toContain('fill')
+    expect(mask.lineWidth).toBe(3)
+    expect(mask.globalAlpha).toBeCloseTo(0.4)
+  })
+
+  it('retains closed compound subpaths and their evenodd mask fill rule', () => {
+    const layer = makeShape({
+      shape: 'path',
+      pathData: 'M0 0H100V100H0Z M25 25V75H75V25Z',
+      pathViewBox: [0, 0, 100, 100],
+      fillRule: 'evenodd',
+    })
+    const { preview, mask } = drawRecordedShape(layer)
+
+    expect(preview.pathCalls).toEqual(mask.pathCalls)
+    expect(mask.pathCalls.filter(([operation]) => operation === 'moveTo')).toHaveLength(2)
+    expect(mask.pathCalls.filter(([operation]) => operation === 'closePath')).toHaveLength(2)
+    expect(preview.paintCalls).toContain('fillStrokeShape')
+    expect(mask.paintCalls).toContain('fill')
+    expect(mask.fillRules).toEqual(['evenodd'])
+  })
+
+  it('routes foil paint to the stroke of an open path instead of filling its gap', () => {
+    const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
+    const props = paintProps?.(makeShape({
+      shape: 'path', pathData: 'M0 1V0H1V1', pathViewBox: [0, 0, 1, 1], fill: 'transparent',
+    }), foil)
+
+    expect(props?.fillPriority).toBe('color')
+    expect(props?.strokeLinearGradientColorStops?.length).toBeGreaterThan(4)
+    expect(props?.fillLinearGradientStartPoint).toBeUndefined()
   })
 })
 

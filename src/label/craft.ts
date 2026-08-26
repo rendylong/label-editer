@@ -6,6 +6,7 @@
 import type { CraftEffect, CraftType, ImageLayer, LabelLayer, ShapeLayer, TextLayer } from './types'
 import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, traceShape, type ShapeDrawingContext } from './shapeGeometry'
+import { hasOpenSvgSubpath, parseNormalizedSvgPath } from './svgPath'
 
 export type CraftScope = 'layer' | 'global'
 export type MaskChannel = 'metalness' | 'roughness' | 'bump'
@@ -163,8 +164,11 @@ export function rectangleRenderProps(layer: Pick<ShapeLayer, 'width' | 'height' 
 
 const OPEN_SHAPE_KINDS = new Set<ShapeLayer['shape']>(['line', 'wave', 'bracket'])
 
-export function shapeUsesOpenStroke(layer: Pick<ShapeLayer, 'shape'>): boolean {
-  return OPEN_SHAPE_KINDS.has(layer.shape)
+export function shapeUsesOpenStroke(layer: Pick<ShapeLayer, 'shape' | 'pathData'>): boolean {
+  if (OPEN_SHAPE_KINDS.has(layer.shape)) return true
+  if (layer.shape !== 'path') return false
+  if (!layer.pathData) throw new Error('Path shapes require pathData')
+  return hasOpenSvgSubpath(parseNormalizedSvgPath(layer.pathData))
 }
 
 export interface GenericShapePaintProps {
@@ -267,6 +271,7 @@ export function drawShapeMask(
   ctx.translate(transform.origin.x, transform.origin.y)
   ctx.rotate((transform.rotation * Math.PI) / 180)
   ctx.translate(transform.box.x + normalized.width / 2, transform.box.y + normalized.height / 2)
+  ctx.globalAlpha *= normalized.opacity
   ctx.beginPath()
   traceShape(ctx, normalized)
   ctx.fillStyle = `rgb(${gray},${gray},${gray})`
@@ -274,7 +279,7 @@ export function drawShapeMask(
   ctx.lineWidth = Math.max(1, normalized.strokeWidth)
   ctx.setLineDash(normalized.geometry?.dash ?? [])
   if (mode === 'stroke' || shapeUsesOpenStroke(normalized)) ctx.stroke()
-  else ctx.fill()
+  else ctx.fill(normalized.fillRule ?? 'nonzero')
   ctx.restore()
 }
 

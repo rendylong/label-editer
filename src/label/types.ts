@@ -159,7 +159,9 @@ export interface ShapeLayer extends LayerPhysicalMetadata {
   shape: ShapeKind
   /** Optional for source compatibility with existing rectangle layers. */
   geometry?: ShapeGeometry
+  /** Editable source path; rendering derives pixels without rewriting it. */
   pathData?: string
+  /** Source coordinate system as [minX, minY, positive width, positive height]. */
   pathViewBox?: [number, number, number, number]
   fillRule?: 'nonzero' | 'evenodd'
   width: number
