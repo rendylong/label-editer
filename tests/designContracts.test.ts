@@ -9,8 +9,10 @@ import {
   validateLayoutBlueprint,
   validateReviewManifest,
   type CarrierMode,
+  type DesignReviewManifestV1,
   type EditorHandoffV2,
   type LayoutBlueprintV1,
+  type ReviewManifestV1,
 } from '../src/agent/designContracts'
 
 const SHA_A = 'a'.repeat(64)
@@ -86,6 +88,43 @@ function approvedHandoff(): EditorHandoffV2 {
     production_constraints: {},
     assumptions: [],
     blockers: [],
+  }
+}
+
+function designReviewManifest(): DesignReviewManifestV1 {
+  return {
+    version: 1,
+    createdAt: '2026-08-26T12:30:00.000Z',
+    blueprint: { revision: 'rev-001', sha256: SHA_A },
+    html: { sha256: SHA_B },
+    references: [],
+    areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
+    artifacts: [{
+      id: 'mockup-front', path: 'mockup-front.png', sha256: SHA_A,
+      mimeType: 'image/png', width: 1600, height: 1200,
+      viewKind: 'mockup-front', areaId: 'front', carrier: 'direct_surface_print',
+    }],
+  }
+}
+
+function productionReviewManifest(): ReviewManifestV1 {
+  return {
+    version: 1,
+    createdAt: '2026-08-26T13:00:00.000Z',
+    input: { kind: 'label-spec-v2', revision: 'sha256:current', sha256: SHA_A },
+    blueprint: { revision: 'rev-001', sha256: SHA_B },
+    designReviewManifest: { sha256: SHA_A },
+    model: { fingerprint: 'model-fingerprint-001' },
+    areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
+    artifacts: [{
+      id: 'label-front', path: 'label-front.png', sha256: SHA_B,
+      mimeType: 'image/png', width: 1600, height: 1600,
+      viewKind: 'flat-artwork', areaId: 'front', carrier: 'direct_surface_print',
+    }, {
+      id: 'surface-front', path: 'surface-front.png', sha256: SHA_A,
+      mimeType: 'image/png', width: 1600, height: 1600,
+      viewKind: 'surface-face', areaId: 'front', carrier: 'direct_surface_print',
+    }],
   }
 }
 
@@ -166,12 +205,38 @@ describe('shared design contracts', () => {
     expect(() => validateLayoutBlueprint(blueprint)).toThrow(/flattened.*accepted/i)
     blueprint.areas[0].layers[0].flattenedFallback = {
       accepted: true,
-      nonEditableLayerIds: ['front-glow', 'front-title'],
+      nonEditableLayerIds: ['front-title'],
       nonEditableTextIds: ['front-title'],
       lostSeparations: ['spot-varnish'],
       vectorAlternative: 'Supply outlined SVG paths for the glow contour.',
     }
     expect(validateLayoutBlueprint(blueprint).version).toBe(1)
+  })
+
+  it('requires flattened disclosures to reference existing layers and real text layers', () => {
+    const blueprint = carrierBlueprint('direct_surface_print')
+    blueprint.areas[0].layers.push({
+      id: 'front-frame', kind: 'shape',
+      boundsMm: { x: 2, y: 2, width: 36, height: 56 },
+      anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 1,
+      processes: [{ process: 'hot_stamp_foil' }],
+      shape: 'rectangle', fill: 'transparent', stroke: '#a5663b', strokeWidthMm: 0.2,
+    })
+    blueprint.areas[0].layers[0].flattenedFallback = {
+      accepted: true,
+      nonEditableLayerIds: ['missing-layer'],
+      nonEditableTextIds: ['front-title'],
+      lostSeparations: ['spot-varnish'],
+      vectorAlternative: 'Supply outlined SVG paths.',
+    }
+    expect(() => validateLayoutBlueprint(blueprint)).toThrow(/nonEditableLayerIds.*missing-layer/i)
+
+    blueprint.areas[0].layers[0].flattenedFallback.nonEditableLayerIds = ['front-title']
+    blueprint.areas[0].layers[0].flattenedFallback.nonEditableTextIds = ['missing-text']
+    expect(() => validateLayoutBlueprint(blueprint)).toThrow(/nonEditableTextIds.*missing-text/i)
+
+    blueprint.areas[0].layers[0].flattenedFallback.nonEditableTextIds = ['front-frame']
+    expect(() => validateLayoutBlueprint(blueprint)).toThrow(/nonEditableTextIds.*text layer/i)
   })
 
   it('caps hostile copy, vector, font, and asset inputs', () => {
@@ -217,36 +282,59 @@ describe('shared design contracts', () => {
     expect(() => validateApprovalRecord({ ...approval, extra: true })).toThrow(/schema/i)
   })
 
-  it('strictly validates design and production review manifests', () => {
-    const designManifest = {
+  it('rejects impossible calendar dates in every timestamped contract', () => {
+    const approval = {
       version: 1 as const,
-      createdAt: '2026-08-26T12:30:00.000Z',
-      blueprint: { revision: 'rev-001', sha256: SHA_A },
-      html: { sha256: SHA_B },
-      references: [],
-      areas: [{ id: 'front', side: 'front' as const, carrier: 'direct_surface_print' as const }],
-      artifacts: [{
-        id: 'mockup-front', path: 'mockup-front.png', sha256: SHA_A,
-        mimeType: 'image/png', width: 1600, height: 1200,
-        viewKind: 'mockup-front' as const, areaId: 'front', carrier: 'direct_surface_print' as const,
-      }],
+      gate: 'design' as const,
+      mode: 'explicit_approval' as const,
+      scope: 'current_task' as const,
+      design_revision: 'rev-001',
+      blueprint_sha256: SHA_A,
+      review_manifest_sha256: SHA_B,
+      recorded_at: '2026-02-31T12:00:00Z',
     }
+    expect(() => validateApprovalRecord(approval)).toThrow(/schema/i)
+
+    const designManifest = designReviewManifest()
+    designManifest.createdAt = '2026-02-31T12:00:00Z'
+    expect(() => validateDesignReviewManifest(designManifest)).toThrow(/schema/i)
+
+    const reviewManifest = productionReviewManifest()
+    reviewManifest.createdAt = '2026-02-31T12:00:00Z'
+    expect(() => validateReviewManifest(reviewManifest)).toThrow(/schema/i)
+  })
+
+  it('requires area identity and complete per-area design-review evidence', () => {
+    const unbound = designReviewManifest()
+    delete unbound.artifacts[0].areaId
+    delete unbound.artifacts[0].carrier
+    expect(() => validateDesignReviewManifest(unbound)).toThrow(/areaId.*carrier/i)
+
+    const incomplete = designReviewManifest()
+    incomplete.areas.push({ id: 'back', side: 'back', carrier: 'applied_label' })
+    expect(() => validateDesignReviewManifest(incomplete)).toThrow(/back.*design-review evidence/i)
+  })
+
+  it('requires area identity and both flat and surface evidence for every production area', () => {
+    const unbound = productionReviewManifest()
+    delete unbound.artifacts[0].areaId
+    delete unbound.artifacts[0].carrier
+    expect(() => validateReviewManifest(unbound)).toThrow(/areaId.*carrier/i)
+
+    const incomplete = productionReviewManifest()
+    incomplete.artifacts = incomplete.artifacts.filter((artifact) => artifact.viewKind !== 'surface-face')
+    expect(() => validateReviewManifest(incomplete)).toThrow(/front.*surface-face/i)
+
+    const missingArea = productionReviewManifest()
+    missingArea.areas.push({ id: 'back', side: 'back', carrier: 'applied_label' })
+    expect(() => validateReviewManifest(missingArea)).toThrow(/back.*flat-artwork.*surface-face/i)
+  })
+
+  it('strictly validates design and production review manifests', () => {
+    const designManifest = designReviewManifest()
     expect(validateDesignReviewManifest(designManifest).version).toBe(1)
 
-    const reviewManifest = {
-      version: 1 as const,
-      createdAt: '2026-08-26T13:00:00.000Z',
-      input: { kind: 'label-spec-v2' as const, revision: 'sha256:current', sha256: SHA_A },
-      blueprint: { revision: 'rev-001', sha256: SHA_B },
-      designReviewManifest: { sha256: SHA_A },
-      model: { fingerprint: 'model-fingerprint-001' },
-      areas: [{ id: 'front', side: 'front' as const, carrier: 'direct_surface_print' as const }],
-      artifacts: [{
-        id: 'label-front', path: 'label-front.png', sha256: SHA_B,
-        mimeType: 'image/png', width: 1600, height: 1600,
-        viewKind: 'flat-artwork' as const, areaId: 'front', carrier: 'direct_surface_print' as const,
-      }],
-    }
+    const reviewManifest = productionReviewManifest()
     expect(validateReviewManifest(reviewManifest).version).toBe(1)
     reviewManifest.artifacts.push(structuredClone(reviewManifest.artifacts[0]))
     expect(() => validateReviewManifest(reviewManifest)).toThrow(/duplicate artifact id/i)

@@ -58,6 +58,16 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "path", "sha256", "mimeType", "width", "height", "viewKind"],
+      "allOf": [{
+        "if": {
+          "properties": { "viewKind": { "enum": ["mockup-front", "mockup-back", "mockup-area"] } },
+          "required": ["viewKind"]
+        },
+        "then": {
+          "required": ["areaId", "carrier"],
+          "properties": { "areaId": true, "carrier": true }
+        }
+      }],
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "path": { "$ref": "#/$defs/path" },

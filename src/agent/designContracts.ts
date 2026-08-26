@@ -270,11 +270,33 @@ const LEGACY_CARRIERS: Record<string, CarrierMode> = {
   bare_no_label: 'bare',
 }
 
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+}
+
+function isStrictIsoDateTime(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value)
+  if (!match) return false
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offsetHourText, offsetMinuteText] = match
+  const year = Number(yearText)
+  const month = Number(monthText)
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  const offsetHour = offsetHourText === undefined ? 0 : Number(offsetHourText)
+  const offsetMinute = offsetMinuteText === undefined ? 0 : Number(offsetMinuteText)
+  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return month >= 1 && month <= 12
+    && day >= 1 && day <= daysInMonth[month - 1]
+    && hour <= 23 && minute <= 59 && second <= 59
+    && offsetHour <= 23 && offsetMinute <= 59
+}
+
 const ajv = new Ajv2020({ allErrors: true, strict: true })
 ajv.addFormat('date-time', {
   type: 'string',
-  validate: (value: string) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)
-    && Number.isFinite(Date.parse(value)),
+  validate: isStrictIsoDateTime,
 })
 
 const validateBlueprintSchema = ajv.compile(layoutBlueprintV1Schema) as ValidateFunction<LayoutBlueprintV1>
@@ -300,7 +322,9 @@ function assertSchema<T>(
   label: string,
 ): asserts value is T {
   if (!validate(value)) {
-    throw new DesignContractError(code, `${label} schema validation failed`, { issues: schemaIssues(validate) })
+    const issues = schemaIssues(validate)
+    const summary = issues.map((issue) => `${issue.path} ${issue.message}`).join('; ')
+    throw new DesignContractError(code, `${label} schema validation failed: ${summary}`, { issues })
   }
 }
 
@@ -401,10 +425,12 @@ export function validateLayoutBlueprint(value: unknown): LayoutBlueprintV1 {
   assertUnique(value.assets.map((asset) => asset.id), 'asset id', 'INVALID_LAYOUT_BLUEPRINT')
   const assetIds = new Set(value.assets.map((asset) => asset.id))
   const layerIds: string[] = []
+  const layersById = new Map<string, LayoutBlueprintLayer>()
   for (const area of value.areas) {
     assertCarrierInvariants(area)
     for (const layer of area.layers) {
       layerIds.push(layer.id)
+      layersById.set(layer.id, layer)
       assertLayerShape(layer, area.id)
       if (layer.assetId && !assetIds.has(layer.assetId)) {
         throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Unknown asset id ${layer.assetId} on ${area.id}/${layer.id}`)
@@ -415,6 +441,35 @@ export function validateLayoutBlueprint(value: unknown): LayoutBlueprintV1 {
     }
   }
   assertUnique(layerIds, 'layer id', 'INVALID_LAYOUT_BLUEPRINT')
+  for (const area of value.areas) {
+    for (const layer of area.layers) {
+      const fallback = layer.flattenedFallback
+      if (!fallback) continue
+      for (const disclosedId of fallback.nonEditableLayerIds) {
+        if (!layersById.has(disclosedId)) {
+          throw new DesignContractError(
+            'INVALID_LAYOUT_BLUEPRINT',
+            `Flattened fallback nonEditableLayerIds references missing layer: ${disclosedId}`,
+          )
+        }
+      }
+      for (const disclosedId of fallback.nonEditableTextIds) {
+        const disclosedLayer = layersById.get(disclosedId)
+        if (!disclosedLayer) {
+          throw new DesignContractError(
+            'INVALID_LAYOUT_BLUEPRINT',
+            `Flattened fallback nonEditableTextIds references missing text layer: ${disclosedId}`,
+          )
+        }
+        if (disclosedLayer.kind !== 'text') {
+          throw new DesignContractError(
+            'INVALID_LAYOUT_BLUEPRINT',
+            `Flattened fallback nonEditableTextIds must reference a text layer: ${disclosedId}`,
+          )
+        }
+      }
+    }
+  }
   return structuredClone(value)
 }
 
@@ -449,19 +504,48 @@ export function validateApprovalRecord(value: unknown): ApprovalRecordV1 {
 }
 
 function assertManifestIdentity(
-  value: { areas: ManifestArea[]; artifacts: Array<{ id: string; path: string; areaId?: string; carrier?: CarrierMode }> },
+  value: {
+    areas: ManifestArea[]
+    artifacts: Array<{ id: string; path: string; viewKind: string; areaId?: string; carrier?: CarrierMode }>
+  },
   code: 'INVALID_DESIGN_REVIEW_MANIFEST' | 'INVALID_REVIEW_MANIFEST',
 ): void {
   assertUnique(value.areas.map((area) => area.id), 'area id', code)
   assertUnique(value.artifacts.map((artifact) => artifact.id), 'artifact id', code)
   assertUnique(value.artifacts.map((artifact) => artifact.path), 'artifact path', code)
   const areas = new Map(value.areas.map((area) => [area.id, area]))
+  const evidenceByArea = new Map<string, Set<string>>()
+  const areaScopedViewKinds = code === 'INVALID_DESIGN_REVIEW_MANIFEST'
+    ? new Set(['mockup-front', 'mockup-back', 'mockup-area'])
+    : new Set(['flat-artwork', 'surface-face'])
   for (const artifact of value.artifacts) {
+    if (areaScopedViewKinds.has(artifact.viewKind) && (!artifact.areaId || !artifact.carrier)) {
+      throw new DesignContractError(code, `Area-scoped artifact ${artifact.id} requires areaId and carrier`)
+    }
     if (!artifact.areaId) continue
     const area = areas.get(artifact.areaId)
     if (!area) throw new DesignContractError(code, `Artifact ${artifact.id} references unknown area id: ${artifact.areaId}`)
     if (artifact.carrier && artifact.carrier !== area.carrier) {
       throw new DesignContractError(code, `Artifact ${artifact.id} carrier does not match area ${artifact.areaId}`)
+    }
+    if (areaScopedViewKinds.has(artifact.viewKind)) {
+      const evidence = evidenceByArea.get(artifact.areaId) ?? new Set<string>()
+      evidence.add(artifact.viewKind)
+      evidenceByArea.set(artifact.areaId, evidence)
+    }
+  }
+  for (const area of value.areas) {
+    if (area.carrier === 'bare') continue
+    const evidence = evidenceByArea.get(area.id) ?? new Set<string>()
+    if (code === 'INVALID_DESIGN_REVIEW_MANIFEST') {
+      if (evidence.size === 0) {
+        throw new DesignContractError(code, `Area ${area.id} is missing required design-review evidence`)
+      }
+      continue
+    }
+    const missing = ['flat-artwork', 'surface-face'].filter((viewKind) => !evidence.has(viewKind))
+    if (missing.length > 0) {
+      throw new DesignContractError(code, `Area ${area.id} is missing required evidence: ${missing.join(', ')}`)
     }
   }
 }
