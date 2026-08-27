@@ -3,7 +3,7 @@
  */
 
 import { FONT_STACKS, type UploadedFontRecord } from './types'
-import { fontCssFor, uploadFamily, uploadedFontId } from './fontRuntime'
+import { fontCssFor, uploadFamily, uploadedFontId, uploadedFontReceipt } from './fontRuntime'
 
 export interface UploadedFont {
   id: string
@@ -18,7 +18,7 @@ export async function uploadFontFile(file: File): Promise<UploadedFont> {
   if (file.size > 20 * 1024 * 1024) throw new Error('字体文件超过 20MB 上限')
   const dataUrl = await fileToDataUrl(file)
   const name = file.name.replace(/\.(ttf|otf|woff2)$/i, '')
-  const family = uploadFamily(name)
+  const family = uploadedFontReceipt({ name, dataUrl }).cssFamily
   const css = `"${family}", sans-serif`
   if (typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts) {
     throw new Error('当前环境不支持字体加载')

@@ -26,6 +26,8 @@ export interface BakeResult {
   fontReadinessKey?: string
   /** Successful visible font + image identity bound to this exact bake. Runtime-only. */
   assetReadinessKey?: string
+  /** Successful full-byte image receipts bound to this exact bake. Runtime-only. */
+  imageAssetReceipts?: Record<string, string>
 }
 
 // ── modelStore ────────────────────────────────────────────────────────
@@ -195,6 +197,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       meshIndex: area ? area.meshIndex : null,
       nodeName: area ? area.nodeName : '',
       selectedLayerIds: [],
+      activations: s.activations + (area?.layers.some((layer) => layer.kind === 'image' && layer.visible) ? 1 : 0),
     })
     useUiStore.getState().setWorkspaceTab(area ? 'labels' : 'model')
   },
@@ -202,7 +205,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
   activateAreaWithRuntime: (id, runtime) => {
     const area = get().areas.find((candidate) => candidate.id === id)
     if (!area) throw new Error(`无法激活不存在的贴标区域：${id}`)
-    set({
+    set((state) => ({
       activeAreaId: area.id,
       activeArea: area,
       meshIndex: area.meshIndex,
@@ -210,7 +213,8 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       remapOutput: runtime.remapOutput,
       meshAccessors: runtime.meshAccessors,
       selectedLayerIds: [],
-    })
+      activations: state.activations + (area.layers.some((layer) => layer.kind === 'image' && layer.visible) ? 1 : 0),
+    }))
     useUiStore.getState().setWorkspaceTab('labels')
   },
 

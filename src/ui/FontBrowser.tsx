@@ -8,6 +8,7 @@ import {
   SYSTEM_FONT_ENTRIES,
   systemFontEntry,
   uploadedFontId,
+  uploadedFontReceipt,
   type FontLoadResult,
   type SystemFontEntry,
 } from '../label/fontRuntime'
@@ -389,7 +390,9 @@ export function FontBrowser({
 
   const previewUpload = (font: UploadedFontRecord): void => {
     const id = uploadedFontId(font.name)
-    const key = `uploaded/${id}/${font.dataUrl.length}`
+    let revision: string
+    try { revision = uploadedFontReceipt(font).receiptKey } catch { revision = 'invalid' }
+    const key = `uploaded/${id}/${revision}`
     if (previewRequests.current.has(key)) return
     previewRequests.current.add(key)
     setLoadStates((state) => ({ ...state, [id]: 'loading' }))

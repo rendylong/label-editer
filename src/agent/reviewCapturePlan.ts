@@ -5,7 +5,9 @@ import { compareOrdinalText } from '../label/layerOrder'
 const DEFAULT_REVIEW_DIMENSION = 1600
 const MAX_REVIEW_DIMENSION = 4096
 export const MAX_REVIEW_CAPTURE_PIXELS = 128 * 1024 * 1024
+export const MAX_REVIEW_DECODED_WORK_BYTES = MAX_REVIEW_CAPTURE_PIXELS * 4
 export const MAX_REVIEW_ENCODED_BYTES = 128 * 1024 * 1024
+export const MAX_REVIEW_SHEET_SOURCES = 130
 const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
 const SIDE_ORDER: readonly LabelSide[] = [
@@ -80,6 +82,41 @@ function assertResultId(id: string, ids: Set<string>): void {
   ids.add(key)
 }
 
+function safeProduct(...values: number[]): number {
+  let result = 1
+  for (const value of values) {
+    if (!Number.isSafeInteger(value) || value < 0 || (value !== 0 && result > Number.MAX_SAFE_INTEGER / value)) {
+      invalidUsage('Review capture work arithmetic overflowed')
+    }
+    result *= value
+  }
+  return result
+}
+
+/** Explicit work model: captures plus sheet source decode/copy and final composition. */
+export function reviewCaptureWork(width: number, height: number, sheetSourceCount: number): {
+  capturePixels: number
+  sheetDecodePixels: number
+  sheetCopyPixels: number
+  sheetCompositionPixels: number
+  aggregatePixels: number
+  aggregateDecodedBytes: number
+} {
+  if (!Number.isSafeInteger(sheetSourceCount) || sheetSourceCount < 1
+    || sheetSourceCount > MAX_REVIEW_SHEET_SOURCES) {
+    invalidUsage(`Review sheet supports 1 through ${MAX_REVIEW_SHEET_SOURCES} sources`)
+  }
+  const pixels = safeProduct(width, height)
+  const capturePixels = safeProduct(pixels, sheetSourceCount + 1)
+  const sheetDecodePixels = safeProduct(pixels, sheetSourceCount)
+  const sheetCopyPixels = safeProduct(pixels, sheetSourceCount)
+  const sheetCompositionPixels = pixels
+  const aggregatePixels = capturePixels + sheetDecodePixels + sheetCopyPixels + sheetCompositionPixels
+  if (!Number.isSafeInteger(aggregatePixels)) invalidUsage('Review capture work arithmetic overflowed')
+  const aggregateDecodedBytes = safeProduct(aggregatePixels, 4)
+  return { capturePixels, sheetDecodePixels, sheetCopyPixels, sheetCompositionPixels, aggregatePixels, aggregateDecodedBytes }
+}
+
 export function buildReviewCapturePlan(input: {
   areas: Array<{ id: string; side: LabelSide; carrier: CarrierMode }>
   width?: number
@@ -116,14 +153,18 @@ export function buildReviewCapturePlan(input: {
   }
   add({ id: 'model-front', kind: 'model-front', width, height })
   add({ id: 'model-back', kind: 'model-back', width, height })
+  if (plan.length > MAX_REVIEW_SHEET_SOURCES) {
+    invalidUsage(`Review sheet supports at most ${MAX_REVIEW_SHEET_SOURCES} sources`)
+  }
+  const work = reviewCaptureWork(width, height, plan.length)
+  if (work.aggregatePixels > MAX_REVIEW_CAPTURE_PIXELS
+    || work.aggregateDecodedBytes > MAX_REVIEW_DECODED_WORK_BYTES) {
+    invalidUsage(`Review capture plan exceeds the ${MAX_REVIEW_CAPTURE_PIXELS}-pixel work budget`)
+  }
   add({
     id: 'review-sheet', kind: 'review-sheet', width, height,
     sourceViewIds: plan.map((view) => view.id),
   })
-  const aggregatePixels = width * height * plan.length
-  if (!Number.isSafeInteger(aggregatePixels) || aggregatePixels > MAX_REVIEW_CAPTURE_PIXELS) {
-    invalidUsage(`Review capture plan exceeds the ${MAX_REVIEW_CAPTURE_PIXELS}-pixel work budget`)
-  }
   return plan
 }
 

@@ -3,6 +3,8 @@ import type { CarrierMode, LabelSide } from '../src/agent/designContracts'
 import {
   assertReviewEncodedByteBudget,
   buildReviewCapturePlan,
+  MAX_REVIEW_SHEET_SOURCES,
+  reviewCaptureWork,
   reviewSheetLabel,
 } from '../src/agent/reviewCapturePlan'
 
@@ -135,6 +137,26 @@ describe('clean production review capture plan', () => {
       areas: Array.from({ length: 20 }, (_, index) => area(`area-${index}`, 'custom', 'direct_surface_print')),
       width: 4096,
       height: 4096,
+    })).toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
+  })
+
+  it('accounts for capture, sheet decode/copy, and composition work with a 64-area source cap', () => {
+    const sixtyFour = Array.from({ length: 64 }, (_, index) => area(`area-${index}`, 'custom', 'direct_surface_print'))
+    const plan = buildReviewCapturePlan({ areas: sixtyFour, width: 1, height: 1 })
+    expect(plan.at(-1)?.sourceViewIds).toHaveLength(MAX_REVIEW_SHEET_SOURCES)
+    expect(reviewCaptureWork(1, 1, MAX_REVIEW_SHEET_SOURCES)).toEqual({
+      capturePixels: 131,
+      sheetDecodePixels: 130,
+      sheetCopyPixels: 130,
+      sheetCompositionPixels: 1,
+      aggregatePixels: 392,
+      aggregateDecodedBytes: 1568,
+    })
+
+    expect(() => buildReviewCapturePlan({
+      areas: [...sixtyFour, area('area-64', 'custom', 'direct_surface_print')],
+      width: 1,
+      height: 1,
     })).toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
   })
 

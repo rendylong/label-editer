@@ -177,4 +177,60 @@ describe('plugin runtime security', () => {
       await server.close()
     }
   })
+
+  it('atomically replaces stable review results with versioned internal artifacts and rolls back a failed repeat', async () => {
+    const editorRoot = await mkdtemp(path.join(tmpdir(), 'glb-label-editor-repeat-batch-'))
+    await writeFile(path.join(editorRoot, 'index.html'), '<main>editor</main>')
+    const server = await createSessionServer({ editorRoot })
+    try {
+      const session = server.createSession()
+      const base = `${server.origin}/session/${session.id}/artifact`
+      const auth = `token=${session.token}`
+      const stage = async (batch: string, internalId: string, resultId: string, byte: number) => {
+        const response = await fetch(`${base}/stage/${batch}/${internalId}?${auth}`, {
+          method: 'PUT',
+          headers: {
+            'content-type': 'image/png',
+            'x-artifact-file-name': encodeURIComponent(`${resultId}.png`),
+            'x-artifact-result-id': resultId,
+          },
+          body: new Uint8Array([byte]),
+        })
+        expect(response.status).toBe(201)
+        return response.json()
+      }
+      const commit = async (batch: string, artifactIds: string[], resultIds: string[]) => fetch(`${base}/stage/${batch}/commit?${auth}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ artifactIds, resultIds }),
+      })
+
+      const first = await stage('attempt-one', 'attempt-one--front', 'front', 1)
+      expect(first).toMatchObject({ id: 'attempt-one--front', resultId: 'front' })
+      expect((await commit('attempt-one', [first.id], ['front'])).status).toBe(201)
+      expect((await fetch(first.url)).status).toBe(200)
+
+      const failed = await stage('attempt-two', 'attempt-two--front', 'front', 2)
+      expect((await fetch(`${base}/stage/attempt-two?${auth}`, { method: 'DELETE' })).status).toBe(200)
+      expect((await fetch(first.url)).status).toBe(200)
+      expect((await fetch(failed.url)).status).toBe(404)
+
+      const second = await stage('attempt-three', 'attempt-three--front', 'front', 3)
+      expect((await commit('attempt-three', [second.id], ['front'])).status).toBe(201)
+      expect((await fetch(first.url)).status).toBe(404)
+      const current = await fetch(second.url)
+      expect(current.status).toBe(200)
+      expect(current.headers.get('x-artifact-id')).toBe(second.id)
+      expect(current.headers.get('x-artifact-result-id')).toBe('front')
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: second.id }])
+
+      const fourth = await stage('attempt-four', 'attempt-four--front', 'front', 4)
+      expect((await commit('attempt-four', [fourth.id], ['front'])).status).toBe(201)
+      const rollback = await fetch(`${base}/stage/attempt-four?${auth}`, { method: 'DELETE' })
+      expect(await rollback.json()).toEqual({ ok: true, batchId: 'attempt-four', purged: true })
+      expect((await fetch(second.url)).status).toBe(200)
+      expect((await fetch(fourth.url)).status).toBe(404)
+    } finally {
+      await server.close()
+    }
+  })
 })

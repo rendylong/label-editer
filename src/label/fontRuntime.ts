@@ -1,7 +1,8 @@
 import { FONT_STACKS, type LabelLayer, type UploadedFontRecord } from './types'
 import { fontEntry, legacyFontId, type FontCatalogEntry } from './fontCatalog'
 import { fontStackCss } from './fontStack'
-import { uploadedFontIdentity } from './uploadedFontIdentity'
+import { revisionedUploadedFontFamily, uploadedFontIdentity } from './uploadedFontIdentity'
+import { decodeBoundedDataUrl } from './boundedAssetBytes'
 
 export { uploadedFontIdentity } from './uploadedFontIdentity'
 
@@ -77,6 +78,22 @@ export function uploadFamily(name: string): string {
   return uploadedFontIdentity(name).cssFamily
 }
 
+export function uploadedFontReceipt(record: UploadedFontRecord): {
+  sha256: string
+  receiptKey: string
+  cssFamily: string
+} {
+  const receipt = decodeBoundedDataUrl(record.dataUrl)
+  if (!['font/woff', 'font/woff2', 'font/ttf', 'font/otf', 'application/font-woff', 'application/octet-stream'].includes(receipt.mimeType)) {
+    throw new Error(`Unsupported uploaded font MIME: ${receipt.mimeType}`)
+  }
+  return {
+    sha256: receipt.sha256,
+    receiptKey: `sha256:${receipt.sha256}`,
+    cssFamily: revisionedUploadedFontFamily(record.name, receipt.sha256),
+  }
+}
+
 export function uploadedFontRecord(ref: string, uploaded: UploadedFontRecord[]): UploadedFontRecord | undefined {
   return uploaded.find((record) => record.name === ref || uploadedFontId(record.name) === ref)
 }
@@ -141,11 +158,17 @@ export function ensureFontLoaded(id: string, weight: number, style: FontStyle): 
 /** Register a serialized uploaded font before selection, preview, canvas draw, or export. */
 export function ensureUploadedFontLoaded(record: UploadedFontRecord): Promise<FontLoadResult> {
   const id = uploadedFontId(record.name)
-  const cacheKey = `${id}/${record.dataUrl}`
+  let receipt: ReturnType<typeof uploadedFontReceipt>
+  try {
+    receipt = uploadedFontReceipt(record)
+  } catch (error) {
+    return Promise.resolve(failedResult(id, 'sans-serif', errorMessage(error)))
+  }
+  const cacheKey = `${id}/${receipt.receiptKey}`
   const cached = uploadedFontLoads.get(cacheKey)
   if (cached) return cached
 
-  const family = uploadFamily(record.name)
+  const family = receipt.cssFamily
   const load = (async (): Promise<FontLoadResult> => {
     try {
       if (typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts) {
@@ -165,11 +188,6 @@ export function ensureUploadedFontLoaded(record: UploadedFontRecord): Promise<Fo
   return load
 }
 
-function uploadRevision(record: UploadedFontRecord): string {
-  const payload = record.dataUrl.slice(record.dataUrl.lastIndexOf(',') + 1)
-  return `${record.dataUrl.length}-${payload.slice(-12)}`
-}
-
 /** Derive a stable, deduplicated load plan from only the text faces used by an area. */
 export function deriveDesignFontRequests(layers: LabelLayer[], uploaded: UploadedFontRecord[]): DesignFontRequest[] {
   const requests = new Map<string, DesignFontRequest>()
@@ -181,7 +199,9 @@ export function deriveDesignFontRequests(layers: LabelLayer[], uploaded: Uploade
     const record = uploadedFontRecord(layer.fontFamily, uploaded)
     if (record) {
       const id = uploadedFontId(record.name)
-      const key = `uploaded/${id}/${uploadRevision(record)}`
+      let revision: string
+      try { revision = uploadedFontReceipt(record).receiptKey } catch { revision = 'invalid' }
+      const key = `uploaded/${id}/${revision}`
       if (!requests.has(key)) requests.set(key, { key, kind: 'uploaded', id, name: record.name, record })
       continue
     }
@@ -234,7 +254,9 @@ export async function waitForDesignFonts(layers: LabelLayer[], uploaded: Uploade
 export function fontCssFor(ref: string, uploaded: UploadedFontRecord[], fontStack?: string[]): string {
   if (fontStack?.length) return fontStackCss(fontStack)
   const record = uploadedFontRecord(ref, uploaded)
-  if (record) return `"${uploadFamily(record.name)}", sans-serif`
+  if (record) {
+    try { return `"${uploadedFontReceipt(record).cssFamily}", sans-serif` } catch { return 'sans-serif' }
+  }
 
   const system = systemFontEntry(ref)
   if (system) return system.css

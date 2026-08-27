@@ -3,9 +3,10 @@ import { JSDOM } from 'jsdom'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { exportPng } from '../src/app/actions'
-import { designAssetReadinessKey } from '../src/label/exportReadiness'
+import { isBakeAssetReadyForArea } from '../src/label/exportReadiness'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useUiStore } from '../src/state/stores'
+import { pngBytes } from './pngTestUtils'
 
 const konvaHarness = vi.hoisted(() => ({
   latestPreview: null as (HTMLCanvasElement & { sourceReady?: boolean; sourceLayerWidth?: number }) | null,
@@ -191,6 +192,19 @@ describe('LabelCanvas image readiness ownership', () => {
     vi.stubGlobal('Node', dom.window.Node)
     vi.stubGlobal('HTMLElement', dom.window.HTMLElement)
     vi.stubGlobal('Image', DeferredImage)
+    const fetchedSources: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      fetchedSources.push(String(input))
+      const bytes = pngBytes(160, 80)
+      return new Response(new Uint8Array(bytes).buffer, {
+        status: 200,
+        headers: { 'content-type': 'image/png', 'content-length': String(bytes.byteLength) },
+      })
+    }))
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn(() => `blob:${fetchedSources.shift() ?? 'image'}`),
+      revokeObjectURL: vi.fn(),
+    })
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
     vi.spyOn(dom.window.HTMLCanvasElement.prototype, 'getContext').mockImplementation(function getContext(this: HTMLCanvasElement) {
       return contextFor(this as MarkedCanvas)
@@ -244,8 +258,10 @@ describe('LabelCanvas image readiness ownership', () => {
     const bake = useLabelStore.getState().bakeMap[config.id]?.color as MarkedCanvas | undefined
     expect(bake?.sourceReady).toBe(true)
     expect(bake?.sourceLayerWidth).toBe(200)
-    expect(useLabelStore.getState().bakeMap[config.id]?.assetReadinessKey)
-      .toBe(designAssetReadinessKey(useLabelStore.getState().areas[0]))
+    expect(isBakeAssetReadyForArea(
+      useLabelStore.getState().areas[0],
+      useLabelStore.getState().bakeMap[config.id],
+    )).toBe(true)
   })
 
   it('evicts a rejected source so the next edit can retry and render after one successful load', async () => {

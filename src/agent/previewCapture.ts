@@ -5,7 +5,7 @@ import type {
   ReviewViewKind,
   ReviewViewRequest,
 } from './contracts'
-import { reviewSheetLabel } from './reviewCapturePlan'
+import { MAX_REVIEW_SHEET_SOURCES, reviewSheetLabel } from './reviewCapturePlan'
 import { parsePortablePng } from '../../scripts/lib/png-core.mjs'
 
 export type AgentPreviewCapture = (request: Required<Pick<PreviewRequest, 'width' | 'height'>>) => Promise<Blob>
@@ -39,6 +39,7 @@ export interface AgentReviewCaptureContext {
   blueprintRevision: string
   inputRevision: string
   sources: AgentReviewCaptureSource[]
+  consumeEncodedBytes?: (byteLength: number) => void
 }
 
 let owner: { token: symbol; capture: AgentPreviewCaptureOwner } | null = null
@@ -69,12 +70,9 @@ function assertBoundedSourceDimensions(width: number, height: number): void {
   }
 }
 
-export async function validatedReviewPngBytes(blob: Blob, width: number, height: number): Promise<Uint8Array> {
+export function assertReviewPngBytes(bytes: Uint8Array, width: number, height: number): void {
   assertReviewDimensions(width, height)
-  if (blob.type !== 'image/png' || blob.size < 1 || blob.size > 32 * 1024 * 1024) {
-    throw reviewNotReady('Review PNG MIME or encoded size is invalid')
-  }
-  const bytes = new Uint8Array(await blob.arrayBuffer())
+  if (bytes.byteLength < 1 || bytes.byteLength > 32 * 1024 * 1024) throw reviewNotReady('Review PNG encoded size is invalid')
   try {
     parsePortablePng(bytes, {
       expectedWidth: width,
@@ -86,6 +84,15 @@ export async function validatedReviewPngBytes(blob: Blob, width: number, height:
   } catch (error) {
     throw reviewNotReady(`Review PNG structure is invalid: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+export async function validatedReviewPngBytes(blob: Blob, width: number, height: number): Promise<Uint8Array> {
+  assertReviewDimensions(width, height)
+  if (blob.type !== 'image/png' || blob.size < 1 || blob.size > 32 * 1024 * 1024) {
+    throw reviewNotReady('Review PNG MIME or encoded size is invalid')
+  }
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  assertReviewPngBytes(bytes, width, height)
   return bytes
 }
 
@@ -178,7 +185,7 @@ async function exactSheetSources(
   context: AgentReviewCaptureContext,
 ): Promise<AgentReviewCaptureSource[]> {
   if (request.kind !== 'review-sheet' || !Array.isArray(request.sourceViewIds)
-    || request.sourceViewIds.length < 1 || request.sourceViewIds.length > 130
+    || request.sourceViewIds.length < 1 || request.sourceViewIds.length > MAX_REVIEW_SHEET_SOURCES
     || context.sources.length !== request.sourceViewIds.length) {
     throw reviewNotReady('Review sheet sources do not exactly match the capture plan')
   }
@@ -196,7 +203,8 @@ async function exactSheetSources(
       throw reviewNotReady(`Review sheet source is stale or invalid: ${expectedId}`)
     }
     assertReviewDimensions(source.result.width, source.result.height)
-    await validatedReviewPngBytes(source.result.blob, source.request.width, source.request.height)
+    const bytes = await validatedReviewPngBytes(source.result.blob, source.request.width, source.request.height)
+    context.consumeEncodedBytes?.(bytes.byteLength)
     ids.add(key)
   }
   return context.sources

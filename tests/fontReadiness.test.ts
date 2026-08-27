@@ -31,7 +31,7 @@ describe('design font readiness', () => {
     expect(requests).toHaveLength(3)
     expect(requests[0]).toMatchObject({ key: 'catalog/inter/400/normal', kind: 'catalog', name: 'Inter' })
     expect(requests[1]).toMatchObject({ kind: 'uploaded', name: 'Brand Font' })
-    expect(requests[1].key).toMatch(/^uploaded\/upload:brand-font\/\d+-AAAA$/)
+    expect(requests[1].key).toMatch(/^uploaded\/upload:brand-font\/sha256:[a-f0-9]{64}$/)
     expect(requests[2]).toMatchObject({ key: 'system/arial', kind: 'system', name: 'Arial' })
   })
 

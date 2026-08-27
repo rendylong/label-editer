@@ -137,14 +137,34 @@ function exactUploadDescriptor(input: URL | RequestInfo, init?: RequestInit, ove
   const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
   const headers = new Headers(init?.headers)
   const body = init?.body as Uint8Array | undefined
+  const resultId = headers.get('x-artifact-result-id') ?? id
   return {
     id,
+    resultId,
     fileName: decodeURIComponent(headers.get('x-artifact-file-name') ?? id),
     mimeType: headers.get('content-type') ?? 'application/octet-stream',
     url: `/session/s1/artifact/${encodeURIComponent(id)}?token=${token}`,
     byteLength: body?.byteLength ?? 0,
+    sha256: body ? sha256(body) : sha256(new Uint8Array()),
+    ...(headers.get('x-artifact-width') ? { width: Number(headers.get('x-artifact-width')) } : {}),
+    ...(headers.get('x-artifact-height') ? { height: Number(headers.get('x-artifact-height')) } : {}),
+    ...(headers.get('x-artifact-area-id') ? { areaId: decodeURIComponent(headers.get('x-artifact-area-id')!) } : {}),
+    ...(headers.get('x-artifact-channel') ? { channel: headers.get('x-artifact-channel') } : {}),
     ...overrides,
   }
+}
+
+function responseAt(url: URL, body: BodyInit | null, init: ResponseInit): Response {
+  const response = new Response(body, init)
+  Object.defineProperty(response, 'url', { value: url.href })
+  return response
+}
+
+function jsonAt(url: URL, status: number, value: unknown): Response {
+  return responseAt(url, JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  })
 }
 
 function sha256(value: string | Uint8Array): string {
@@ -721,18 +741,47 @@ describe('browser Agent clean production review runtime', () => {
     })
   }
 
-  function acceptUploads(events: string[] = []) {
+  function acceptUploads(events: string[] = [], options: {
+    commitValue?: (body: { artifactIds: string[]; resultIds: string[] }, batchId: string) => unknown
+    readbackHeaders?: Record<string, string>
+    stageRedirected?: boolean
+  } = {}) {
+    const staged = new Map<string, { bytes: Uint8Array; resultId: string; descriptor: Record<string, unknown> }>()
     vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
+      const url = new URL(String(input), window.location.origin)
+      const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
       if (init?.method === 'PUT') {
-        events.push(`upload:${id}`)
-        return { ok: true, json: async () => ({ ...exactUploadDescriptor(input, init), bytes: { serverOnly: true } }) } as Response
+        const descriptor = exactUploadDescriptor(input, init)
+        const resultId = String(descriptor.resultId)
+        const bytes = new Uint8Array(init.body as Uint8Array)
+        events.push(`upload:${resultId}`)
+        staged.set(id, { bytes, resultId, descriptor })
+        const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
+        const response = jsonAt(url, 201, { ok: true, batchId, ...descriptor })
+        if (options.stageRedirected) Object.defineProperty(response, 'redirected', { value: true })
+        return response
       }
-      if (init?.method === 'POST') {
-        const body = JSON.parse(String(init.body)) as { artifactIds: string[] }
-        return { ok: true, json: async () => ({ ok: true, artifactIds: body.artifactIds }) } as Response
+      if (init?.method === 'POST' && id === 'commit') {
+        const body = JSON.parse(String(init.body)) as { artifactIds: string[]; resultIds: string[] }
+        const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
+        return jsonAt(url, 201, options.commitValue?.(body, batchId) ?? { ok: true, batchId, ...body })
       }
-      return { ok: true, json: async () => ({ ok: true }) } as Response
+      if (init?.method === 'GET') {
+        const artifact = staged.get(id)!
+        return responseAt(url, new Uint8Array(artifact.bytes).buffer, {
+          status: 200,
+          headers: {
+            'content-type': 'image/png',
+            'content-length': String(artifact.bytes.byteLength),
+            'x-artifact-id': id,
+            'x-artifact-result-id': artifact.resultId,
+            'x-artifact-sha256': String(artifact.descriptor.sha256),
+            ...options.readbackHeaders,
+          },
+        })
+      }
+      const batchId = decodeURIComponent(url.pathname.split('/').at(-1)!)
+      return jsonAt(url, 200, { ok: true, batchId, purged: true })
     }))
   }
 
@@ -770,6 +819,66 @@ describe('browser Agent clean production review runtime', () => {
       selectedPartId: useModelStore.getState().selectedPartId,
       workspaceTab: useUiStore.getState().workspaceTab,
     }).toEqual(before)
+    for (const [, init] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(init?.redirect).toBe('error')
+    }
+  })
+
+  it('supports two successful reviews in one session with stable result ids and distinct internal artifact locators', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    acceptUploads()
+    const bridge = createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+
+    const first = await bridge.renderReviewEvidence(request)
+    const second = await bridge.renderReviewEvidence(request)
+
+    expect(first).toMatchObject({ ok: true })
+    expect(second).toMatchObject({ ok: true })
+    if (!first.ok || !second.ok) throw new Error('Expected repeat review success')
+    expect(second.data.views.map((view) => view.id)).toEqual(first.data.views.map((view) => view.id))
+    expect(second.data.views.map((view) => view.artifact.id)).toEqual(first.data.views.map((view) => view.artifact.id))
+    expect(second.data.views.map((view) => view.artifact.url))
+      .not.toEqual(first.data.views.map((view) => view.artifact.url))
+    const putPaths = (fetch as ReturnType<typeof vi.fn>).mock.calls
+      .filter(([, init]) => init?.method === 'PUT')
+      .map(([input]) => new URL(String(input), window.location.origin).pathname)
+    expect(new Set(putPaths).size).toBe(10)
+  })
+
+  it('rejects a forged ok:false commit acknowledgement and proves exact purge acknowledgement', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    acceptUploads([], { commitValue: (body, batchId) => ({ ok: false, batchId, ...body }) })
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
+  })
+
+  it('rejects a redirected stage acknowledgement even when its final URL is same-origin', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    acceptUploads([], { stageRedirected: true })
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+  })
+
+  it('rejects committed artifact readback with a cross-artifact identity and purges the attempt', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    acceptUploads([], { readbackHeaders: { 'x-artifact-result-id': 'model-back' } })
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
   })
 
   it.each(['awaiting_user_approval', 'continuous_authorized'] as const)(

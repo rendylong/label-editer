@@ -13,6 +13,7 @@ import { fontCssFor } from './fonts'
 import { resolvedTextDirection } from './textDirection'
 import { useDesignFontReadiness } from './designFontReadiness'
 import { designAssetReadinessKey, designFontReadinessKey } from './exportReadiness'
+import { beginImageAssetLoad, bindImageAssetReceipt, loadContentBoundImage } from './imageAssetReceipt'
 import { clearTransparentCanvasBorder } from './canvasBorder'
 import {
   renderCarrierMasks,
@@ -162,35 +163,6 @@ export function captureDesignCanvas(
   }
 }
 
-interface ImageCacheEntry {
-  image: HTMLImageElement
-  ready: Promise<HTMLImageElement>
-}
-
-const imgCache = new Map<string, ImageCacheEntry>()
-
-function loadImg(src: string): Promise<HTMLImageElement> {
-  const cached = imgCache.get(src)
-  if (cached) return cached.ready
-  const image = new Image()
-  const ready = new Promise<HTMLImageElement>((resolve, reject) => {
-    image.onload = () => {
-      image.onload = null
-      image.onerror = null
-      resolve(image)
-    }
-    image.onerror = () => {
-      image.onload = null
-      image.onerror = null
-      if (imgCache.get(src)?.image === image) imgCache.delete(src)
-      reject(new Error('图片解码失败'))
-    }
-  })
-  imgCache.set(src, { image, ready })
-  image.src = src
-  return ready
-}
-
 function fontString(layer: TextLayer, css: string): string {
   const style = layer.italic ? 'italic ' : ''
   const weight = typeof layer.fontWeight === 'number' ? layer.fontWeight : layer.fontWeight === 'bold' ? 700 : 400
@@ -246,8 +218,29 @@ function drawTextShape(ctx: CanvasRenderingContext2D, layer: TextLayer, gray: nu
 
 interface ImageBits {
   src: string
+  receiptKey: string
   original: HTMLImageElement
   preview: HTMLCanvasElement
+}
+
+const contentImageLoads = new Map<string, { identity: string; load: ReturnType<typeof loadContentBoundImage> }>()
+
+function loadAreaImage(
+  areaId: string,
+  activationRevision: number,
+  layer: ImageLayer,
+): ReturnType<typeof loadContentBoundImage> {
+  const owner = `${areaId}\u0000${layer.id}`
+  const identity = `${activationRevision}\u0000${layer.src}\u0000${layer.naturalWidth}\u0000${layer.naturalHeight}`
+  const cached = contentImageLoads.get(owner)
+  if (cached?.identity === identity) return cached.load
+  beginImageAssetLoad(areaId, layer.id)
+  const load = loadContentBoundImage(layer.src, layer.naturalWidth, layer.naturalHeight)
+  contentImageLoads.set(owner, { identity, load })
+  void load.catch(() => {
+    if (contentImageLoads.get(owner)?.load === load) contentImageLoads.delete(owner)
+  })
+  return load
 }
 
 export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JSX.Element {
@@ -258,6 +251,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
   const applyAreaOp = useLabelStore((s) => s.applyAreaOp)
   const interactionLayerIdsRef = useRef<string[] | null>(null)
   const showSeam = useUiStore((s) => s.showSeam)
+  const activationRevision = useLabelStore((s) => s.activations)
 
   const stageRef = useRef<Konva.Stage>(null)
   const trRef = useRef<Konva.Transformer>(null)
@@ -299,7 +293,9 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     const jobs = imageLayers
       .map(async (layer) => {
         try {
-          return { layer, src: layer.src, image: await loadImg(layer.src) }
+          if (!areaId) throw new Error('Image area is inactive')
+          const loaded = await loadAreaImage(areaId, activationRevision, layer)
+          return { layer, src: layer.src, image: loaded.image, receiptKey: loaded.receiptKey }
         } catch {
           return null
         }
@@ -311,16 +307,22 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         if (!readyImage) continue
         m.set(readyImage.layer.id, {
           src: readyImage.src,
+          receiptKey: readyImage.receiptKey,
           original: readyImage.image,
           preview: renderCraftedImage(readyImage.image, readyImage.layer),
         })
+        if (areaId) bindImageAssetReceipt(
+          areaId, readyImage.layer.id, readyImage.src,
+          readyImage.layer.naturalWidth, readyImage.layer.naturalHeight,
+          readyImage.receiptKey,
+        )
       }
       setImgBits(m)
     })
     return () => {
       alive = false
     }
-  }, [layers.map((l) => (l.kind === 'image' ? `${l.src}:${l.naturalWidth}:${l.naturalHeight}:${l.width}:${l.height}:${l.fit ?? 'stretch'}:${JSON.stringify(l.craft)}` : '')).join('|'), config?.meshIndex])
+  }, [layers.map((l) => (l.kind === 'image' ? `${l.src}:${l.naturalWidth}:${l.naturalHeight}:${l.width}:${l.height}:${l.fit ?? 'stretch'}:${JSON.stringify(l.craft)}` : '')).join('|'), config?.meshIndex, activationRevision])
 
   const displayHeight = useMemo(() => {
     if (!spec || displayWidth <= 0) return 300
@@ -373,6 +375,11 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     const visibleImagesReady = cfg.layers.every((layer) => layer.kind !== 'image' || !layer.visible
       || (imgBits.get(layer.id)?.src === layer.src))
     const assetsReady = fontReadiness.ready && visibleImagesReady
+    const imageAssetReceipts = Object.fromEntries(cfg.layers.flatMap((layer) => {
+      if (layer.kind !== 'image' || !layer.visible) return []
+      const receiptKey = imgBits.get(layer.id)?.receiptKey
+      return receiptKey ? [[layer.id, receiptKey]] : []
+    }))
     setBake(cfg.id, {
       color,
       ...masks,
@@ -381,7 +388,8 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       areaOwner: cfg,
       textOverflowLayerIds,
       fontReadinessKey: fontReadiness.ready ? visibleFontReadinessKey : undefined,
-      assetReadinessKey: assetsReady ? designAssetReadinessKey(cfg) : undefined,
+      imageAssetReceipts: assetsReady ? imageAssetReceipts : undefined,
+      assetReadinessKey: assetsReady ? designAssetReadinessKey(cfg, imageAssetReceipts) : undefined,
     })
     return true
   }, [areaId, fontReadiness.ready, fontRevision, imgBits, setBake, visibleFontReadinessKey])

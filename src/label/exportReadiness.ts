@@ -2,6 +2,7 @@ import { deriveDesignFontRequests } from './fontRuntime'
 import { canonicalLayerOrder } from './layerOrder'
 import type { LabelAreaConfig } from './types'
 import { sha256HexSync } from '../agent/syncSha256'
+import { currentImageAssetReceipt } from './imageAssetReceipt'
 
 export type CarrierReadinessCode =
   | 'ink-adhesion'
@@ -92,7 +93,10 @@ export function designFontReadinessKey(area: Pick<LabelAreaConfig, 'layers' | 'f
 }
 
 /** Fingerprint every visible external asset identity required by one exact bake. */
-export function designAssetReadinessKey(area: Pick<LabelAreaConfig, 'layers' | 'fonts'>): string {
+export function designAssetReadinessKey(
+  area: Pick<LabelAreaConfig, 'layers' | 'fonts'>,
+  imageReceipts: Readonly<Record<string, string>> = {},
+): string {
   const visible = canonicalLayerOrder(area.layers).filter((layer) => layer.visible)
   const identity = {
     fonts: deriveDesignFontRequests(visible, area.fonts).map((request) => request.key),
@@ -101,6 +105,7 @@ export function designAssetReadinessKey(area: Pick<LabelAreaConfig, 'layers' | '
       src: layer.src,
       naturalWidth: layer.naturalWidth,
       naturalHeight: layer.naturalHeight,
+      receiptKey: imageReceipts[layer.id] ?? 'unverified',
     }] : []),
   }
   return `sha256:${sha256HexSync(new TextEncoder().encode(JSON.stringify(identity)))}`
@@ -108,9 +113,16 @@ export function designAssetReadinessKey(area: Pick<LabelAreaConfig, 'layers' | '
 
 /** A current owner reference alone is insufficient: the successful asset set must match too. */
 export function isBakeAssetReadyForArea(
-  area: Pick<LabelAreaConfig, 'layers' | 'fonts'>,
-  bake: { fontReadinessKey?: string; assetReadinessKey?: string },
+  area: Pick<LabelAreaConfig, 'id' | 'layers' | 'fonts'>,
+  bake: { fontReadinessKey?: string; assetReadinessKey?: string; imageAssetReceipts?: Record<string, string> },
 ): boolean {
-  return (bake.fontReadinessKey ?? '') === designFontReadinessKey(area)
-    && bake.assetReadinessKey === designAssetReadinessKey(area)
+  const visibleImages = canonicalLayerOrder(area.layers).flatMap((layer) => layer.visible && layer.kind === 'image' ? [layer] : [])
+  const receipts = bake.imageAssetReceipts ?? {}
+  const imagesReady = visibleImages.every((layer) => {
+    const current = currentImageAssetReceipt(area.id, layer.id, layer.src, layer.naturalWidth, layer.naturalHeight)
+    return current !== undefined && receipts[layer.id] === current
+  })
+  return imagesReady
+    && (bake.fontReadinessKey ?? '') === designFontReadinessKey(area)
+    && bake.assetReadinessKey === designAssetReadinessKey(area, receipts)
 }

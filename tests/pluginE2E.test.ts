@@ -145,6 +145,14 @@ describe('GLB label plugin E2E', () => {
         },
       })
       if (!rendered.ok) throw new Error(rendered.error.message)
+      const repeated = await runtime.callBridge(session, 'renderReviewEvidence', fixture.request)
+      expect(repeated, JSON.stringify(repeated)).toMatchObject({
+        ok: true,
+        data: { views: rendered.data.views.map((entry: { id: string }) => ({ id: entry.id, artifact: { id: entry.id } })) },
+      })
+      if (!repeated.ok) throw new Error(repeated.error.message)
+      expect(repeated.data.views.map((entry: { artifact: { url: string } }) => entry.artifact.url))
+        .not.toEqual(rendered.data.views.map((entry: { artifact: { url: string } }) => entry.artifact.url))
       const stored = runtime.getArtifacts(session.id)
       expect(stored.map((artifact: { id: string }) => artifact.id)).toEqual(
         rendered.data.views.map((entry: { artifact: { id: string } }) => entry.artifact.id),

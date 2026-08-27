@@ -179,8 +179,8 @@ describe('font runtime', () => {
     const uploaded: UploadedFontRecord[] = [{ name: 'Brand Font', dataUrl: 'data:font/woff2;base64,d09GMg==' }]
     const { fontCssFor, waitForDesignFonts } = await freshRuntime()
 
-    expect(fontCssFor('upload:brand-font', uploaded)).toBe('"__upload_brand_font", sans-serif')
-    expect(fontCssFor('Brand Font', uploaded)).toBe('"__upload_brand_font", sans-serif')
+    expect(fontCssFor('upload:brand-font', uploaded)).toMatch(/^"__upload_brand_font_[a-f0-9]{64}", sans-serif$/)
+    expect(fontCssFor('Brand Font', uploaded)).toBe(fontCssFor('upload:brand-font', uploaded))
     await expect(waitForDesignFonts([textLayer('upload:brand-font')], uploaded)).resolves.toEqual({
       ready: ['Brand Font'],
       unavailable: [],
@@ -192,11 +192,42 @@ describe('font runtime', () => {
     const record: UploadedFontRecord = { name: 'Restored Brand', dataUrl: 'data:font/woff2;base64,UkVTVE9SRUQ=' }
     const { ensureUploadedFontLoaded } = await freshRuntime()
 
-    await expect(ensureUploadedFontLoaded(record)).resolves.toEqual({
-      id: 'upload:restored-brand', ok: true, cssFamily: '__upload_restored_brand',
+    await expect(ensureUploadedFontLoaded(record)).resolves.toMatchObject({
+      id: 'upload:restored-brand', ok: true, cssFamily: expect.stringMatching(/^__upload_restored_brand_[a-f0-9]{64}$/),
     })
     expect(FontFaceDouble.created[0].source).toBe('url("data:font/woff2;base64,UkVTVE9SRUQ=")')
     expect(addFont).toHaveBeenCalledOnce()
+  })
+
+  it('binds uploaded font readiness and CSS registration to the complete decoded bytes', async () => {
+    const first: UploadedFontRecord = { name: 'Mutable Brand', dataUrl: 'data:font/woff2;base64,QUFBQUFBQUFBQUFBVEFJTA==' }
+    const second: UploadedFontRecord = { name: 'Mutable Brand', dataUrl: 'data:font/woff2;base64,QkJCQkJCQkJBQUFBVEFJTA==' }
+    expect(first.dataUrl).toHaveLength(second.dataUrl.length)
+    expect(first.dataUrl.slice(-12)).toBe(second.dataUrl.slice(-12))
+    const { deriveDesignFontRequests, ensureUploadedFontLoaded, fontCssFor } = await freshRuntime()
+
+    const firstRequest = deriveDesignFontRequests([textLayer('upload:mutable-brand')], [first])[0]
+    const secondRequest = deriveDesignFontRequests([textLayer('upload:mutable-brand')], [second])[0]
+    expect(firstRequest.key).toMatch(/^uploaded\/upload:mutable-brand\/sha256:[a-f0-9]{64}$/)
+    expect(secondRequest.key).not.toBe(firstRequest.key)
+
+    const firstResult = await ensureUploadedFontLoaded(first)
+    const secondResult = await ensureUploadedFontLoaded(second)
+    expect(firstResult.cssFamily).not.toBe(secondResult.cssFamily)
+    expect(fontCssFor(firstResult.id, [first])).toContain(firstResult.cssFamily)
+    expect(fontCssFor(secondResult.id, [second])).toContain(secondResult.cssFamily)
+    expect(FontFaceDouble.created).toHaveLength(2)
+  })
+
+  it('rejects an oversized uploaded font before decoding or constructing FontFace', async () => {
+    const { ensureUploadedFontLoaded } = await freshRuntime()
+    const oversized: UploadedFontRecord = {
+      name: 'Too Large',
+      dataUrl: `data:font/woff2;base64,${'A'.repeat(28 * 1024 * 1024)}`,
+    }
+
+    await expect(ensureUploadedFontLoaded(oversized)).resolves.toMatchObject({ ok: false })
+    expect(FontFaceDouble.created).toHaveLength(0)
   })
 
   it('reports a corrupt restored upload as unavailable without treating it as selected-ready', async () => {

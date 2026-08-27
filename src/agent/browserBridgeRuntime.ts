@@ -15,6 +15,7 @@ import {
   captureAgentPreview,
   captureAgentQcView,
   captureAgentReviewView,
+  assertReviewPngBytes,
   validatedReviewPngBytes,
   type AgentReviewCaptureSource,
 } from './previewCapture'
@@ -446,7 +447,7 @@ function assertReviewStateUnchanged(snapshot: ReviewStateSnapshot, stage: string
       || value.version !== expected.version || value.areaOwner !== expected.areaOwner
       || (value.fontReadinessKey ?? '') !== expected.fontReadinessKey
       || (value.assetReadinessKey ?? '') !== expected.assetReadinessKey
-      || value.assetReadinessKey !== designAssetReadinessKey(expected.areaOwner)) {
+      || value.assetReadinessKey !== designAssetReadinessKey(expected.areaOwner, value.imageAssetReceipts)) {
       throw reviewNotReady(stage, `Review bake changed during capture (${stage})`, { areaId })
     }
   }
@@ -584,26 +585,36 @@ function artifactStageUrl(bootstrap: AgentBridgeBootstrap, batchId: string, suff
   return url
 }
 
+function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  const keys = [...expected].sort()
+  return actual.length === keys.length && actual.every((key, index) => key === keys[index])
+}
+
 async function uploadArtifact(
   bootstrap: AgentBridgeBootstrap,
   artifact: BrowserArtifact,
-  options: { batchId?: string } = {},
+  options: { batchId?: string; internalId?: string; resultId?: string } = {},
 ): Promise<ArtifactDescriptor> {
+  const uploadId = options.internalId ?? artifact.id
+  const resultId = options.resultId ?? artifact.id
   const url = options.batchId
-    ? artifactStageUrl(bootstrap, options.batchId, `/${encodeURIComponent(artifact.id)}`)
-    : artifactLocator(bootstrap, artifact.id)
+    ? artifactStageUrl(bootstrap, options.batchId, `/${encodeURIComponent(uploadId)}`)
+    : artifactLocator(bootstrap, uploadId)
   url.searchParams.set('token', bootstrap.token)
   const response = await fetch(url, {
     method: 'PUT',
     headers: {
       'content-type': artifact.mimeType,
       'x-artifact-file-name': encodeURIComponent(artifact.fileName),
+      ...(options.batchId ? { 'x-artifact-result-id': resultId } : {}),
       ...(artifact.width ? { 'x-artifact-width': String(artifact.width) } : {}),
       ...(artifact.height ? { 'x-artifact-height': String(artifact.height) } : {}),
       ...(artifact.areaId ? { 'x-artifact-area-id': encodeURIComponent(artifact.areaId) } : {}),
       ...(artifact.channel ? { 'x-artifact-channel': artifact.channel } : {}),
     },
     body: artifact.bytes as BodyInit,
+    redirect: 'error',
   })
   if (!response.ok) throw new Error(`Artifact upload failed (${response.status}): ${artifact.fileName}`)
   let value: unknown
@@ -613,12 +624,26 @@ async function uploadArtifact(
     throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
   }
   if (!value || typeof value !== 'object') throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
-  const descriptor = value as Partial<ArtifactDescriptor>
-  if (descriptor.id !== artifact.id
+  const descriptor = value as Partial<ArtifactDescriptor> & { ok?: unknown; batchId?: unknown; resultId?: unknown }
+  const descriptorKeys = [
+    'ok', 'id', 'resultId', 'batchId', 'fileName', 'mimeType', 'url', 'byteLength', 'sha256',
+    ...(artifact.width ? ['width'] : []),
+    ...(artifact.height ? ['height'] : []),
+    ...(artifact.areaId ? ['areaId'] : []),
+    ...(artifact.channel ? ['channel'] : []),
+  ]
+  if ((options.batchId && !hasExactKeys(descriptor, descriptorKeys))
+    || descriptor.id !== uploadId
+    || (options.batchId && (descriptor.ok !== true || descriptor.batchId !== options.batchId))
+    || (options.batchId && descriptor.resultId !== resultId)
     || descriptor.fileName !== artifact.fileName
     || descriptor.mimeType !== artifact.mimeType
     || typeof descriptor.url !== 'string'
-    || descriptor.byteLength !== artifact.bytes.byteLength) {
+    || descriptor.byteLength !== artifact.bytes.byteLength
+    || (options.batchId && descriptor.width !== artifact.width)
+    || (options.batchId && descriptor.height !== artifact.height)
+    || (options.batchId && descriptor.areaId !== artifact.areaId)
+    || (options.batchId && descriptor.channel !== artifact.channel)) {
     throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
   }
   let locator: URL
@@ -626,10 +651,17 @@ async function uploadArtifact(
     const value = descriptor.url.trim()
     if (value.length === 0) throw new Error('Empty artifact locator')
     locator = new URL(value, window.location.origin)
-    const expected = artifactLocator(bootstrap, artifact.id)
+    const expected = artifactLocator(bootstrap, uploadId)
     if (locator.href !== expected.href) throw new Error('Artifact locator does not bind the expected session artifact')
   } catch {
     throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
+  }
+  if (options.batchId) {
+    if (response.redirected || response.url !== url.href || response.status !== 201
+      || response.headers.get('content-type') !== 'application/json; charset=utf-8'
+      || descriptor.sha256 !== sha256HexSync(artifact.bytes)) {
+      throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
+    }
   }
   return {
     url: locator.href,
@@ -659,25 +691,71 @@ async function commitArtifactBatch(
   bootstrap: AgentBridgeBootstrap,
   batchId: string,
   artifactIds: readonly string[],
+  resultIds: readonly string[],
 ): Promise<void> {
-  const response = await fetch(artifactStageUrl(bootstrap, batchId, '/commit'), {
+  const url = artifactStageUrl(bootstrap, batchId, '/commit')
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ artifactIds }),
+    body: JSON.stringify({ artifactIds, resultIds }),
+    redirect: 'error',
   })
-  if (!response.ok) throw new Error(`Artifact batch commit failed (${response.status})`)
+  if (!response.ok || response.redirected || response.status !== 201 || response.url !== url.href
+    || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
+    throw new Error(`Artifact batch commit failed (${response.status})`)
+  }
   let value: unknown
   try { value = await response.json() } catch { throw new Error('Invalid artifact batch commit response') }
-  const ids = value && typeof value === 'object' && Array.isArray((value as { artifactIds?: unknown }).artifactIds)
-    ? (value as { artifactIds: unknown[] }).artifactIds : undefined
-  if (!ids || ids.length !== artifactIds.length || ids.some((id, index) => id !== artifactIds[index])) {
+  const body = value as { ok?: unknown; batchId?: unknown; artifactIds?: unknown; resultIds?: unknown }
+  const ids = Array.isArray(body?.artifactIds) ? body.artifactIds : undefined
+  const results = Array.isArray(body?.resultIds) ? body.resultIds : undefined
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'artifactIds', 'resultIds'])
+    || body.ok !== true || body.batchId !== batchId
+    || !ids || ids.length !== artifactIds.length || ids.some((id, index) => id !== artifactIds[index])
+    || !results || results.length !== resultIds.length || results.some((id, index) => id !== resultIds[index])) {
     throw new Error('Invalid artifact batch commit response')
   }
 }
 
 async function purgeArtifactBatch(bootstrap: AgentBridgeBootstrap, batchId: string): Promise<void> {
-  const response = await fetch(artifactStageUrl(bootstrap, batchId), { method: 'DELETE' })
-  if (!response.ok) throw new Error(`Artifact batch purge failed (${response.status})`)
+  const url = artifactStageUrl(bootstrap, batchId)
+  const response = await fetch(url, { method: 'DELETE', redirect: 'error' })
+  if (!response.ok || response.redirected || response.status !== 200 || response.url !== url.href
+    || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
+    throw new Error(`Artifact batch purge failed (${response.status})`)
+  }
+  let value: unknown
+  try { value = await response.json() } catch { throw new Error('Invalid artifact batch purge response') }
+  const body = value as { ok?: unknown; batchId?: unknown; purged?: unknown }
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'purged'])
+    || body.ok !== true || body.batchId !== batchId || body.purged !== true) {
+    throw new Error('Invalid artifact batch purge response')
+  }
+}
+
+async function readBackReviewArtifact(
+  descriptor: ArtifactDescriptor,
+  internalId: string,
+  expectedBytes: Uint8Array,
+  width: number,
+  height: number,
+  consumeBytes: (length: number) => void,
+): Promise<void> {
+  const response = await fetch(descriptor.url, { method: 'GET', cache: 'no-store', redirect: 'error', credentials: 'same-origin' })
+  if (!response.ok || response.redirected || response.status !== 200 || response.url !== descriptor.url
+    || response.headers.get('content-type') !== descriptor.mimeType
+    || response.headers.get('content-length') !== String(expectedBytes.byteLength)
+    || response.headers.get('x-artifact-id') !== internalId
+    || response.headers.get('x-artifact-result-id') !== descriptor.id
+    || response.headers.get('x-artifact-sha256') !== descriptor.sha256) {
+    throw new Error(`Invalid artifact readback response: ${descriptor.fileName}`)
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  consumeBytes(bytes.byteLength)
+  if (bytes.byteLength !== expectedBytes.byteLength || sha256HexSync(bytes) !== descriptor.sha256) {
+    throw new Error(`Artifact readback bytes changed: ${descriptor.fileName}`)
+  }
+  assertReviewPngBytes(bytes, width, height)
 }
 
 export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): LabelEditorAgentBridgeV1 {
@@ -863,7 +941,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           areas: reviewPlanAreas(useLabelStore.getState().areas), width, height,
         })
         assertReviewStateUnchanged(snapshot, 'after-plan')
-        const captures: Array<AgentReviewCaptureSource & { bytes: Uint8Array }> = []
+        const captures: AgentReviewCaptureSource[] = []
         const resultIds = new Set<string>()
         let encodedByteTotal = 0
         for (const request of plan) {
@@ -874,19 +952,35 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
               blueprintRevision: gate.blueprintRevision,
               inputRevision: gate.documentRevision,
               sources: [...captures],
+              consumeEncodedBytes: (length) => {
+                encodedByteTotal = assertReviewEncodedByteBudget(encodedByteTotal, length)
+              },
             })
           } catch (error) {
             if (error && typeof error === 'object' && 'code' in error) throw error
             throw reviewNotReady(`capture:${request.id}`, `Review capture failed: ${request.id}`)
           }
           assertReviewCaptureResult(request, result, resultIds)
-          const bytes = await validatedReviewPngBytes(result.blob, request.width, request.height)
-          encodedByteTotal = assertReviewEncodedByteBudget(encodedByteTotal, bytes.byteLength)
-          captures.push({ request, result, bytes })
+          captures.push({ request, result })
           assertReviewStateUnchanged(snapshot, `after-capture:${request.id}`)
         }
         if (captures.length !== plan.length) {
           throw reviewNotReady('capture-complete', `Review captured ${captures.length} of ${plan.length} planned views`)
+        }
+        const prepared: Array<{
+          request: ReviewViewRequest
+          camera?: ReviewViewResult['camera']
+          bytes: Uint8Array
+        }> = []
+        while (captures.length > 0) {
+          const source = captures.shift()!
+          const bytes = await validatedReviewPngBytes(source.result.blob, source.request.width, source.request.height)
+          encodedByteTotal = assertReviewEncodedByteBudget(encodedByteTotal, bytes.byteLength)
+          prepared.push({
+            request: source.request,
+            bytes,
+            ...(source.result.camera ? { camera: source.result.camera } : {}),
+          })
         }
         const finalDocument = currentReviewDocument()
         const finalGate = await verifyDesignGate({
@@ -910,37 +1004,63 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         let completed = false
         try {
           const views: ReviewViewResult[] = []
-          for (const source of captures) {
+          const internalIds: string[] = []
+          for (const source of prepared) {
             assertReviewStateUnchanged(snapshot, `before-upload:${source.request.id}`)
+            const internalId = `${batchId}--${source.request.id}`
             let artifact: ArtifactDescriptor
             try {
               artifact = await uploadArtifact(bootstrap, {
                 id: source.request.id, fileName: `${source.request.id}.png`, mimeType: 'image/png',
                 bytes: source.bytes, width: source.request.width, height: source.request.height,
                 areaId: source.request.areaId,
-              }, { batchId })
+              }, { batchId, internalId, resultId: source.request.id })
             } catch (error) {
               throw reviewNotReady(`upload:${source.request.id}`, `Review artifact upload failed: ${source.request.id}`, {
                 cause: error instanceof Error ? error.message : String(error),
               })
             }
+            internalIds.push(internalId)
             assertReviewStateUnchanged(snapshot, `after-upload:${source.request.id}`)
             views.push({
               id: source.request.id, kind: source.request.kind,
               ...(source.request.areaId ? { areaId: source.request.areaId } : {}),
               ...(source.request.carrier ? { carrier: source.request.carrier } : {}),
               artifact,
-              ...(source.result.camera ? { camera: source.result.camera } : {}),
+              ...(source.camera ? { camera: source.camera } : {}),
             })
           }
           assertReviewStateUnchanged(snapshot, 'before-commit')
           assertReviewPlanUnchanged(plan, width, height, 'before-commit-plan')
           try {
-            await commitArtifactBatch(bootstrap, batchId, captures.map((source) => source.request.id))
+            await commitArtifactBatch(
+              bootstrap,
+              batchId,
+              internalIds,
+              prepared.map((source) => source.request.id),
+            )
           } catch (error) {
             throw reviewNotReady('upload-commit', 'Review artifact batch commit failed', {
               cause: error instanceof Error ? error.message : String(error),
             })
+          }
+          for (let index = 0; index < prepared.length; index += 1) {
+            const source = prepared[index]
+            const view = views[index]
+            try {
+              await readBackReviewArtifact(
+                view.artifact,
+                internalIds[index],
+                source.bytes,
+                source.request.width,
+                source.request.height,
+                (length) => { encodedByteTotal = assertReviewEncodedByteBudget(encodedByteTotal, length) },
+              )
+            } catch (error) {
+              throw reviewNotReady(`readback:${source.request.id}`, `Review artifact readback failed: ${source.request.id}`, {
+                cause: error instanceof Error ? error.message : String(error),
+              })
+            }
           }
 
           // Final no-await barrier. Every digest and network operation is complete;

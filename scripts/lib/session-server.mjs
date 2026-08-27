@@ -99,11 +99,18 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
             if (session.artifacts.has(id)) return json(response, 409, { ok: false, error: 'Artifact already exists' })
             const batch = session.stagedArtifacts.get(batchId) ?? new Map()
             if (batch.has(id)) return json(response, 409, { ok: false, error: 'Artifact already staged' })
+            const resultId = String(request.headers['x-artifact-result-id'] ?? id)
+            if (!/^[A-Za-z0-9._-]{1,160}$/.test(resultId)
+              || [...batch.values()].some((artifact) => artifact.resultId === resultId)) {
+              return json(response, 400, { ok: false, error: 'Invalid or duplicate artifact result id' })
+            }
             const bytes = await readBody(request, maxUploadBytes)
             const encodedName = request.headers['x-artifact-file-name']
             const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
             const artifact = {
               id,
+              resultId,
+              batchId,
               fileName: sanitizeArtifactName(decodedName),
               mimeType: String(request.headers['content-type'] ?? 'application/octet-stream').split(';')[0],
               bytes,
@@ -121,37 +128,60 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
             }
             batch.set(id, artifact)
             session.stagedArtifacts.set(batchId, batch)
-            json(response, 201, artifact)
+            const { bytes: _bytes, ...descriptor } = artifact
+            json(response, 201, { ok: true, ...descriptor })
             return
           }
           if (request.method === 'POST' && parts[5] === 'commit') {
             const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
             const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : null
+            const resultIds = Array.isArray(body?.resultIds) ? body.resultIds : artifactIds
             const batch = session.stagedArtifacts.get(batchId)
             if (!batch || !artifactIds || artifactIds.length !== batch.size
-              || artifactIds.some((id, index) => typeof id !== 'string' || id !== [...batch.keys()][index])) {
+              || !resultIds || resultIds.length !== batch.size
+              || artifactIds.some((id, index) => typeof id !== 'string' || id !== [...batch.keys()][index])
+              || resultIds.some((id, index) => typeof id !== 'string' || id !== [...batch.values()][index].resultId)) {
               return json(response, 409, { ok: false, error: 'Artifact batch is incomplete or mismatched' })
             }
             if (artifactIds.some((id) => session.artifacts.has(id))) {
               return json(response, 409, { ok: false, error: 'Artifact already exists' })
             }
             const committed = new Map(batch)
-            for (const [id, artifact] of committed) session.artifacts.set(id, artifact)
-            session.committedArtifactBatches.set(batchId, committed)
+            const prior = new Map()
+            for (const [id, artifact] of committed) {
+              const previous = session.currentArtifactsByResultId.get(artifact.resultId)
+              prior.set(artifact.resultId, previous)
+              if (previous) {
+                session.artifacts.delete(previous.id)
+                if (previous.batchId) session.committedArtifactBatches.delete(previous.batchId)
+              }
+              session.artifacts.set(id, artifact)
+              session.currentArtifactsByResultId.set(artifact.resultId, artifact)
+            }
+            session.committedArtifactBatches.set(batchId, { committed, prior })
             session.stagedArtifacts.delete(batchId)
-            json(response, 201, { ok: true, artifactIds })
+            json(response, 201, { ok: true, batchId, artifactIds, resultIds })
             return
           }
           if (request.method === 'DELETE' && parts.length === 5) {
             session.stagedArtifacts.delete(batchId)
-            const committed = session.committedArtifactBatches.get(batchId)
-            if (committed) {
-              for (const [id, artifact] of committed) {
-                if (session.artifacts.get(id) === artifact) session.artifacts.delete(id)
+            const transaction = session.committedArtifactBatches.get(batchId)
+            if (transaction) {
+              for (const [id, artifact] of transaction.committed) {
+                if (session.artifacts.get(id) === artifact) {
+                  session.artifacts.delete(id)
+                  const previous = transaction.prior.get(artifact.resultId)
+                  if (previous) {
+                    session.artifacts.set(previous.id, previous)
+                    session.currentArtifactsByResultId.set(artifact.resultId, previous)
+                  } else {
+                    session.currentArtifactsByResultId.delete(artifact.resultId)
+                  }
+                }
               }
               session.committedArtifactBatches.delete(batchId)
             }
-            json(response, 200, { ok: true })
+            json(response, 200, { ok: true, batchId, purged: true })
             return
           }
           json(response, 404, { ok: false, error: 'Artifact batch route not found' })
@@ -191,6 +221,9 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
             'content-type': artifact.mimeType,
             'content-length': artifact.byteLength,
             'cache-control': 'no-store',
+            'x-artifact-id': artifact.id,
+            'x-artifact-result-id': artifact.resultId ?? artifact.id,
+            'x-artifact-sha256': artifact.sha256,
           })
           response.end(artifact.bytes)
           return
@@ -240,6 +273,7 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
         artifacts: new Map(),
         stagedArtifacts: new Map(),
         committedArtifactBatches: new Map(),
+        currentArtifactsByResultId: new Map(),
       }
       sessions.set(session.id, session)
       return { id: session.id, token: session.token }
@@ -252,7 +286,11 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
     },
     getArtifacts(sessionId) {
       const session = sessions.get(sessionId)
-      return session ? [...session.artifacts.values()] : []
+      return session ? [...session.artifacts.values()].map((artifact) => ({
+        ...artifact,
+        internalId: artifact.id,
+        id: artifact.resultId ?? artifact.id,
+      })) : []
     },
     disposeSession(sessionId) {
       sessions.delete(sessionId)

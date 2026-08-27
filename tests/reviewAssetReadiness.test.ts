@@ -6,6 +6,7 @@ import {
 } from '../src/label/exportReadiness'
 import type { LabelAreaConfig } from '../src/label/types'
 import type { BakeResult } from '../src/state/stores'
+import { bindImageAssetReceipt } from '../src/label/imageAssetReceipt'
 
 function owner(): LabelAreaConfig {
   return {
@@ -36,8 +37,12 @@ describe('review bake asset readiness', () => {
     } satisfies BakeResult
 
     expect(isBakeAssetReadyForArea(area, bake)).toBe(false)
+    const imageAssetReceipts = { mark: `image/image/png/20x10/sha256:${'a'.repeat(64)}` }
+    bindImageAssetReceipt(area.id, 'mark', 'asset://brand-mark', 20, 10, imageAssetReceipts.mark)
     expect(isBakeAssetReadyForArea(area, {
-      ...bake, assetReadinessKey: designAssetReadinessKey(area),
+      ...bake,
+      imageAssetReceipts,
+      assetReadinessKey: designAssetReadinessKey(area, imageAssetReceipts),
     })).toBe(true)
     expect(designAssetReadinessKey({
       ...area,
