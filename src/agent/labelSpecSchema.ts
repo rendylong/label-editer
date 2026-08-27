@@ -1,7 +1,7 @@
 import type { ErrorObject, ValidateFunction } from 'ajv'
 import labelSpecV2Schema from './label-spec-v2.schema.json'
 import validateV2 from './generated/labelSpecV2Validator'
-import type { CarrierMode, ProcessIntent } from './designContracts'
+import type { CarrierMode, LabelSide, ProcessIntent } from './designContracts'
 import type { DesignBinding, LayerDesignMetrics, PhysicalArtboard, SubstrateSpec, TargetAspectPolicy } from '../label/types'
 import { canonicalFontStack } from '../label/fontStack'
 import { validateVectorPath } from '../label/vectorPathValidation'
@@ -29,7 +29,7 @@ export interface LabelSpecAreaV2 extends UnknownRecord {
   name: string
   target: LabelSpecTargetV2
   surfaceMode: 'overlay' | 'replace'
-  side?: 'front' | 'back'
+  side?: LabelSide
   carrier?: CarrierMode
   artboard?: PhysicalArtboard
   substrate?: SubstrateSpec

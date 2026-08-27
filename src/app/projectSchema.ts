@@ -40,6 +40,7 @@ type UnknownRecord = Record<string, unknown>
 const POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 const CRAFT_TYPES = new Set(['foil', 'emboss', 'deboss', 'matte', 'uv', 'stroke'])
 const CARRIER_MODES = new Set<string>(layoutBlueprintV1Schema.$defs.carrier.enum)
+const LABEL_SIDES = new Set<string>(['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'])
 const PROCESS_TYPES = new Set<string>(layoutBlueprintV1Schema.$defs.process.properties.process.enum)
 const REQUIRED_MASKS = new Set<string>(layoutBlueprintV1Schema.$defs.process.properties.requiredMask.enum)
 const SHAPE_KINDS = new Set<ShapeKind>([
@@ -352,6 +353,7 @@ function normalizeLayer(raw: unknown): LabelLayer {
     validateCommonLayerFields(raw)
     requiredString(raw, 'src', { nonEmpty: true })
     for (const field of ['naturalWidth', 'naturalHeight', 'width', 'height']) requiredFiniteNumber(raw, field)
+    if (raw.fit !== undefined && raw.fit !== 'contain' && raw.fit !== 'cover' && raw.fit !== 'stretch') layerError('fit 无效')
     return {
       ...cloneValue(raw) as unknown as LabelLayer,
       ...(raw.designMetrics === undefined ? {} : { designMetrics: normalizeDesignMetrics(raw.designMetrics) }),
@@ -495,8 +497,8 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
   if (raw.surfaceMode !== undefined && raw.surfaceMode !== 'overlay' && raw.surfaceMode !== 'replace') {
     areaError('surfaceMode', '必须是 overlay 或 replace')
   }
-  if (raw.side !== undefined && raw.side !== 'front' && raw.side !== 'back') {
-    areaError('side', '必须是 front 或 back')
+  if (raw.side !== undefined && (typeof raw.side !== 'string' || !LABEL_SIDES.has(raw.side))) {
+    areaError('side', '无效')
   }
 
   const range = normalizeRange(requiredAreaValue(raw, 'range', legacy, { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }))
@@ -540,7 +542,7 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     surfaceMode: raw.surfaceMode === 'overlay' || raw.surfaceMode === 'replace'
       ? raw.surfaceMode
       : /label|贴标|标签/i.test(nodeNameValue) ? 'replace' : 'overlay',
-    ...(raw.side === 'front' || raw.side === 'back' ? { side: raw.side } : {}),
+    ...(typeof raw.side === 'string' && LABEL_SIDES.has(raw.side) ? { side: raw.side as LabelAreaConfig['side'] } : {}),
     remap,
     range,
     canvas,

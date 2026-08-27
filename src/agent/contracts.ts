@@ -109,7 +109,7 @@ export interface QcAreaEvidence {
   areaId: string
   meshIndex: number
   nodeName: string
-  side?: 'front' | 'back'
+  side?: 'front' | 'back' | 'left' | 'right' | 'wrap' | 'top' | 'bottom' | 'neck' | 'custom'
   surfaceMode: 'overlay' | 'replace'
   requiredChannels: QcDiagnosticChannel[]
   viewIds: string[]

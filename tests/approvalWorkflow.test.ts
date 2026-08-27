@@ -82,12 +82,12 @@ function blueprint(): LayoutBlueprintV1 {
   }
 }
 
-function designManifest(blueprintSha256: string): DesignReviewManifestV1 {
+function designManifest(blueprintSha256: string, side: LayoutBlueprintV1['areas'][number]['side'] = 'front'): DesignReviewManifestV1 {
   return {
     version: 1, createdAt: '2026-08-27T10:00:00.000Z',
     blueprint: { revision: 'design-rev-001', sha256: blueprintSha256 },
     html: { sha256: '1'.repeat(64) }, references: [],
-    areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
+    areas: [{ id: 'front', side, carrier: 'direct_surface_print' }],
     artifacts: [{
       id: 'mockup-front', path: 'mockup-front.png', sha256: '2'.repeat(64), mimeType: 'image/png',
       width: 1600, height: 1200, viewKind: 'mockup-front',
@@ -106,7 +106,7 @@ function labelDocument(sourceBlueprint: LayoutBlueprintV1, blueprintSha256: stri
   return {
     version: 2,
     areas: [{
-      id: 'front', name: 'Front', target: { stableSelector: 'mesh:0/node:1' }, surfaceMode: 'overlay', side: 'front',
+      id: 'front', name: 'Front', target: { stableSelector: 'mesh:0/node:1' }, surfaceMode: 'overlay', side: compiledArea.side,
       range: { uStart: 0.1, uWidth: 0.3, vStart: 0.2, vHeight: 0.5 },
       remap: { mode: 'cylindrical', wrap: 1, offset: 0, mirrorU: false },
       carrier: 'direct_surface_print', artboard: { widthMm: 40, heightMm: 60, background: 'transparent' },
@@ -135,7 +135,11 @@ function projectDocument(sourceBlueprint: LayoutBlueprintV1, blueprintSha256: st
   return serializeLabelProject('bottle.glb', applyStructuredLabelSpec(shell, spec).areas)
 }
 
-function handoff(blueprintSha256: string, designManifestSha256: string): EditorHandoffV2 {
+function handoff(
+  blueprintSha256: string,
+  designManifestSha256: string,
+  side: LayoutBlueprintV1['areas'][number]['side'] = 'front',
+): EditorHandoffV2 {
   return {
     handoff_version: 2, status: 'approved',
     source: {
@@ -149,7 +153,7 @@ function handoff(blueprintSha256: string, designManifestSha256: string): EditorH
     },
     model: { package_type: 'bottle' },
     areas: [{
-      id: 'front', side: 'front', carrier: 'direct_surface_print', placement: 'Centered front.',
+      id: 'front', side, carrier: 'direct_surface_print', placement: 'Centered front.',
       physical_size_mm: { width: 40, height: 60 }, blueprint_area_id: 'front',
     }],
     assets: [], production_constraints: {}, assumptions: [], blockers: [],
@@ -205,13 +209,13 @@ function productionManifest(input: {
   }
 }
 
-function workflowFixture() {
-  const state: any = { blueprint: blueprint(), modelFingerprint: 'model-fingerprint-001' }
+function workflowFixture(sourceBlueprint = blueprint()) {
+  const state: any = { blueprint: sourceBlueprint, modelFingerprint: 'model-fingerprint-001' }
   state.blueprintSha256 = sha256(JSON.stringify(state.blueprint))
-  state.designManifest = designManifest(state.blueprintSha256)
+  state.designManifest = designManifest(state.blueprintSha256, sourceBlueprint.areas[0].side)
   state.designManifestSha256 = sha256(JSON.stringify(state.designManifest))
   state.document = labelDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
-  state.handoff = handoff(state.blueprintSha256, state.designManifestSha256)
+  state.handoff = handoff(state.blueprintSha256, state.designManifestSha256, sourceBlueprint.areas[0].side)
   state.productionManifest = productionManifest(state)
   state.productionManifestSha256 = sha256(JSON.stringify(state.productionManifest))
   state.productionApproval = {
@@ -256,6 +260,17 @@ describe('design approval gate', () => {
       blueprintSha256: state.blueprintSha256, designReviewManifestSha256: state.designManifestSha256,
     })
   })
+
+  it.each(['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'] as const)(
+    'accepts approved %s side identity without lossy front/back coercion',
+    async (side) => {
+      const sourceBlueprint = blueprint()
+      sourceBlueprint.areas[0].side = side
+      const state = workflowFixture(sourceBlueprint)
+
+      await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true, status: 'approved' })
+    },
+  )
 
   it('represents awaiting and rejected states deterministically without claiming approval', async () => {
     const awaiting = workflowFixture(); awaiting.handoff.status = 'awaiting_user_approval'
@@ -334,6 +349,99 @@ describe('design approval gate', () => {
     const state = workflowFixture()
     state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
     state.document.areas[0].layers[0].text = 'UNAPPROVED PROJECT COPY'
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it('binds every runtime shape input not superseded by physical metrics', async () => {
+    const sourceBlueprint = blueprint()
+    sourceBlueprint.areas[0].layers.push({
+      id: 'frame', kind: 'shape', boundsMm: { x: 2, y: 2, width: 36, height: 56 },
+      anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 2, processes: [],
+      shape: 'rectangle', fill: 'transparent', stroke: '#111111',
+    })
+    const state = workflowFixture(sourceBlueprint)
+    state.document.areas[0].layers[2].cornerRadius = 28
+
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it('binds the compiled image asset and fit mode as actual editor render inputs', async () => {
+    const sourceBlueprint = blueprint()
+    sourceBlueprint.assets.push({
+      id: 'mark', path: 'assets/mark.png', sha256: '9'.repeat(64), mimeType: 'image/png', width: 160, height: 40,
+    })
+    sourceBlueprint.areas[0].layers = [{
+      id: 'mark', kind: 'image', boundsMm: { x: 4, y: 8, width: 32, height: 12 },
+      anchor: 'center', rotation: 0, opacity: 1, visible: true, zIndex: 0, processes: [],
+      assetId: 'mark', fit: 'contain',
+    }]
+    const state = workflowFixture(sourceBlueprint)
+    state.document.areas[0].layers[0].fit = 'cover'
+
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it('compares resolved render inputs and ignores stale proxy pixels when physical metrics override them', async () => {
+    const state = workflowFixture()
+    const project = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    project.areas[0].layers[0].x = 999
+    project.areas[0].layers[0].y = 888
+    project.areas[0].layers[0].fontSize = 777
+    project.areas[0].layers[0].letterSpacing = 666
+    project.areas[0].layers[0].lineHeight = 4
+    state.document = project
+
+    await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true, status: 'approved' })
+  })
+
+  it.each([
+    ['x', (layer: any) => { delete layer.designMetrics.boundsMm }, (layer: any) => { layer.x += 1 }],
+    ['width', (layer: any) => { delete layer.designMetrics.boundsMm }, (layer: any) => { layer.width += 1 }],
+    ['fontSize', (layer: any) => { delete layer.designMetrics.fontSizeMm }, (layer: any) => { layer.fontSize += 1 }],
+    ['letterSpacing', (layer: any) => { delete layer.designMetrics.letterSpacingEm }, (layer: any) => { layer.letterSpacing += 1 }],
+    ['lineHeight', (layer: any) => { delete layer.designMetrics.lineHeight }, (layer: any) => { layer.lineHeight += 0.1 }],
+  ])('binds Project %s after its corresponding physical override is absent', async (_field, removeOverride, mutate) => {
+    const state = workflowFixture()
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    const layer = state.document.areas[0].layers[0]
+    removeOverride(layer)
+    await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true })
+
+    mutate(layer)
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it('binds Project shape pixels when optional physical stroke and radius overrides are absent', async () => {
+    const sourceBlueprint = blueprint()
+    sourceBlueprint.areas[0].layers.push({
+      id: 'frame', kind: 'shape', boundsMm: { x: 2, y: 2, width: 36, height: 56 },
+      anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 2, processes: [],
+      shape: 'rectangle', fill: 'transparent', stroke: '#111111',
+    })
+    const state = workflowFixture(sourceBlueprint)
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    state.document.areas[0].layers[2].strokeWidth = 3
+
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it('fingerprints bounded embedded font bytes instead of trusting an unchanged font name', async () => {
+    const sourceBlueprint = blueprint()
+    const approvedBytes = Buffer.from('approved-font-bytes')
+    sourceBlueprint.assets.push({
+      id: 'brand-font', path: 'assets/brand.woff2', sha256: sha256(approvedBytes.toString('binary')),
+      mimeType: 'font/woff2',
+    })
+    sourceBlueprint.areas[0].layers[0].fontStack = undefined
+    sourceBlueprint.areas[0].layers[0].fontAsset = 'brand-font'
+    const state = workflowFixture(sourceBlueprint)
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    state.document.areas[0].fonts = [{
+      name: 'assets/brand.woff2', dataUrl: `data:font/woff2;base64,${approvedBytes.toString('base64')}`,
+    }]
+    await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true })
+
+    state.document.areas[0].fonts[0].dataUrl = `data:font/woff2;base64,${Buffer.from('forged-font-bytes').toString('base64')}`
     await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
   })
 
@@ -587,6 +695,27 @@ describe('revision classification', () => {
   })
 
   it.each([
+    ['side', (layer: any, area: any) => { area.side = 'wrap' }],
+    ['stroke width', (layer: any) => { layer.strokeWidthMm = 0.8 }],
+    ['corner radius', (layer: any) => { layer.cornerRadiusMm = 3 }],
+    ['fill rule', (layer: any) => { layer.fillRule = 'evenodd' }],
+  ])('classifies same-revision blueprint %s changes from canonical content', (_label, mutate) => {
+    const approved = snapshot()
+    approved.blueprint.areas[0].layers.push({
+      id: 'frame', kind: 'shape', boundsMm: { x: 2, y: 2, width: 36, height: 56 },
+      anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 2, processes: [],
+      shape: 'path', pathData: 'M0 0H1V1H0Z', pathViewBox: [0, 0, 1, 1], fillRule: 'nonzero',
+      fill: 'transparent', stroke: '#111111', strokeWidthMm: 0.2, cornerRadiusMm: 0,
+    })
+    const current = structuredClone(approved)
+    mutate(current.blueprint.areas[0].layers[2], current.blueprint.areas[0])
+
+    expect(classification(current, approved)).toMatchObject({
+      valid: false, invalidates: 'design', reasons: expect.arrayContaining(['design:layout']),
+    })
+  })
+
+  it.each([
     ['copy', (area: any) => { area.layers[0].text = 'CURRENT DOCUMENT CHANGED' }],
     ['physical layout', (area: any) => { area.layers[0].designMetrics.boundsMm.x = 7 }],
     ['process intent', (area: any) => { area.layers[0].processes = [{ process: 'pad_print' }] }],
@@ -665,5 +794,14 @@ describe('revision classification', () => {
 
   it('returns valid when no design or production facts changed', () => {
     expect(classification(snapshot())).toEqual({ valid: true, invalidates: 'none' })
+  })
+
+  it('fails an unrepresentable document closed without escaping the classifier union', () => {
+    const current = snapshot()
+    current.document = { version: 999, areas: [] }
+
+    expect(classification(current)).toEqual({
+      valid: false, invalidates: 'design', reasons: ['design:document', 'production:area-targets'],
+    })
   })
 })

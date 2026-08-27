@@ -318,7 +318,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     return () => {
       alive = false
     }
-  }, [layers.map((l) => (l.kind === 'image' ? `${l.src}:${l.width}:${l.height}:${JSON.stringify(l.craft)}` : '')).join('|'), config?.meshIndex])
+  }, [layers.map((l) => (l.kind === 'image' ? `${l.src}:${l.naturalWidth}:${l.naturalHeight}:${l.width}:${l.height}:${l.fit ?? 'stretch'}:${JSON.stringify(l.craft)}` : '')).join('|'), config?.meshIndex])
 
   const displayHeight = useMemo(() => {
     if (!spec || displayWidth <= 0) return 300

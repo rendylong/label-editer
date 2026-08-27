@@ -691,7 +691,8 @@ export function drawImageMaskShape(
   temp.height = height
   const tctx = temp.getContext('2d')!
   tctx.clearRect(0, 0, width, height)
-  tctx.drawImage(image, 0, 0, width, height)
+  const fit = resolveImageFitBox(layer)
+  tctx.drawImage(image, fit.x, fit.y, fit.width, fit.height)
   tctx.globalCompositeOperation = 'source-in'
   tctx.fillStyle = `rgb(${gray},${gray},${gray})`
   tctx.fillRect(0, 0, width, height)
@@ -718,7 +719,8 @@ export function renderCraftedImage(image: CanvasImageSource, layer: ImageLayer):
   base.width = width
   base.height = height
   const bctx = base.getContext('2d')!
-  bctx.drawImage(image, 0, 0, width, height)
+  const fit = resolveImageFitBox(layer)
+  bctx.drawImage(image, fit.x, fit.y, fit.width, fit.height)
   const foil = layer.craft.find((effect) => effect.type === 'foil')
   if (foil) {
     const geometry = foilKonvaGradient(foil, width, height)!
@@ -751,6 +753,27 @@ export function renderCraftedImage(image: CanvasImageSource, layer: ImageLayer):
   }
   octx.drawImage(base, 0, 0)
   return output
+}
+
+/** CSS object-fit compatible mapping shared by preview color and all image masks. */
+export function resolveImageFitBox(layer: Pick<ImageLayer, 'fit' | 'naturalWidth' | 'naturalHeight' | 'width' | 'height'>): {
+  x: number
+  y: number
+  width: number
+  height: number
+} {
+  const frameWidth = Math.max(1, layer.width)
+  const frameHeight = Math.max(1, layer.height)
+  const sourceWidth = Number.isFinite(layer.naturalWidth) && layer.naturalWidth > 0 ? layer.naturalWidth : frameWidth
+  const sourceHeight = Number.isFinite(layer.naturalHeight) && layer.naturalHeight > 0 ? layer.naturalHeight : frameHeight
+  const fit = layer.fit ?? 'stretch'
+  if (fit === 'stretch') return { x: 0, y: 0, width: frameWidth, height: frameHeight }
+  const scale = fit === 'contain'
+    ? Math.min(frameWidth / sourceWidth, frameHeight / sourceHeight)
+    : Math.max(frameWidth / sourceWidth, frameHeight / sourceHeight)
+  const width = sourceWidth * scale
+  const height = sourceHeight * scale
+  return { x: (frameWidth - width) / 2, y: (frameHeight - height) / 2, width, height }
 }
 
 /**

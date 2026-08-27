@@ -80,6 +80,21 @@ function makeImageLayer(): Record<string, unknown> {
   }
 }
 
+it.each(['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'] as const)(
+  'round-trips Project v3 side %s and image fit as additive fields',
+  (side) => {
+    const project = projectWithLayers([{ ...makeImageLayer(), fit: 'contain' }])
+    ;(project.areas as Array<Record<string, unknown>>)[0].side = side
+
+    const parsed = parseLabelProject(project)
+    const serialized = serializeLabelProject('bottle.glb', parsed.areas)
+
+    expect(serialized.areas[0].side).toBe(side)
+    expect(serialized.areas[0].layers[0]).toMatchObject({ kind: 'image', fit: 'contain' })
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(serialized)).toBe(true)
+  },
+)
+
 function projectWithLayers(layers: unknown[]): Record<string, unknown> {
   return {
     version: 3,

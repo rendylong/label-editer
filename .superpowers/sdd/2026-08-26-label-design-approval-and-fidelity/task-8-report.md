@@ -99,3 +99,50 @@
 
 - The canonical Project design projection intentionally treats physical design metadata, not canvas-derived pixel coordinates, as the approval authority. The physical-layout resolver owns translation from that metadata to a current production canvas, while the production target digest binds the canvas and mapping inputs.
 - The original Task 8 residuals for caller-supplied model inspection, Task 10 PNG-byte validation, and the optional headful preview environment remain unchanged.
+
+## Fix round 2 — resolved editor render-input authority
+
+### RED reproductions
+
+- Command: `pnpm vitest run tests/approvalWorkflow.test.ts tests/blueprintCompiler.test.ts tests/labelSpecV2.test.ts tests/projectSchema.test.ts tests/craft.test.ts`
+- Before implementation: 5 files ran, 35 tests failed and 213 passed.
+- Exact bypasses reproduced:
+  - a Project/Spec shape `cornerRadius` change passed the design gate when no physical radius overrode it;
+  - a compiled blueprint image dropped `fit`, while Label Spec/Project schemas rejected the field and contain/cover masks rendered as stretch;
+  - a legacy blueprint with omitted image `fit` rendered as contain in design review but was not compilable with the same default;
+  - changing referenced embedded font bytes under the same area font name remained approved;
+  - `left`, `right`, `wrap`, `top`, `bottom`, `neck`, and `custom` were lost during blueprint compilation/Spec/Project apply;
+  - same-revision blueprint changes to side, `strokeWidthMm`, `cornerRadiusMm`, and `fillRule` returned `invalidates: none`.
+
+### Semantic decisions and implementation
+
+- Replaced metadata-only comparison with one canonical resolved render-input projection. Label Spec is applied through `applyStructuredLabelSpec()` on a deterministic 4096px-high artboard-proportional canvas; Project v3 is parsed through `parseLabelProject()` on its current production canvas. Both sides then reuse `resolvePhysicalLayer()` and `normalizeShapeLayer()` before comparison. The approved blueprint is compiled through the real compiler and resolved against the same Spec canvas or current Project shell.
+- The projection covers resolved position/frame, typography, shape geometry/path/fill rule/stroke/radius, opacity/rotation/visibility/anchor/order, text behavior, image source/fit/aspect, processes/craft, carrier/artboard/substrate/global craft, side, and referenced font assets. Raw proxy pixels are ignored only when the same physical resolver actually overwrites them; removing an individual physical override makes its runtime value approval-bearing.
+- Referenced Project embedded font data URLs are decoded within a 28 MiB data-URL bound and represented only by SHA-256 plus MIME metadata. The projection never copies font payloads. A browser-safe synchronous SHA-256 helper keeps the existing synchronous revision-classifier API and is cross-checked by the gate regression against Node SHA-256 evidence.
+- Added `ImageLayer.fit` plus Label Spec/Project schema support for `contain`, `cover`, and `stretch`. The compiler persists fit and approved intrinsic image dimensions; one shared fit-box function drives preview color and every image mask, and image-cache identity includes the intrinsic frame inputs. Legacy Spec/Project documents with no fit retain the former stretch behavior, while a legacy blueprint omission inherits design review's contain default. Unknown fit or missing approved intrinsic dimensions fails as `UNREPRESENTABLE_LAYER` rather than silently changing design-review/editor output.
+- Expanded Spec/Project/runtime side identity to the full `LabelSide` vocabulary. Only `back` retains the legacy automatic half-wrap offset; every other side remains distinct and uses the explicit production remap instead of inventing an orientation.
+- Completed classifier layout content with area side plus `fillRule`, `strokeWidthMm`, and `cornerRadiusMm`; all other blueprint fields remain assigned to their deterministic design categories. Same revision text no longer masks changed content.
+
+### Scope expansion
+
+- Added `src/agent/syncSha256.ts` and replaced `src/agent/designProjection.ts` internals.
+- Extended the Label Spec and Project JSON schemas/types, regenerated `labelSpecV2Validator.ts`, and updated Spec/Project application boundaries.
+- Extended runtime image rendering in `src/label/craft.ts` and `src/label/LabelCanvas.tsx`, plus the QC side evidence type.
+- Added exact regressions across approval workflow, blueprint compiler, schema/apply/project round-trip, and image mask rendering tests.
+
+### GREEN verification
+
+- Focused TDD suite: 5 files, 266 tests passed.
+- Affected gate/compiler/schema/fidelity/design-review/browser-runtime suite: 10 files, 473 tests passed, including 75 real-Chromium design-review tests and 20 browser Agent runtime tests.
+- TypeScript: `pnpm exec tsc -b --pretty false` exited 0 with no diagnostics.
+- Full suite: `pnpm test -- --reporter=dot --testTimeout=10000` passed all 76 files; 1,239 tests passed and 1 environment-gated test skipped. Two immediately preceding default-5-second runs each timed out in a different Chromium case under full-suite concurrency; the first isolated retry passed in 575 ms, and the complete 75-test browser suite passed in the affected run without changing its assertions.
+- Production build: `pnpm build` exited 0; Vite transformed 222 modules. Existing browser-externalization, mixed GLTFLoader import, and large-chunk warnings remain non-failing.
+- Explicit packaged plugin E2E: real front/back apply/export passed in 151 seconds; 1 passed and 1 environment-gated test skipped.
+- `git diff --check` and tracked-clean status are rerun immediately before and after the fix commit.
+
+### Residual risks
+
+- The 28 MiB encoded-font bound covers the existing 20 MiB uploaded-font limit, but SHA-256 is synchronous to preserve the classifier API; a maximum-size font adds bounded gate latency.
+- Full side identity is lossless, but non-front/back physical orientation is deliberately not inferred. Its UV/remap/canvas placement remains a separately bound production fact.
+- Path-referenced Spec assets are matched to the SHA-bound blueprint asset declaration; embedded Project image/font bytes are hashed directly. Re-reading arbitrary external asset paths remains the asset loader/design-review publisher responsibility.
+- The earlier Task 8 residuals for caller-supplied model inspection and Task 10 published PNG-byte validation remain unchanged.

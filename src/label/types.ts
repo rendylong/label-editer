@@ -3,7 +3,7 @@
  * 所有数据模型必须 JSON 可序列化（.lbl 项目文件依赖）。
  */
 
-import type { CarrierMode, LabelSubstrate, NormalizedBounds, PhysicalBounds, ProcessIntent } from '../agent/designContracts'
+import type { CarrierMode, LabelSide, LabelSubstrate, NormalizedBounds, PhysicalBounds, ProcessIntent } from '../agent/designContracts'
 
 export type { CarrierMode, ProcessIntent } from '../agent/designContracts'
 
@@ -121,6 +121,8 @@ export interface ImageLayer extends LayerPhysicalMetadata {
   /** 原始像素尺寸 */
   naturalWidth: number
   naturalHeight: number
+  /** How source pixels map into the editable image frame. Legacy omission means stretch. */
+  fit?: 'contain' | 'cover' | 'stretch'
   width: number
   height: number
   x: number
@@ -277,7 +279,7 @@ export interface LabelAreaConfig {
    */
   surfaceMode?: 'overlay' | 'replace'
   /** Explicit side identity keeps repeated spec imports from swapping front/back offsets. */
-  side?: 'front' | 'back'
+  side?: LabelSide
   remap: RemapParams
   /** 区域范围（尺寸/位置，可调） */
   range: LabelAreaRange

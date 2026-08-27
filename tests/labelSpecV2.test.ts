@@ -481,6 +481,29 @@ describe('Label Spec v2', () => {
     }
   })
 
+  it.each(['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'] as const)(
+    'accepts and applies the full %s side vocabulary without collapsing identity',
+    (side) => {
+      const input = {
+        version: 2,
+        areas: [{
+          id: side, name: side, target: { meshIndex: 0 }, surfaceMode: 'overlay', side,
+          range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+          layers: [{
+            id: 'image', type: 'image', asset: 'mark.png', fit: 'cover',
+            x: 0.5, y: 0.5, width: 0.5, height: 0.25,
+          }],
+        }],
+      }
+
+      expect(validateLabelSpec(input).ok).toBe(true)
+      expect(applyStructuredLabelSpec(baseArea, input).areas[0]).toMatchObject({
+        side,
+        layers: [{ kind: 'image', fit: 'cover' }],
+      })
+    },
+  )
+
   it('rejects unknown fields and invalid craft parameters', () => {
     const unknown = validateLabelSpec({ version: 2, surprise: true, areas: [] })
     expect(unknown.ok).toBe(false)

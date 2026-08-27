@@ -129,6 +129,13 @@ function assetPath(blueprint: LayoutBlueprintV1, layer: LayoutBlueprintLayer, ar
   return asset.path
 }
 
+function imageAsset(blueprint: LayoutBlueprintV1, layer: LayoutBlueprintLayer, area: LayoutBlueprintArea) {
+  const asset = blueprint.assets.find((candidate) => candidate.id === layer.assetId)
+  if (!asset) unrepresentable(area, layer, `asset ${layer.assetId ?? '(missing)'} is unavailable`)
+  if (!asset.width || !asset.height) unrepresentable(area, layer, `image asset ${asset.id} has no intrinsic dimensions`)
+  return asset
+}
+
 function fontFamily(blueprint: LayoutBlueprintV1, area: LayoutBlueprintArea, layer: LayoutBlueprintLayer): string {
   if (layer.fontAsset) return assetPath(blueprint, { ...layer, assetId: layer.fontAsset }, area)
   if (layer.fontStack?.length) return canonicalFontStack(layer.fontStack)[0]
@@ -192,10 +199,18 @@ function compileLayer(blueprint: LayoutBlueprintV1, area: LayoutBlueprintArea, l
   }
 
   if (layer.kind === 'image') {
+    const fit = layer.fit ?? 'contain'
+    if (fit !== 'contain' && fit !== 'cover' && fit !== 'stretch') {
+      return unrepresentable(area, layer, `image fit ${String(fit)} is not representable`)
+    }
+    const asset = imageAsset(blueprint, layer, area)
     return {
       ...common,
       type: 'image',
-      asset: assetPath(blueprint, layer, area),
+      asset: asset.path,
+      fit,
+      naturalWidth: asset.width!,
+      naturalHeight: asset.height!,
       width: bounded(bounds.width, 0.001, 4),
       height: bounded(bounds.height, 0.001, 4),
     }
@@ -238,13 +253,12 @@ export function compileBlueprintArea(
   area: LayoutBlueprintArea,
   shell?: ResolvedModelAreaShell,
 ): LabelSpecAreaV2 {
-  const side = area.side === 'front' || area.side === 'back' ? area.side : undefined
   return {
     id: area.id,
     name: shell?.name ?? area.id,
     target: structuredClone(shell?.target ?? { nodeName: area.id }),
     surfaceMode: shell?.surfaceMode ?? 'overlay',
-    ...(side ? { side } : {}),
+    side: area.side,
     range: structuredClone(shell?.range ?? { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }),
     ...(shell?.remap === undefined ? {} : { remap: structuredClone(shell.remap) }),
     carrier: area.carrier,

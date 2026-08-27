@@ -805,8 +805,15 @@ function assertCurrentDocumentDesign(
   document: UnknownRecord,
   blueprint: LayoutBlueprintV1,
 ): void {
-  const approved = canonicalApprovedBlueprintDesignProjection(blueprint)
-  const current = canonicalDocumentDesignProjection(document)
+  let approved: UnknownRecord
+  let current: UnknownRecord
+  try {
+    approved = canonicalApprovedBlueprintDesignProjection(blueprint, document)
+    current = canonicalDocumentDesignProjection(document, blueprint)
+  } catch (error) {
+    if (error instanceof WorkflowGateError) throw error
+    return workflowError('APPROVAL_REQUIRED', 'Current Spec/Project render inputs are not representable', 'currentDocument.design')
+  }
   if (!sameProjection(current, approved)) {
     workflowError('STALE_APPROVAL', 'Current Spec/Project editable design differs from the approved blueprint', 'currentDocument.design')
   }
@@ -1169,12 +1176,15 @@ function designProjections(blueprint: LayoutBlueprintV1): Record<string, unknown
     })),
     'design:layout': {
       areas: stableSortById(blueprint.areas).map((area) => ({
-        id: area.id, artboard: area.artboard, placementIntent: area.placementIntent, placementPolicy: area.placementPolicy ?? null,
+        id: area.id, side: area.side, artboard: area.artboard,
+        placementIntent: area.placementIntent, placementPolicy: area.placementPolicy ?? null,
       })),
       layers: sortedLayerProjection(blueprint, (_area, layer) => ({
         boundsMm: layer.boundsMm ?? null, normalizedBounds: layer.normalizedBounds ?? null,
         anchor: layer.anchor, rotation: layer.rotation, shape: layer.shape ?? null, points: layer.points ?? null,
         pathData: layer.pathData ?? null, pathViewBox: layer.pathViewBox ?? null,
+        fillRule: layer.fillRule ?? null, strokeWidthMm: layer.strokeWidthMm ?? null,
+        cornerRadiusMm: layer.cornerRadiusMm ?? null,
       })),
     },
     'design:color': sortedLayerProjection(blueprint, (_area, layer) => ({
@@ -1219,10 +1229,14 @@ export function classifyRevisionChange(input: {
   }
   const approvedDocument = isRecord(input.approved.document) ? input.approved.document : {}
   const currentDocument = isRecord(input.current.document) ? input.current.document : {}
-  if (!sameProjection(
-    canonicalDocumentDesignProjection(approvedDocument),
-    canonicalDocumentDesignProjection(currentDocument),
-  )) {
+  try {
+    if (!sameProjection(
+      canonicalDocumentDesignProjection(approvedDocument, input.approved.blueprint),
+      canonicalDocumentDesignProjection(currentDocument, input.current.blueprint),
+    )) reasons.add('design:document')
+  } catch {
+    // A classifier must keep its exact union return contract while failing
+    // unrepresentable snapshots closed as a design invalidation.
     reasons.add('design:document')
   }
   if (!sameProjection(areaTargetProjection(approvedDocument), areaTargetProjection(currentDocument))) {

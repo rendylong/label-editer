@@ -18,8 +18,11 @@ import { validateLabelSpec } from '../agent/labelSpecSchema'
 import { assertPhysicalAreaPlacement, resolvePhysicalLayer } from './physicalLayout'
 import { canonicalFontStack } from '../label/fontStack'
 import { validateVectorPath } from '../label/vectorPathValidation'
+import type { LabelSide } from '../agent/designContracts'
 
 type UnknownRecord = Record<string, unknown>
+
+const LABEL_SIDES = new Set<LabelSide>(['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'])
 
 export interface StructuredLabelSpecResult {
   areas: LabelAreaConfig[]
@@ -108,8 +111,9 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
       ...common,
       kind: 'image',
       src: typeof input.asset === 'string' ? input.asset : '',
-      naturalWidth: width,
-      naturalHeight: height,
+      naturalWidth: Math.max(1, finite(input.naturalWidth, width)),
+      naturalHeight: Math.max(1, finite(input.naturalHeight, height)),
+      fit: input.fit === 'contain' || input.fit === 'cover' ? input.fit : 'stretch',
       width,
       height,
     }
@@ -161,7 +165,9 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
     : baseArea.remap.offset
   const areas = root.areas.map((value, index) => {
     const input = record(value, `areas[${index}]`)
-    const side = input.side === 'back' ? 'back' : 'front'
+    const side = typeof input.side === 'string' && LABEL_SIDES.has(input.side as LabelSide)
+      ? input.side as LabelSide
+      : 'front'
     const offset = side === 'back' ? (frontOffset + 0.5) % 1 : frontOffset
     const inputCarrier = typeof input.carrier === 'string' ? input.carrier as LabelAreaConfig['carrier'] : undefined
     const effectiveCarrier = inputCarrier ?? baseArea.carrier
@@ -172,7 +178,7 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
     const next: LabelAreaConfig = {
       ...baseArea,
       id: index === 0 ? baseArea.id : `${baseArea.id}-${idSeed}-${index + 1}`,
-      name: typeof input.name === 'string' ? input.name : `${baseArea.name} · ${side === 'back' ? '背标' : '正标'}`,
+      name: typeof input.name === 'string' ? input.name : `${baseArea.name} · ${side === 'back' ? '背标' : side === 'front' ? '正标' : side}`,
       side,
       remap: { ...baseArea.remap, offset },
       paper: input.paper && typeof input.paper === 'object' ? { ...baseArea.paper, ...(input.paper as LabelAreaConfig['paper']) } as LabelAreaConfig['paper'] : baseArea.paper,

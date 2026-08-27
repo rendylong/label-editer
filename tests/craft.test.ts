@@ -354,4 +354,37 @@ describe('图片遮罩绘制', () => {
     ])
     expect(draws).toEqual([[0, 0, 80, 40]])
   })
+
+  it.each([
+    ['stretch', [0, 0, 80, 40]],
+    ['contain', [0, 10, 80, 20]],
+    ['cover', [-40, 0, 160, 40]],
+  ] as const)('renders %s image fit identically into preview and mask staging', (fit, expected) => {
+    const draws: number[][] = []
+    const tempContext = {
+      drawImage: (_source: CanvasImageSource, ...values: number[]) => draws.push(values),
+      fillRect: () => undefined,
+      clearRect: () => undefined,
+      save: () => undefined,
+      restore: () => undefined,
+      set fillStyle(_value: string) {},
+      set globalCompositeOperation(_value: string) {},
+    }
+    globalThis.document = {
+      createElement: () => ({ width: 0, height: 0, getContext: () => tempContext }),
+    } as unknown as Document
+    const targetContext = {
+      save: () => undefined, restore: () => undefined, translate: () => undefined, rotate: () => undefined,
+      drawImage: () => undefined,
+    }
+    const layer: ImageLayer = {
+      id: `fit-${fit}`, kind: 'image', src: 'blob:test', naturalWidth: 160, naturalHeight: 40,
+      width: 80, height: 40, fit, x: 0, y: 0, rotation: 0, opacity: 1,
+      visible: true, locked: false, zIndex: 0, craft: [],
+    }
+
+    craft.drawImageMaskShape?.(targetContext as unknown as CanvasRenderingContext2D, layer, {} as CanvasImageSource, 255)
+
+    expect(draws[0]).toEqual(expected)
+  })
 })

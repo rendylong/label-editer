@@ -106,10 +106,41 @@ describe('blueprint compiler', () => {
 
     expect(areas[0].layers[0]).toMatchObject({
       id: 'botanical', type: 'image', asset: 'assets/botanical-art.png', opacity: 0.75,
+      fit: 'contain',
       designMetrics: { normalizedBounds: { x: 0.1, y: 0.2, width: 0.8, height: 0.5 }, anchor: 'center' },
     })
     expect(validateLabelSpec({ version: 2, areas }).ok).toBe(true)
   })
+
+  it('preserves the design-review contain default when a legacy blueprint omits image fit', () => {
+    const blueprint = laviraBlueprint()
+    blueprint.assets.push({
+      id: 'legacy-mark', path: 'assets/legacy-mark.png', sha256: 'a'.repeat(64),
+      mimeType: 'image/png', width: 200, height: 100,
+    })
+    blueprint.areas[0].layers = [{
+      id: 'legacy-mark', kind: 'image', boundsMm: { x: 2, y: 2, width: 20, height: 20 },
+      anchor: 'center', rotation: 0, opacity: 1, visible: true, zIndex: 0, processes: [],
+      assetId: 'legacy-mark',
+    }]
+
+    expect(compileBlueprintToSpecAreas(blueprint)[0].layers[0]).toMatchObject({
+      type: 'image', fit: 'contain', naturalWidth: 200, naturalHeight: 100,
+    })
+  })
+
+  it.each(['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'] as const)(
+    'preserves the full approved %s side through Spec apply and Project serialization',
+    (side) => {
+      const blueprint = laviraBlueprint()
+      blueprint.areas[0].side = side
+      const specAreas = compileBlueprintToSpecAreas(blueprint)
+      const project = serializeLabelProject('bottle.glb', applyStructuredLabelSpec(shell, { version: 2, areas: specAreas }).areas)
+
+      expect(specAreas[0].side).toBe(side)
+      expect(project.areas[0].side).toBe(side)
+    },
+  )
 
   it('rejects an unsupported editable kind with the disclosed flattened option', () => {
     const blueprint = laviraBlueprint()
@@ -132,6 +163,22 @@ describe('blueprint compiler', () => {
         },
       },
     } satisfies Partial<BlueprintCompilerError>))
+  })
+
+  it('fails closed instead of silently changing a non-representable image fit', () => {
+    const blueprint = laviraBlueprint()
+    blueprint.assets.push({
+      id: 'mark', path: 'assets/mark.png', sha256: 'a'.repeat(64), mimeType: 'image/png', width: 100, height: 50,
+    })
+    blueprint.areas[0].layers = [{
+      id: 'mark', kind: 'image', boundsMm: { x: 2, y: 2, width: 20, height: 10 },
+      anchor: 'center', rotation: 0, opacity: 1, visible: true, zIndex: 0, processes: [],
+      assetId: 'mark', fit: 'tile' as any,
+    }]
+
+    expect(() => compileBlueprintToSpecAreas(blueprint)).toThrowError(expect.objectContaining({
+      code: 'UNREPRESENTABLE_LAYER', details: expect.objectContaining({ reason: 'image fit tile is not representable' }),
+    }))
   })
 
   it('keeps out-of-artboard physical bounds exact while bounding legacy proxies', () => {
