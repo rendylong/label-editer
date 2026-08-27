@@ -20,6 +20,9 @@ const MAX_DECODED_IMAGE_PIXELS = 16 * 1024 * 1024
 const MAX_IMAGE_DIMENSION = 16_384
 const MAX_CAPTURE_DIMENSION = 4_096
 const MAX_CAPTURE_PIXELS = 16 * 1024 * 1024
+const PACKAGE_HORIZONTAL_INSET = 56
+const PACKAGE_TOP_INSET = 36
+const PACKAGE_BOTTOM_INSET = 24
 
 const ajv = new Ajv2020({ allErrors: true, strict: true })
 ajv.addFormat('date-time', { type: 'string', validate: isStrictRfc3339DateTime })
@@ -265,8 +268,9 @@ function boundaryStyle(area, pxPerMm) {
 }
 
 function renderArea(area, options) {
-  const width = area.artboard.widthMm * options.pxPerMm
-  const height = area.artboard.heightMm * options.pxPerMm
+  const dimensions = options.capturePlan.areas.get(area.id)
+  if (!dimensions) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Area ${area.id} is missing a capture dimension plan`)
+  const { width, height, left, top } = dimensions
   const customBoundary = area.substrate?.boundary?.shape === 'custom'
   const opaqueSubstrate = area.substrate?.kind === 'opaque'
   const filmSubstrate = area.substrate?.kind === 'transparent'
@@ -279,13 +283,14 @@ function renderArea(area, options) {
         : ''
   const layers = area.carrier === 'bare' ? '' : area.layers.slice().sort((a, b) => a.zIndex - b.zIndex || a.id.localeCompare(b.id)).map((layer) => renderLayer(layer, area, options)).join('')
   const selectiveUnderbase = area.carrier === 'clear_label' && area.layers.some((layer) => layer.processes.some((process) => process.process === 'white_underbase' || process.requiredMask === 'white_underbase'))
-  return `<div class="area-artboard carrier-${attr(area.carrier)}" data-area-id="${attr(area.id)}" data-carrier="${attr(area.carrier)}" data-selective-underbase="${selectiveUnderbase}" style="width:${cssNumber(width)}px;height:${cssNumber(height)}px">${substrate}${layers}</div>`
+  return `<div class="area-artboard carrier-${attr(area.carrier)}" data-area-id="${attr(area.id)}" data-carrier="${attr(area.carrier)}" data-selective-underbase="${selectiveUnderbase}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px">${substrate}${layers}</div>`
 }
 
 function renderView(side, area, options, revision) {
   const selectiveUnderbase = area.carrier === 'clear_label' && area.layers.some((layer) => layer.processes.some((process) => process.process === 'white_underbase' || process.requiredMask === 'white_underbase'))
   const processNote = selectiveUnderbase ? ' · selective white underbase declared' : ''
-  return `<section class="review-view" data-side="${side}" data-blueprint-revision="${attr(revision)}" style="width:${options.width}px;height:${options.height}px"><div class="diagnostic"><strong>${side.toUpperCase()}</strong> · ${escapeHtml(area.carrier)} · ${escapeHtml(area.placementIntent)}${processNote} · supplier/sample review required</div><div class="package-silhouette">${renderArea(area, options)}</div></section>`
+  const { width, height } = options.capturePlan.review
+  return `<section class="review-view" data-side="${side}" data-blueprint-revision="${attr(revision)}" style="width:${width}px;height:${height}px"><div class="diagnostic"><strong>${side.toUpperCase()}</strong> · ${escapeHtml(area.carrier)} · ${escapeHtml(area.placementIntent)}${processNote} · supplier/sample review required</div><div class="package-silhouette">${renderArea(area, options)}</div></section>`
 }
 
 export function renderBlueprintHtml(blueprint, options) {
@@ -295,6 +300,7 @@ export function renderBlueprintHtml(blueprint, options) {
   }
   const prepared = prepareLayoutBlueprint(blueprint, options.pxPerMm)
   const validated = prepared.blueprint
+  const capturePlan = resolveCapturePlan(validated, options.width, options.height, options.pxPerMm)
   if (!(options.assets instanceof Map)) throw new DesignReviewError('INVALID_USAGE', 'assets must be a resolved asset map')
   const front = validated.areas.find((area) => area.side === 'front')
   const back = validated.areas.find((area) => area.side === 'back')
@@ -306,9 +312,9 @@ export function renderBlueprintHtml(blueprint, options) {
     const format = asset.mimeType === 'font/woff2' ? 'woff2' : 'woff'
     return [`@font-face{font-family:'review-font-${asset.id}';src:url('${resolved.dataUrl}') format('${format}')}`]
   }).join('')
-  const renderOptions = { ...options, geometry: prepared.geometry }
+  const renderOptions = { ...options, geometry: prepared.geometry, capturePlan }
   return `<!doctype html><html lang="en" data-blueprint-revision="${revision}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Label design review ${revision}</title><style>
-${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.text-geometry::after{content:'\\200b'}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
+${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:${PACKAGE_TOP_INSET}px ${PACKAGE_HORIZONTAL_INSET}px ${PACKAGE_BOTTOM_INSET}px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:absolute;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.text-geometry::after{content:'\\200b'}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
 </style></head><body>${renderView('front', front, renderOptions, validated.revision)}${renderView('back', back, renderOptions, validated.revision)}</body></html>`
 }
 
@@ -447,23 +453,45 @@ function assertDimension(value, label) {
   if (!Number.isInteger(value) || value < 1 || value > MAX_CAPTURE_DIMENSION) throw new DesignReviewError('INVALID_USAGE', `${label} must be an integer from 1 to ${MAX_CAPTURE_DIMENSION}`)
 }
 
-function assertCaptureAllocation(width, height, label, code) {
-  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
-    || width > MAX_CAPTURE_DIMENSION || height > MAX_CAPTURE_DIMENSION || width > MAX_CAPTURE_PIXELS / height) {
-    throw new DesignReviewError(code, `${label} dimensions exceed the ${MAX_CAPTURE_DIMENSION}px / ${MAX_CAPTURE_PIXELS}-pixel capture limit`)
+function capturePixelExtent(value, label, code) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new DesignReviewError(code, `${label} dimensions must be positive finite pixel extents`)
   }
+  // Match cssNumber() precision, then cover every device pixel touched by the CSS extent.
+  const cssExtent = Number(value.toFixed(6))
+  if (!(cssExtent > 0)) throw new DesignReviewError(code, `${label} dimensions are not representable in review CSS pixels`)
+  return Math.ceil(cssExtent)
 }
 
-function assertCapturePlan(blueprint, width, height, pxPerMm) {
-  assertCaptureAllocation(width, height, 'Requested front/back capture', 'INVALID_USAGE')
-  for (const area of blueprint.areas.filter((candidate) => candidate.carrier !== 'bare')) {
-    assertCaptureAllocation(
-      Math.round(area.artboard.widthMm * pxPerMm),
-      Math.round(area.artboard.heightMm * pxPerMm),
-      `Area ${area.id} capture`,
-      'INVALID_LAYOUT_BLUEPRINT',
-    )
+export function resolveCaptureDimensions(width, height, { label = 'Capture', code = 'INVALID_LAYOUT_BLUEPRINT' } = {}) {
+  const resolved = {
+    width: capturePixelExtent(width, label, code),
+    height: capturePixelExtent(height, label, code),
   }
+  if (resolved.width > MAX_CAPTURE_DIMENSION || resolved.height > MAX_CAPTURE_DIMENSION
+    || resolved.width > MAX_CAPTURE_PIXELS / resolved.height) {
+    throw new DesignReviewError(code, `${label} dimensions exceed the ${MAX_CAPTURE_DIMENSION}px / ${MAX_CAPTURE_PIXELS}-pixel capture limit`)
+  }
+  return resolved
+}
+
+function resolveCapturePlan(blueprint, width, height, pxPerMm) {
+  assertDimension(width, 'width'); assertDimension(height, 'height')
+  const review = resolveCaptureDimensions(width, height, { label: 'Requested front/back capture', code: 'INVALID_USAGE' })
+  const packageWidth = Math.max(0, review.width - (2 * PACKAGE_HORIZONTAL_INSET))
+  const packageHeight = Math.max(0, review.height - PACKAGE_TOP_INSET - PACKAGE_BOTTOM_INSET)
+  const areas = new Map()
+  for (const area of blueprint.areas) {
+    const dimensions = resolveCaptureDimensions(area.artboard.widthMm * pxPerMm, area.artboard.heightMm * pxPerMm, {
+      label: `Area ${area.id} capture`, code: 'INVALID_LAYOUT_BLUEPRINT',
+    })
+    areas.set(area.id, {
+      ...dimensions,
+      left: Math.round((packageWidth - dimensions.width) / 2),
+      top: Math.round((packageHeight - dimensions.height) / 2),
+    })
+  }
+  return { review, areas }
 }
 
 function assertCapture(entry, width, height, label) {
@@ -475,12 +503,12 @@ function assertCapture(entry, width, height, label) {
   }
 }
 
-export async function captureDesignReview({ html, blueprint, width, height, pxPerMm, resolveHtml }) {
+export async function captureDesignReview({ html, blueprint, width, height, pxPerMm, resolveHtml, capturePlan }) {
   let browser
   try {
-    assertCapturePlan(blueprint, width, height, pxPerMm)
+    const plan = capturePlan ?? resolveCapturePlan(blueprint, width, height, pxPerMm)
     browser = await chromium.launch({ headless: true })
-    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, serviceWorkers: 'block' })
+    const context = await browser.newContext({ viewport: plan.review, deviceScaleFactor: 1, serviceWorkers: 'block' })
     const externalRequests = []
     await context.route('**/*', async (route) => {
       const url = route.request().url()
@@ -536,18 +564,22 @@ export async function captureDesignReview({ html, blueprint, width, height, pxPe
     if (externalRequests.length > 0) throw new DesignReviewError('BROWSER_NOT_READY', `External network request blocked: ${externalRequests[0]}`)
     const capture = { areas: {} }
     for (const side of ['front', 'back']) {
+      const expected = plan.review
       const locator = page.locator(`[data-side="${side}"]`)
       const box = await locator.boundingBox()
-      if (!box || Math.round(box.width) !== width || Math.round(box.height) !== height) throw new DesignReviewError('BROWSER_NOT_READY', `${side} panel dimensions changed`)
-      capture[side] = { bytes: await locator.screenshot({ type: 'png', animations: 'disabled' }), width, height }
+      if (!box || box.width !== expected.width || box.height !== expected.height) throw new DesignReviewError('BROWSER_NOT_READY', `${side} panel dimensions changed`)
+      capture[side] = { bytes: await locator.screenshot({ type: 'png', animations: 'disabled' }), ...expected }
     }
     for (const area of blueprint.areas.filter((candidate) => candidate.carrier !== 'bare')) {
-      const expectedWidth = Math.round(area.artboard.widthMm * pxPerMm)
-      const expectedHeight = Math.round(area.artboard.heightMm * pxPerMm)
+      const expected = plan.areas.get(area.id)
+      if (!expected) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Area ${area.id} is missing a capture dimension plan`)
       const locator = page.locator(`[data-area-id="${area.id}"]`)
       const box = await locator.boundingBox()
-      if (!box || Math.round(box.width) !== expectedWidth || Math.round(box.height) !== expectedHeight) throw new DesignReviewError('BROWSER_NOT_READY', `Area ${area.id} dimensions changed`)
-      capture.areas[area.id] = { bytes: await locator.screenshot({ type: 'png', animations: 'disabled' }), width: expectedWidth, height: expectedHeight }
+      if (!box || box.width !== expected.width || box.height !== expected.height) throw new DesignReviewError('BROWSER_NOT_READY', `Area ${area.id} dimensions changed`)
+      capture.areas[area.id] = {
+        bytes: await locator.screenshot({ type: 'png', animations: 'disabled' }),
+        width: expected.width, height: expected.height,
+      }
     }
     if (errors.length > 0) throw new DesignReviewError('BROWSER_NOT_READY', `Browser rendering failed: ${errors.join('; ')}`)
     await context.close()
@@ -589,7 +621,7 @@ export async function renderDesignReview({
   let parsed
   try { parsed = JSON.parse(blueprintBytes.toString('utf8')) } catch (error) { throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Blueprint JSON is invalid: ${error.message}`) }
   const blueprint = validateLayoutBlueprint(parsed, pxPerMm)
-  assertCapturePlan(blueprint, width, height, pxPerMm)
+  const capturePlan = resolveCapturePlan(blueprint, width, height, pxPerMm)
   const resolvedOutputDir = path.resolve(outputDir)
   if (!force && await stat(resolvedOutputDir).then(() => true, (error) => {
     if (error?.code === 'ENOENT') return false
@@ -600,13 +632,13 @@ export async function renderDesignReview({
   const { assets, references } = await resolveLocalFiles(blueprint, resolvedBlueprintPath, referencePaths)
   const provisionalHtml = renderBlueprintHtml(blueprint, { width, height, pxPerMm, assets })
   const captureResult = await capture({
-    html: provisionalHtml, blueprint, areas: blueprint.areas, width, height, pxPerMm,
+    html: provisionalHtml, blueprint, areas: blueprint.areas, width, height, pxPerMm, capturePlan,
     resolveHtml: (textMetrics) => renderBlueprintHtml(blueprint, { width, height, pxPerMm, assets, textMetrics }),
   })
   const html = capture === captureDesignReview && typeof captureResult.resolvedHtml === 'string' ? captureResult.resolvedHtml : provisionalHtml
   const htmlBytes = Buffer.from(html)
-  assertCapture(captureResult.front, width, height, 'front')
-  assertCapture(captureResult.back, width, height, 'back')
+  assertCapture(captureResult.front, capturePlan.review.width, capturePlan.review.height, 'front')
+  assertCapture(captureResult.back, capturePlan.review.width, capturePlan.review.height, 'back')
 
   const publication = []
   const manifestArtifacts = []
@@ -617,16 +649,16 @@ export async function renderDesignReview({
       ...(area ? { areaId: area.id, carrier: area.carrier } : {}),
     })
   }
-  addArtifact('mockup-html', 'mockup.html', htmlBytes, 'text/html', width, height, 'mockup-html')
-  addArtifact('mockup-front', 'mockup-front.png', captureResult.front.bytes, 'image/png', width, height, 'mockup-front')
-  addArtifact('mockup-back', 'mockup-back.png', captureResult.back.bytes, 'image/png', width, height, 'mockup-back')
+  addArtifact('mockup-html', 'mockup.html', htmlBytes, 'text/html', capturePlan.review.width, capturePlan.review.height, 'mockup-html')
+  addArtifact('mockup-front', 'mockup-front.png', captureResult.front.bytes, 'image/png', capturePlan.review.width, capturePlan.review.height, 'mockup-front')
+  addArtifact('mockup-back', 'mockup-back.png', captureResult.back.bytes, 'image/png', capturePlan.review.width, capturePlan.review.height, 'mockup-back')
   for (const area of blueprint.areas.filter((candidate) => candidate.carrier !== 'bare')) {
     const areaCapture = captureResult.areas?.[area.id]
-    const areaWidth = Math.round(area.artboard.widthMm * pxPerMm)
-    const areaHeight = Math.round(area.artboard.heightMm * pxPerMm)
-    assertCapture(areaCapture, areaWidth, areaHeight, `area ${area.id}`)
+    const dimensions = capturePlan.areas.get(area.id)
+    if (!dimensions) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Area ${area.id} is missing a capture dimension plan`)
+    assertCapture(areaCapture, dimensions.width, dimensions.height, `area ${area.id}`)
     const areaToken = sanitizeArtifactName(area.id)
-    addArtifact(`mockup-area-${area.id}`, `areas/${areaToken}.png`, areaCapture.bytes, 'image/png', areaWidth, areaHeight, 'mockup-area', area)
+    addArtifact(`mockup-area-${area.id}`, `areas/${areaToken}.png`, areaCapture.bytes, 'image/png', dimensions.width, dimensions.height, 'mockup-area', area)
   }
   const manifest = buildDesignReviewManifest({
     blueprint, blueprintSha256: sha256Bytes(blueprintBytes), htmlSha256: sha256Bytes(htmlBytes), createdAt, references, artifacts: manifestArtifacts,

@@ -7,7 +7,7 @@ import { resolveLayerRenderTransform } from '../src/label/craft'
 import { traceValidatedSvgPath } from '../src/label/svgPath'
 import { validateVectorPath } from '../src/label/vectorPathValidation'
 // @ts-expect-error Pure Node ESM module is consumed directly by the internal renderer.
-import { buildDesignReviewManifest, renderBlueprintHtml, renderDesignReview } from '../scripts/lib/design-review.mjs'
+import { buildDesignReviewManifest, renderBlueprintHtml, renderDesignReview, resolveCaptureDimensions } from '../scripts/lib/design-review.mjs'
 // @ts-expect-error Pure Node ESM runner is consumed directly by tests.
 import { runDesignReviewCli } from '../scripts/render-design-review.mjs'
 
@@ -98,12 +98,13 @@ async function writeFixture(root: string, value = blueprint()): Promise<string> 
 }
 
 function fakeCapture(overrides: Record<string, unknown> = {}) {
-  return vi.fn(async ({ width, height, areas, pxPerMm }: any) => ({
+  return vi.fn(async ({ width, height, areas, pxPerMm, capturePlan }: any) => ({
     front: { bytes: pngWithDimensions(width, height), width, height }, back: { bytes: pngWithDimensions(width, height), width, height },
-    areas: Object.fromEntries(areas.filter((area: any) => area.carrier !== 'bare').map((area: any) => [area.id, {
-      bytes: pngWithDimensions(Math.round(area.artboard.widthMm * pxPerMm), Math.round(area.artboard.heightMm * pxPerMm)),
-      width: Math.round(area.artboard.widthMm * pxPerMm), height: Math.round(area.artboard.heightMm * pxPerMm),
-    }])),
+    areas: Object.fromEntries(areas.filter((area: any) => area.carrier !== 'bare').map((area: any) => {
+      const dimensions = capturePlan?.areas.get(area.id)
+        ?? resolveCaptureDimensions(area.artboard.widthMm * pxPerMm, area.artboard.heightMm * pxPerMm)
+      return [area.id, { bytes: pngWithDimensions(dimensions.width, dimensions.height), ...dimensions }]
+    })),
     ...overrides,
   }))
 }
@@ -412,6 +413,75 @@ describe('blueprint-derived design review', () => {
     await expect(renderDesignReview({ blueprintPath, outputDir: path.join(root, 'oversized-area'), width: 640, height: 480, pxPerMm: 1, capture }))
       .rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
     expect(capture).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['front', 0],
+    ['back', 1],
+  ] as const)('rejects a fractional %s area that Chromium would rasterize beyond 4096 before browser launch', async (_side, areaIndex) => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    source.areas[areaIndex].artboard = { ...source.areas[areaIndex].artboard, widthMm: 1, heightMm: 4096.49 }
+    const blueprintPath = await writeFixture(root, source)
+    const capture = fakeCapture()
+
+    await expect(renderDesignReview({
+      blueprintPath, outputDir: path.join(root, 'fractional-overflow'), width: 640, height: 480, pxPerMm: 1, capture,
+    })).rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
+    expect(capture).not.toHaveBeenCalled()
+  })
+
+  it('canonicalizes boundary and near-boundary physical areas to one exact integer capture plan', async () => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    source.areas[0].artboard = { ...source.areas[0].artboard, widthMm: 1, heightMm: 4096 }
+    source.areas[1].artboard = { ...source.areas[1].artboard, widthMm: 1, heightMm: 4095.01 }
+    const blueprintPath = await writeFixture(root, source)
+    const capture = vi.fn(async ({ width, height, html }: any) => ({
+      front: { bytes: pngWithDimensions(width, height), width, height },
+      back: { bytes: pngWithDimensions(width, height), width, height },
+      areas: {
+        front: { bytes: pngWithDimensions(1, 4096), width: 1, height: 4096 },
+        back: { bytes: pngWithDimensions(1, 4096), width: 1, height: 4096 },
+      },
+      resolvedHtml: html,
+    }))
+
+    const result = await renderDesignReview({
+      blueprintPath, outputDir: path.join(root, 'fractional-boundary'), width: 640, height: 480, pxPerMm: 1, capture,
+    })
+
+    expect(capture).toHaveBeenCalledOnce()
+    const emittedHtml = capture.mock.calls[0][0].html
+    expect(emittedHtml).toMatch(/data-area-id="front"[^>]+style="[^"]*width:1px;height:4096px"/)
+    expect(emittedHtml).toMatch(/data-area-id="back"[^>]+style="[^"]*width:1px;height:4096px"/)
+    expect(result.manifest.artifacts.filter((artifact: any) => artifact.viewKind === 'mockup-area').map((artifact: any) => ({
+      areaId: artifact.areaId, width: artifact.width, height: artifact.height,
+    }))).toEqual([
+      { areaId: 'front', width: 1, height: 4096 },
+      { areaId: 'back', width: 1, height: 4096 },
+    ])
+  })
+
+  it('captures fractional physical areas at the same canonical CSS, PNG, and manifest dimensions in Chromium', async () => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    source.areas[0].artboard = { ...source.areas[0].artboard, widthMm: 40.1, heightMm: 60.1 }
+    source.areas[1].artboard = { ...source.areas[1].artboard, widthMm: 38.1, heightMm: 58.1 }
+    const blueprintPath = await writeFixture(root, source)
+
+    const result = await renderDesignReview({
+      blueprintPath, outputDir: path.join(root, 'fractional-browser'), width: 640, height: 480, pxPerMm: 1,
+    })
+
+    expect(result.html).toMatch(/data-area-id="front"[^>]+style="[^"]*width:41px;height:61px"/)
+    expect(result.html).toMatch(/data-area-id="back"[^>]+style="[^"]*width:39px;height:59px"/)
+    expect(result.manifest.artifacts.filter((artifact: any) => artifact.viewKind === 'mockup-area').map((artifact: any) => ({
+      areaId: artifact.areaId, width: artifact.width, height: artifact.height,
+    }))).toEqual([
+      { areaId: 'front', width: 41, height: 61 },
+      { areaId: 'back', width: 39, height: 59 },
+    ])
   })
 
   it('maps the declared stretch image fit to the browser-supported fill behavior', () => {
