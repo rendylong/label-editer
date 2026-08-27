@@ -6,7 +6,7 @@ import type {
   PhysicalBounds,
   ProcessIntent,
 } from './designContracts'
-import { WorkflowGateError } from './designContracts'
+import { WorkflowGateError } from './workflowGateError'
 import type { LabelSpecAreaV2, LabelSpecLayerV2 } from './labelSpecSchema'
 import type { CraftEffect, ShapeKind } from '../label/types'
 import { canonicalFontStack } from '../label/fontStack'

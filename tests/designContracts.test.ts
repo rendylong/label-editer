@@ -306,13 +306,13 @@ describe('shared design contracts', () => {
     expect(() => validateLayoutBlueprint(blueprint)).toThrow(/schema/i)
   })
 
-  it('blocks an awaiting, blocked, or digest-mismatched handoff', () => {
+  it('represents awaiting and blocked handoff states while still rejecting contradictory digests', () => {
     const handoff = approvedHandoff()
     handoff.status = 'awaiting_user_approval'
-    expect(() => validateEditorHandoff(handoff)).toThrow(/awaiting_user_approval/)
+    expect(validateEditorHandoff(handoff).status).toBe('awaiting_user_approval')
     handoff.status = 'approved'
     handoff.blockers.push('Missing supplier confirmation.')
-    expect(() => validateEditorHandoff(handoff)).toThrow(/blocker/i)
+    expect(validateEditorHandoff(handoff).blockers).toEqual(['Missing supplier confirmation.'])
     handoff.blockers = []
     handoff.approval.blueprint_sha256 = '0'.repeat(64)
     expect(() => validateEditorHandoff(handoff)).toThrow(/digest/i)

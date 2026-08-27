@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { BlueprintCompilerError, compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
+import { applyStructuredLabelSpec } from '../src/app/labelSpec'
+import { serializeLabelProject } from '../src/app/projectSchema'
+import type { LabelAreaConfig } from '../src/label/types'
 import {
   WorkflowGateError,
   classifyRevisionChange,
@@ -53,6 +56,9 @@ function areaTargetsSha256(document: any): string {
     range: area.range,
     remap: area.remap ?? null,
     placementPolicy: area.placementPolicy ?? null,
+    canvas: area.canvas ?? null,
+    axisMin: area.axisMin ?? null,
+    axisMax: area.axisMax ?? null,
   })).sort((left: any, right: any) => left.id.localeCompare(right.id))
   return canonicalSha256({ areas })
 }
@@ -95,7 +101,8 @@ function designManifest(blueprintSha256: string): DesignReviewManifestV1 {
   }
 }
 
-function labelDocument(blueprintSha256: string, designManifestSha256: string): any {
+function labelDocument(sourceBlueprint: LayoutBlueprintV1, blueprintSha256: string, designManifestSha256: string): any {
+  const [compiledArea] = compileBlueprintToSpecAreas(sourceBlueprint)
   return {
     version: 2,
     areas: [{
@@ -107,30 +114,25 @@ function labelDocument(blueprintSha256: string, designManifestSha256: string): a
       designBinding: {
         blueprintRevision: 'design-rev-001', blueprintSha256, reviewManifestSha256: designManifestSha256,
       },
-      layers: [],
+      layers: compiledArea.layers,
     }],
   }
 }
 
-function projectDocument(blueprintSha256: string, designManifestSha256: string): any {
-  return {
-    version: 3, modelFileName: 'bottle.glb',
-    areas: [{
-      id: 'front', name: 'Front', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay', side: 'front',
-      remap: {
-        mode: 'cylindrical', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0,
-        mirrorU: false, planarBox: { min: [-1, -1, -1], max: [1, 1, 1] },
-      },
-      range: { uStart: 0.1, uWidth: 0.3, vStart: 0.2, vHeight: 0.5 },
-      canvas: { width: 1024, height: 1536, aspect: 2 / 3 },
-      paper: { enabled: false, color: '#ffffff', opacity: 0 }, carrier: 'direct_surface_print',
-      artboard: { widthMm: 40, heightMm: 60, background: 'transparent' }, placementPolicy: 'fit',
-      blueprintAreaId: 'front', designBinding: {
-        blueprintRevision: 'design-rev-001', blueprintSha256, reviewManifestSha256: designManifestSha256,
-      },
-      layers: [], globalCraft: { craft: [] }, fonts: [], referenceVisible: false,
-    }],
+function projectDocument(sourceBlueprint: LayoutBlueprintV1, blueprintSha256: string, designManifestSha256: string): any {
+  const shell: LabelAreaConfig = {
+    id: 'front', name: 'Front', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay', side: 'front',
+    remap: {
+      mode: 'cylindrical', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0,
+      mirrorU: false, planarBox: { min: [-1, -1, -1], max: [1, 1, 1] },
+    },
+    range: { uStart: 0.1, uWidth: 0.3, vStart: 0.2, vHeight: 0.5 },
+    canvas: { width: 1024, height: 1536, aspect: 2 / 3 },
+    paper: { enabled: false, color: '#ffffff', opacity: 0 }, layers: [], globalCraft: { craft: [] },
+    fonts: [], referenceVisible: false, undoStack: [], redoStack: [],
   }
+  const spec = labelDocument(sourceBlueprint, blueprintSha256, designManifestSha256)
+  return serializeLabelProject('bottle.glb', applyStructuredLabelSpec(shell, spec).areas)
 }
 
 function handoff(blueprintSha256: string, designManifestSha256: string): EditorHandoffV2 {
@@ -151,6 +153,31 @@ function handoff(blueprintSha256: string, designManifestSha256: string): EditorH
       physical_size_mm: { width: 40, height: 60 }, blueprint_area_id: 'front',
     }],
     assets: [], production_constraints: {}, assumptions: [], blockers: [],
+  }
+}
+
+function legacyHandoff(status: 'approved' | 'assumed_for_fast_run' | 'awaiting_user_approval' | 'rejected' = 'approved') {
+  return {
+    handoff_version: 1,
+    status,
+    source: { design_spec: 'design-spec.md', mockup: 'mockup.html' },
+    model: { package_type: 'bottle' },
+    design_intent: {
+      selected_direction: 'Ember', positioning: 'premium woody fragrance',
+      convention_basis: ['category benchmark'], differentiation_axes: ['layout', 'typography'],
+    },
+    areas: [{
+      id: 'front', side: 'front', application: 'direct_print', placement: 'Centered front.',
+      physical_size_mm: { width: 40, height: 60 }, shape: 'rectangle',
+      layer_order: ['brand', 'product'],
+      copy: [{ text: 'LAVIRA', role: 'brand', language: 'en', writing_direction: 'ltr', placeholder: false }],
+      typography: { class: 'sans', font_preference: 'Arial', weight: 600, case: 'uppercase', letter_spacing: 0, alignment: 'center' },
+      palette: [{ role: 'ink', color: '#111111' }],
+      processes: [{ element: 'brand', process: 'screen_print' }],
+    }],
+    assets: [],
+    print_constraints: { bleed_mm: 'unknown', minimum_text_height_mm: 'unknown', spot_colors: [] },
+    assumptions: [], blockers: [],
   }
 }
 
@@ -183,7 +210,7 @@ function workflowFixture() {
   state.blueprintSha256 = sha256(JSON.stringify(state.blueprint))
   state.designManifest = designManifest(state.blueprintSha256)
   state.designManifestSha256 = sha256(JSON.stringify(state.designManifest))
-  state.document = labelDocument(state.blueprintSha256, state.designManifestSha256)
+  state.document = labelDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
   state.handoff = handoff(state.blueprintSha256, state.designManifestSha256)
   state.productionManifest = productionManifest(state)
   state.productionManifestSha256 = sha256(JSON.stringify(state.productionManifest))
@@ -234,13 +261,13 @@ describe('design approval gate', () => {
     const awaiting = workflowFixture(); awaiting.handoff.status = 'awaiting_user_approval'
     await expectWorkflowCode(verifyDesignGate(designGateInput(awaiting)), 'AWAITING_USER_APPROVAL')
 
-    const rejected = workflowFixture(); rejected.handoff = { handoff_version: 1, status: 'rejected' }
+    const rejected = workflowFixture(); rejected.handoff = legacyHandoff('rejected')
     await expectWorkflowCode(verifyDesignGate(designGateInput(rejected)), 'AWAITING_USER_APPROVAL')
   })
 
   it('blocks non-empty blocker lists with bounded workflow details', async () => {
     const state = workflowFixture()
-    state.handoff.blockers = ['x'.repeat(5000)]
+    state.handoff.blockers = ['x'.repeat(1000)]
     await expect(verifyDesignGate(designGateInput(state))).rejects.toSatisfy((error: WorkflowGateError) => (
       error.code === 'HANDOFF_BLOCKED'
       && Array.isArray(error.details?.blockers)
@@ -283,11 +310,38 @@ describe('design approval gate', () => {
     await expectWorkflowCode(verifyDesignGate(designGateInput(staleBinding)), 'STALE_APPROVAL', 'designBinding')
   })
 
+  it.each([
+    ['exact copy', (state: any) => { state.document.areas[0].layers[0].text = 'UNAPPROVED' }],
+    ['layer order', (state: any) => { state.document.areas[0].layers.reverse() }],
+    ['layer type', (state: any) => {
+      const layer = state.document.areas[0].layers[0]
+      state.document.areas[0].layers[0] = {
+        id: layer.id, type: 'shape', shape: 'rectangle', x: layer.x, y: layer.y, width: 0.5, height: 0.2,
+        rotation: layer.rotation, opacity: layer.opacity, visible: layer.visible, locked: false,
+        fill: '#111111', stroke: '#111111', strokeWidth: 0, cornerRadius: 0,
+        craft: layer.craft, designMetrics: layer.designMetrics, processes: layer.processes,
+      }
+    }],
+    ['physical layout', (state: any) => { state.document.areas[0].layers[0].designMetrics.boundsMm.x = 9 }],
+    ['typography', (state: any) => { state.document.areas[0].layers[0].designMetrics.fontSizeMm = 9 }],
+    ['process intent', (state: any) => { state.document.areas[0].layers[0].processes = [{ process: 'pad_print' }] }],
+  ])('rejects unapproved %s changes in the current Label Spec composition', async (_label, mutate) => {
+    const state = workflowFixture(); mutate(state)
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it('rejects unapproved editable composition changes in a current Project v3', async () => {
+    const state = workflowFixture()
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    state.document.areas[0].layers[0].text = 'UNAPPROVED PROJECT COPY'
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
   it('normalizes legacy approved and assumed-fast-run handoffs to an awaiting state', async () => {
-    const approved = workflowFixture(); approved.handoff = { handoff_version: 1, status: 'approved' }
+    const approved = workflowFixture(); approved.handoff = legacyHandoff('approved')
     await expectWorkflowCode(verifyDesignGate(designGateInput(approved)), 'APPROVAL_REQUIRED', 'handoff.version')
 
-    const assumed = workflowFixture(); assumed.handoff = { handoff_version: 1, status: 'assumed_for_fast_run' }
+    const assumed = workflowFixture(); assumed.handoff = legacyHandoff('assumed_for_fast_run')
     await expectWorkflowCode(verifyDesignGate(designGateInput(assumed)), 'AWAITING_USER_APPROVAL', 'handoff.status')
   })
 
@@ -303,7 +357,7 @@ describe('design approval gate', () => {
 
   it('allows legacy fast-run only with a current-task continuous authorization record and current evidence', async () => {
     const state = workflowFixture()
-    state.handoff = { handoff_version: 1, status: 'assumed_for_fast_run' }
+    state.handoff = legacyHandoff('assumed_for_fast_run')
     state.designApproval = {
       version: 1, gate: 'design', mode: 'continuous_authorized', scope: 'current_task',
       design_revision: 'design-rev-001', blueprint_sha256: state.blueprintSha256,
@@ -313,6 +367,56 @@ describe('design approval gate', () => {
 
     state.designApproval.review_manifest_sha256 = '0'.repeat(64)
     await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'approval.reviewManifestSha256')
+  })
+
+  it('does not treat an unknown handoff version as a legacy authorization carrier', async () => {
+    const state = workflowFixture()
+    state.handoff = { ...legacyHandoff('assumed_for_fast_run'), handoff_version: 999 }
+    state.designApproval = {
+      version: 1, gate: 'design', mode: 'continuous_authorized', scope: 'current_task',
+      design_revision: 'design-rev-001', blueprint_sha256: state.blueprintSha256,
+      review_manifest_sha256: state.designManifestSha256, recorded_at: '2026-08-27T10:01:00.000Z',
+    }
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'APPROVAL_REQUIRED', 'handoff.version')
+  })
+
+  it('rejects malformed legacy v1 before applying a continuous authorization record', async () => {
+    const state = workflowFixture()
+    state.handoff = { handoff_version: 1, status: 'assumed_for_fast_run' }
+    state.designApproval = {
+      version: 1, gate: 'design', mode: 'continuous_authorized', scope: 'current_task',
+      design_revision: 'design-rev-001', blueprint_sha256: state.blueprintSha256,
+      review_manifest_sha256: state.designManifestSha256, recorded_at: '2026-08-27T10:01:00.000Z',
+    }
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'APPROVAL_REQUIRED', 'handoff')
+  })
+
+  it('rejects validated legacy blockers before continuous authorization', async () => {
+    const state = workflowFixture()
+    state.handoff = legacyHandoff('assumed_for_fast_run')
+    state.handoff.blockers = ['Supplier capability unresolved.']
+    state.designApproval = {
+      version: 1, gate: 'design', mode: 'continuous_authorized', scope: 'current_task',
+      design_revision: 'design-rev-001', blueprint_sha256: state.blueprintSha256,
+      review_manifest_sha256: state.designManifestSha256, recorded_at: '2026-08-27T10:01:00.000Z',
+    }
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'HANDOFF_BLOCKED', 'handoff.blockers')
+  })
+
+  it.each([
+    ['area id', (state: any) => { state.handoff.areas.push(structuredClone(state.handoff.areas[0])) }],
+    ['blueprint area id', (state: any) => {
+      const duplicate = structuredClone(state.handoff.areas[0]); duplicate.id = 'other'; state.handoff.areas.push(duplicate)
+    }],
+    ['asset id', (state: any) => {
+      state.handoff.assets = [
+        { id: 'logo', path: 'logo-a.png', sha256: '7'.repeat(64) },
+        { id: 'logo', path: 'logo-b.png', sha256: '8'.repeat(64) },
+      ]
+    }],
+  ])('semantically validates unique %s before representing an awaiting v2 state', async (_label, mutate) => {
+    const state = workflowFixture(); state.handoff.status = 'awaiting_user_approval'; mutate(state)
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'APPROVAL_REQUIRED', 'handoff')
   })
 
   it('maps unrepresentable editable layers to the stable workflow error contract', () => {
@@ -343,7 +447,7 @@ describe('production approval gate', () => {
 
   it('accepts a canonical Project v3 with the same exact production bindings', async () => {
     const state = workflowFixture()
-    state.document = projectDocument(state.blueprintSha256, state.designManifestSha256)
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
     state.productionManifest = productionManifest(state)
     state.productionManifest.input.kind = 'label-project-v3'
     state.productionApproval.spec_revision = revisionOf(state.document)
@@ -427,6 +531,18 @@ describe('production approval gate', () => {
     const duplicate = { ...state.document, areas: [state.document.areas[0], structuredClone(state.document.areas[0])] }
     await expectWorkflowCode(computeAreaTargetsSha256(duplicate), 'APPROVAL_REQUIRED', 'currentDocument.areas')
   })
+
+  it.each([
+    ['canvas', (area: any) => { area.canvas.width += 1 }],
+    ['axis minimum', (area: any) => { area.axisMin = -2 }],
+    ['axis maximum', (area: any) => { area.axisMax = 2 }],
+  ])('binds Project v3 %s into the production area-target digest', async (_label, mutate) => {
+    const state = workflowFixture()
+    const project = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    const before = await computeAreaTargetsSha256(project)
+    mutate(project.areas[0])
+    await expect(computeAreaTargetsSha256(project)).resolves.not.toBe(before)
+  })
 })
 
 function snapshot(): WorkflowRevisionSnapshot {
@@ -471,6 +587,15 @@ describe('revision classification', () => {
   })
 
   it.each([
+    ['copy', (area: any) => { area.layers[0].text = 'CURRENT DOCUMENT CHANGED' }],
+    ['physical layout', (area: any) => { area.layers[0].designMetrics.boundsMm.x = 7 }],
+    ['process intent', (area: any) => { area.layers[0].processes = [{ process: 'pad_print' }] }],
+  ])('classifies current-document %s changes as design invalidation', (_label, mutate) => {
+    const current = snapshot(); mutate((current.document as any).areas[0])
+    expect(classification(current)).toEqual({ valid: false, invalidates: 'design', reasons: ['design:document'] })
+  })
+
+  it.each([
     ['target selector', (value: WorkflowRevisionSnapshot) => { (value.document as any).areas[0].target.stableSelector = 'mesh:1/node:2' }, 'production:area-targets'],
     ['UV range', (value: WorkflowRevisionSnapshot) => { (value.document as any).areas[0].range.uStart = 0.2 }, 'production:area-targets'],
     ['remap orientation', (value: WorkflowRevisionSnapshot) => { (value.document as any).areas[0].remap.mirrorU = true }, 'production:area-targets'],
@@ -481,6 +606,37 @@ describe('revision classification', () => {
   ])('classifies %s changes as production invalidation', (_label, mutate, reason) => {
     const current = snapshot(); mutate(current)
     expect(classification(current)).toEqual({ valid: false, invalidates: 'production', reasons: [reason] })
+  })
+
+  it.each([
+    ['mesh target', (area: any) => { area.meshIndex = 3 }],
+    ['range', (area: any) => { area.range.uStart = 0.2 }],
+    ['translation', (area: any) => { area.remap.origin[0] = 0.5 }],
+    ['orientation', (area: any) => { area.remap.axis = [1, 0, 0] }],
+    ['scale', (area: any) => { area.remap.radius = 1.25 }],
+    ['canvas', (area: any) => { area.canvas.width += 1 }],
+    ['axis minimum', (area: any) => { area.axisMin = -2 }],
+    ['axis maximum', (area: any) => { area.axisMax = 2 }],
+  ])('classifies Project v3 %s changes as production mapping invalidation', (_label, mutate) => {
+    const approved = snapshot()
+    const state = workflowFixture()
+    approved.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    const current = structuredClone(approved); mutate((current.document as any).areas[0])
+    expect(classification(current, approved)).toEqual({
+      valid: false, invalidates: 'production', reasons: ['production:area-targets'],
+    })
+  })
+
+  it('gives a current Project design change precedence over a simultaneous axis mapping change', () => {
+    const approved = snapshot()
+    const state = workflowFixture()
+    approved.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    const current = structuredClone(approved)
+    ;(current.document as any).areas[0].layers[0].text = 'UNAPPROVED'
+    ;(current.document as any).areas[0].axisMax = 2
+    expect(classification(current, approved)).toEqual({
+      valid: false, invalidates: 'design', reasons: ['design:document', 'production:area-targets'],
+    })
   })
 
   it('gives design invalidation precedence while returning sorted, deduplicated reasons', () => {

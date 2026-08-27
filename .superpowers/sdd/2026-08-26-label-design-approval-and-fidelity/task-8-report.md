@@ -58,3 +58,44 @@
 - The gate binds and validates the immutable production manifest and its embedded artifact hashes. Reading every published PNG byte remains the production review publisher/output validator responsibility planned for Task 10.
 - Vite retains existing browser-externalization, mixed dynamic/static GLTFLoader, and large-chunk warnings; the build exits successfully and Task 8 adds no new occurrence of those warnings.
 - The optional headful live-preview plugin E2E remains skipped unless its environment flag is enabled; the default installed-like browser apply/export E2E passed.
+
+## Fix round 1 — independent approval-gate findings
+
+### RED reproductions
+
+1. Current-document design forgery:
+   - `pnpm vitest run tests/approvalWorkflow.test.ts -t "rejects unapproved"`
+   - Six cases resolved `valid: true` before the fix: Label Spec copy, order, physical layout, typography, process intent, and Project v3 copy. A schema-valid layer-type mutation was also added to the same contract matrix.
+2. Unvalidated legacy authorization:
+   - `pnpm vitest run tests/approvalWorkflow.test.ts -t "unknown handoff version|malformed legacy|legacy blockers"`
+   - `handoff_version: 999`, a two-field malformed v1, and a blocked v1 all resolved `continuous_authorized` before the fix.
+3. Incomplete current-document and production projections:
+   - `pnpm vitest run tests/approvalWorkflow.test.ts -t "current-document|Project v3 canvas changes|Project v3 axis|binds Project v3"`
+   - Current-document design mutations returned `invalidates: none`; Project canvas/axis mutations retained the old target digest and returned `invalidates: none`.
+4. Awaiting-state semantic bypass:
+   - `pnpm vitest run tests/approvalWorkflow.test.ts -t "semantically validates unique"`
+   - Duplicate v2 area ids, blueprint-area ids, and asset ids returned `AWAITING_USER_APPROVAL` before semantic validation.
+   - `pnpm vitest run tests/designContracts.test.ts -t "awaiting, blocked"` also proved that the old validator rejected a valid awaiting state instead of representing it.
+
+### Fix decisions
+
+- Added one compiler-derived canonical design projection shared by `verifyDesignGate()` and `classifyRevisionChange()`. The approved side is produced through `compileBlueprintToSpecAreas()`; the current Spec/Project side normalizes the two editable formats to the same physical design facts. Copy, type/order/visibility, physical metrics, typography/font identity, color/vector data, process/craft intent, carrier, artboard, substrate, editable assets, and global craft now participate.
+- Kept physical `designMetrics` as design authority for Project v3. Project pixel canvas, remap origin/axis/radius/wrap/offset/mirror/planar box, range, mesh identity, surface mode, placement policy, `axisMin`, and `axisMax` remain production mapping facts and are all bound in the canonical area-target projection.
+- Split `WorkflowGateError` into a cycle-free shared module so the design gate can reuse the real blueprint compiler without a runtime import cycle. `BlueprintCompilerError` retains the same exported base-class identity and stable `UNREPRESENTABLE_LAYER` code.
+- Made `validateEditorHandoff()` state-aware: schema, unique area/blueprint-area/asset ids, mode/status consistency, and source/approval digest consistency are semantic validity; awaiting and blocked values remain representable states. `verifyDesignGate()` reuses that validation, then rejects blockers before applying authorization and returns the normal wait-state error only after semantic validity is proven.
+- Continuous authorization now considers only a fully validated `handoff_version: 1` document in a recognized legacy state. Legacy approved still requires v2 normalization; legacy assumed-fast-run still requires a current-task continuous record and fresh evidence; unknown versions and malformed v1 fail closed.
+- Revision classification now includes current-document design projection as `design:document`. Its production projection includes all Label Spec/Project mapping fields, including Project canvas and axis bounds. Reasons remain sorted/deduplicated and design still wins.
+
+### GREEN verification
+
+- Focused gate/contracts/compiler: 3 files, 110 tests passed.
+- Affected contracts/fidelity/project/design-review/atomic publication: 9 files, 349 tests passed, including real Chromium captures.
+- TypeScript: `pnpm exec tsc -b --pretty false` exited 0 with no diagnostics.
+- Production build: `pnpm build` exited 0; Vite transformed 222 modules. Existing browser-externalization, mixed GLTFLoader import, and large-chunk warnings remain unchanged.
+- Full suite: 76 files passed; 1,183 tests passed and 1 environment-gated headful test skipped.
+- Explicit packaged plugin E2E: installed-like front/back apply/export passed; 1 passed and 1 environment-gated headful test skipped.
+
+### Fix-round residuals
+
+- The canonical Project design projection intentionally treats physical design metadata, not canvas-derived pixel coordinates, as the approval authority. The physical-layout resolver owns translation from that metadata to a current production canvas, while the production target digest binds the canvas and mapping inputs.
+- The original Task 8 residuals for caller-supplied model inspection, Task 10 PNG-byte validation, and the optional headful preview environment remain unchanged.

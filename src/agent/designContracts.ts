@@ -7,8 +7,13 @@ import layoutBlueprintV1Schema from './layout-blueprint-v1.schema.json'
 import labelProjectV3Schema from './label-project-v3.schema.json'
 import labelSpecV2Schema from './label-spec-v2.schema.json'
 import reviewManifestV1Schema from './review-manifest-v1.schema.json'
+import { canonicalApprovedBlueprintDesignProjection, canonicalDocumentDesignProjection } from './designProjection'
+import { WorkflowGateError, type WorkflowGateErrorCode } from './workflowGateError'
 import { isStrictRfc3339DateTime, validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
 import { validateFontStack } from '../label/fontStack'
+
+export { WorkflowGateError } from './workflowGateError'
+export type { WorkflowGateErrorCode } from './workflowGateError'
 
 export type CarrierMode =
   | 'direct_surface_print'
@@ -257,42 +262,6 @@ export class DesignContractError extends Error {
     this.name = 'DesignContractError'
     this.code = code
     this.details = details
-  }
-}
-
-export type WorkflowGateErrorCode =
-  | 'AWAITING_USER_APPROVAL'
-  | 'APPROVAL_REQUIRED'
-  | 'HANDOFF_BLOCKED'
-  | 'DIGEST_MISMATCH'
-  | 'STALE_APPROVAL'
-  | 'UNREPRESENTABLE_LAYER'
-
-function boundedWorkflowDetail(value: unknown, depth = 0): unknown {
-  if (typeof value === 'string') return value.slice(0, 256)
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null
-  if (typeof value === 'boolean' || value === null) return value
-  if (depth >= 4) return '[bounded]'
-  if (Array.isArray(value)) return value.slice(0, 32).map((entry) => boundedWorkflowDetail(entry, depth + 1))
-  if (!value || typeof value !== 'object') return '[unsupported]'
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 32).map(([key, nested]) => [
-    key.slice(0, 64), boundedWorkflowDetail(nested, depth + 1),
-  ]))
-}
-
-function boundedWorkflowDetails(details: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-  return boundedWorkflowDetail(details) as Readonly<Record<string, unknown>>
-}
-
-export class WorkflowGateError extends Error {
-  readonly code: WorkflowGateErrorCode
-  readonly details?: Readonly<Record<string, unknown>>
-
-  constructor(code: WorkflowGateErrorCode, message: string, details?: Readonly<Record<string, unknown>>) {
-    super(message)
-    this.name = 'WorkflowGateError'
-    this.code = code
-    this.details = details ? boundedWorkflowDetails(details) : undefined
   }
 }
 
@@ -569,12 +538,6 @@ export function validateEditorHandoff(value: unknown): EditorHandoffV2 {
   assertUnique(value.areas.map((area) => area.id), 'area id', 'INVALID_EDITOR_HANDOFF')
   assertUnique(value.areas.map((area) => area.blueprint_area_id), 'blueprint area id', 'INVALID_EDITOR_HANDOFF')
   assertUnique(value.assets.map((asset) => asset.id), 'asset id', 'INVALID_EDITOR_HANDOFF')
-  if (value.status === 'awaiting_user_approval') {
-    throw new DesignContractError('INVALID_EDITOR_HANDOFF', 'Editor Handoff status is awaiting_user_approval')
-  }
-  if (value.blockers.length > 0) {
-    throw new DesignContractError('INVALID_EDITOR_HANDOFF', 'Editor Handoff has non-empty blockers', { blockers: value.blockers })
-  }
   if (value.status === 'approved' && value.approval.mode !== 'explicit_approval') {
     throw new DesignContractError('INVALID_EDITOR_HANDOFF', 'approved status requires explicit_approval mode')
   }
@@ -582,10 +545,20 @@ export function validateEditorHandoff(value: unknown): EditorHandoffV2 {
     throw new DesignContractError('INVALID_EDITOR_HANDOFF', 'continuous_authorized status requires matching approval mode')
   }
   if (value.source.blueprint_revision !== value.approval.blueprint_revision) {
-    throw new DesignContractError('DIGEST_MISMATCH', 'Blueprint revision digest binding mismatch')
+    throw new DesignContractError('DIGEST_MISMATCH', 'Blueprint revision digest binding mismatch', {
+      field: 'handoff.blueprintRevision',
+    })
   }
-  assertDigestBinding(value.source.blueprint_sha256, value.approval.blueprint_sha256, 'Blueprint')
-  assertDigestBinding(value.source.review_manifest_sha256, value.approval.review_manifest_sha256, 'Review manifest')
+  if (value.source.blueprint_sha256 !== value.approval.blueprint_sha256) {
+    throw new DesignContractError('DIGEST_MISMATCH', 'Blueprint digest mismatch', {
+      field: 'handoff.blueprintSha256',
+    })
+  }
+  if (value.source.review_manifest_sha256 !== value.approval.review_manifest_sha256) {
+    throw new DesignContractError('DIGEST_MISMATCH', 'Review manifest digest mismatch', {
+      field: 'handoff.reviewManifestSha256',
+    })
+  }
   return structuredClone(value)
 }
 
@@ -828,6 +801,17 @@ function assertDocumentDesignBindings(
   }
 }
 
+function assertCurrentDocumentDesign(
+  document: UnknownRecord,
+  blueprint: LayoutBlueprintV1,
+): void {
+  const approved = canonicalApprovedBlueprintDesignProjection(blueprint)
+  const current = canonicalDocumentDesignProjection(document)
+  if (!sameProjection(current, approved)) {
+    workflowError('STALE_APPROVAL', 'Current Spec/Project editable design differs from the approved blueprint', 'currentDocument.design')
+  }
+}
+
 function boundedBlockers(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.slice(0, 32).map((blocker) => String(blocker).slice(0, 256))
@@ -864,8 +848,83 @@ function assertCurrentDesignApproval(
   }
 }
 
-function legacyHandoffStatus(handoff: unknown): string | undefined {
-  return isRecord(handoff) && typeof handoff.status === 'string' ? handoff.status : undefined
+type LegacyHandoffStatus = 'approved' | 'assumed_for_fast_run' | 'awaiting_user_approval' | 'rejected'
+
+interface LegacyEditorHandoffV1 extends UnknownRecord {
+  handoff_version: 1
+  status: LegacyHandoffStatus
+  blockers: string[]
+}
+
+function boundedString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 4096
+}
+
+function stringList(value: unknown, maximum = 256): value is string[] {
+  return Array.isArray(value) && value.length <= maximum && value.every(boundedString)
+}
+
+function legacyMeasurement(value: unknown, allowZero: boolean): boolean {
+  return value === 'unknown' || (typeof value === 'number' && Number.isFinite(value) && (allowZero ? value >= 0 : value > 0))
+}
+
+function legacyRecordList(value: unknown, validate: (entry: UnknownRecord) => boolean, maximum = 256): boolean {
+  return Array.isArray(value) && value.length <= maximum && value.every((entry) => isRecord(entry) && validate(entry))
+}
+
+function validateLegacyArea(value: unknown): value is UnknownRecord {
+  if (!isRecord(value)
+    || !boundedString(value.id)
+    || !['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'].includes(String(value.side))
+    || !['direct_print', 'paper_label', 'clear_label', 'foil_stamp', 'other'].includes(String(value.application))
+    || !boundedString(value.placement)
+    || !['rectangle', 'rounded_rect', 'oval', 'full_wrap', 'die_cut', 'band', 'other'].includes(String(value.shape))
+    || !stringList(value.layer_order)) return false
+  if (!isRecord(value.physical_size_mm)
+    || !legacyMeasurement(value.physical_size_mm.width, false)
+    || !legacyMeasurement(value.physical_size_mm.height, false)) return false
+  if (!legacyRecordList(value.copy, (copy) => (
+    typeof copy.text === 'string'
+    && ['brand', 'product', 'claim', 'ingredient', 'volume', 'regulatory', 'other'].includes(String(copy.role))
+    && boundedString(copy.language)
+    && ['ltr', 'rtl', 'auto'].includes(String(copy.writing_direction))
+    && typeof copy.placeholder === 'boolean'
+  ))) return false
+  if (!isRecord(value.typography)
+    || !boundedString(value.typography.class)
+    || !boundedString(value.typography.font_preference)
+    || !(boundedString(value.typography.weight) || (typeof value.typography.weight === 'number' && Number.isFinite(value.typography.weight)))
+    || !boundedString(value.typography.case)
+    || !(boundedString(value.typography.letter_spacing) || (typeof value.typography.letter_spacing === 'number' && Number.isFinite(value.typography.letter_spacing)))
+    || !boundedString(value.typography.alignment)) return false
+  if (!legacyRecordList(value.palette, (entry) => boundedString(entry.role) && boundedString(entry.color))) return false
+  return legacyRecordList(value.processes, (entry) => boundedString(entry.element) && boundedString(entry.process))
+}
+
+function validateLegacyHandoff(value: unknown): LegacyEditorHandoffV1 | undefined {
+  if (!isRecord(value) || value.handoff_version !== 1
+    || !['approved', 'assumed_for_fast_run', 'awaiting_user_approval', 'rejected'].includes(String(value.status))) return undefined
+  if (!isRecord(value.source) || !boundedString(value.source.design_spec) || !boundedString(value.source.mockup)) return undefined
+  if (!isRecord(value.model)
+    || !['bottle', 'jar', 'tube', 'compact', 'other'].includes(String(value.model.package_type))
+    || (value.model.glb_path !== undefined && !boundedString(value.model.glb_path))) return undefined
+  if (!isRecord(value.design_intent)
+    || !boundedString(value.design_intent.selected_direction)
+    || !boundedString(value.design_intent.positioning)
+    || !stringList(value.design_intent.convention_basis)
+    || !stringList(value.design_intent.differentiation_axes)) return undefined
+  if (!legacyRecordList(value.areas, validateLegacyArea, 64) || (value.areas as unknown[]).length === 0) return undefined
+  const areaIds = (value.areas as UnknownRecord[]).map((area) => area.id as string)
+  if (new Set(areaIds).size !== areaIds.length) return undefined
+  if (!legacyRecordList(value.assets, (asset) => boundedString(asset.id) && boundedString(asset.role) && boundedString(asset.path))) return undefined
+  const assetIds = (value.assets as UnknownRecord[]).map((asset) => asset.id as string)
+  if (new Set(assetIds).size !== assetIds.length) return undefined
+  if (!isRecord(value.print_constraints)
+    || !legacyMeasurement(value.print_constraints.bleed_mm, true)
+    || !legacyMeasurement(value.print_constraints.minimum_text_height_mm, false)
+    || !stringList(value.print_constraints.spot_colors)) return undefined
+  if (!stringList(value.assumptions, 128) || !stringList(value.blockers, 128)) return undefined
+  return structuredClone(value) as LegacyEditorHandoffV1
 }
 
 export async function verifyDesignGate(input: DesignGateInput): Promise<DesignGateResult> {
@@ -876,74 +935,71 @@ export async function verifyDesignGate(input: DesignGateInput): Promise<DesignGa
   ])
   assertManifestBlueprintBinding(designManifest.value, blueprint)
   assertDocumentDesignBindings(document.value, blueprint, designManifest.sha256)
+  assertCurrentDocumentDesign(document.value, blueprint.value)
 
   if (!isRecord(input.handoff) || input.handoff.handoff_version !== 2) {
-    const status = legacyHandoffStatus(input.handoff)
-    if (status === 'rejected' || status === 'awaiting_user_approval') {
+    if (!isRecord(input.handoff) || input.handoff.handoff_version !== 1) {
+      return workflowError('APPROVAL_REQUIRED', 'Handoff version is not recognized', 'handoff.version')
+    }
+    const legacy = validateLegacyHandoff(input.handoff)
+    if (!legacy) {
+      return workflowError('APPROVAL_REQUIRED', 'Legacy Handoff v1 is not contract-valid', 'handoff')
+    }
+    const blockers = boundedBlockers(legacy.blockers)
+    if (blockers.length > 0) {
+      return workflowError('HANDOFF_BLOCKED', 'Legacy editor handoff has unresolved blockers', 'handoff.blockers', { blockers })
+    }
+    if (legacy.status === 'rejected' || legacy.status === 'awaiting_user_approval') {
       return workflowError('AWAITING_USER_APPROVAL', 'Legacy handoff is awaiting user approval', 'handoff.status', {
         workflowState: 'awaiting_user_approval',
       })
     }
-    if (input.approvalRecord !== undefined) {
-      const record = validateWorkflowApprovalRecord(input.approvalRecord, 'design')
-      if (record.mode !== 'continuous_authorized') {
-        return workflowError('APPROVAL_REQUIRED', 'Legacy handoff requires current continuous authorization', 'approval.mode')
-      }
-      assertCurrentDesignApproval(record, blueprint, designManifest.sha256)
-      return {
-        valid: true, status: 'continuous_authorized', blueprintRevision: blueprint.value.revision,
-        blueprintSha256: blueprint.sha256, designReviewManifestSha256: designManifest.sha256,
-        documentRevision: document.revision, documentSha256: document.sha256,
-      }
+    if (legacy.status === 'approved') {
+      return workflowError('APPROVAL_REQUIRED', 'Legacy approved handoff must be normalized to approved Handoff v2', 'handoff.version', {
+        normalizedStatus: 'awaiting_user_approval',
+      })
     }
-    if (status === 'assumed_for_fast_run') {
+    if (input.approvalRecord === undefined) {
       return workflowError('AWAITING_USER_APPROVAL', 'Legacy assumed_for_fast_run is not approval', 'handoff.status', {
         workflowState: 'awaiting_user_approval',
       })
     }
-    return workflowError('APPROVAL_REQUIRED', 'Legacy handoff must be normalized to approved Handoff v2', 'handoff.version', {
-      normalizedStatus: 'awaiting_user_approval',
-    })
-  }
-
-  const rawHandoff = input.handoff
-  if (rawHandoff.status === 'awaiting_user_approval' || rawHandoff.status === 'rejected') {
-    return workflowError('AWAITING_USER_APPROVAL', 'Editor handoff is awaiting user approval', 'handoff.status', {
-      workflowState: 'awaiting_user_approval',
-    })
-  }
-  const blockers = boundedBlockers(rawHandoff.blockers)
-  if (blockers.length > 0) {
-    return workflowError('HANDOFF_BLOCKED', 'Editor handoff has unresolved blockers', 'handoff.blockers', { blockers })
-  }
-  if (!isRecord(rawHandoff.approval) || rawHandoff.approval.scope !== 'current_task') {
-    return workflowError('APPROVAL_REQUIRED', 'Handoff approval scope must be exactly current_task', 'approval.scope')
+    const record = validateWorkflowApprovalRecord(input.approvalRecord, 'design')
+    if (record.mode !== 'continuous_authorized') {
+      return workflowError('APPROVAL_REQUIRED', 'Legacy handoff requires current continuous authorization', 'approval.mode')
+    }
+    assertCurrentDesignApproval(record, blueprint, designManifest.sha256)
+    return {
+      valid: true, status: 'continuous_authorized', blueprintRevision: blueprint.value.revision,
+      blueprintSha256: blueprint.sha256, designReviewManifestSha256: designManifest.sha256,
+      documentRevision: document.revision, documentSha256: document.sha256,
+    }
   }
 
   let handoff: EditorHandoffV2
   try {
-    assertSchema(rawHandoff, validateHandoffSchema, 'INVALID_EDITOR_HANDOFF', 'Editor Handoff v2')
-    handoff = rawHandoff
-  } catch {
+    handoff = validateEditorHandoff(input.handoff)
+  } catch (error) {
+    if (error instanceof DesignContractError && error.code === 'DIGEST_MISMATCH') {
+      const field = typeof error.details?.field === 'string' ? error.details.field : 'handoff'
+      return workflowError('DIGEST_MISMATCH', error.message, field)
+    }
+    if (isRecord(input.handoff.approval) && input.handoff.approval.scope !== 'current_task') {
+      return workflowError('APPROVAL_REQUIRED', 'Handoff approval scope must be exactly current_task', 'approval.scope')
+    }
     return workflowError('APPROVAL_REQUIRED', 'Editor Handoff v2 is not contract-valid', 'handoff')
   }
-  if ((handoff.status === 'approved' && handoff.approval.mode !== 'explicit_approval')
-    || (handoff.status === 'continuous_authorized' && handoff.approval.mode !== 'continuous_authorized')) {
-    return workflowError('APPROVAL_REQUIRED', 'Handoff status and approval mode do not agree', 'approval.mode')
+  const blockers = boundedBlockers(handoff.blockers)
+  if (blockers.length > 0) {
+    return workflowError('HANDOFF_BLOCKED', 'Editor handoff has unresolved blockers', 'handoff.blockers', { blockers })
   }
-  if (handoff.status !== 'approved' && handoff.status !== 'continuous_authorized') {
+  if (handoff.status === 'awaiting_user_approval') {
     return workflowError('AWAITING_USER_APPROVAL', 'Editor handoff is awaiting user approval', 'handoff.status', {
       workflowState: 'awaiting_user_approval',
     })
   }
-  if (handoff.source.blueprint_revision !== handoff.approval.blueprint_revision) {
-    return workflowError('DIGEST_MISMATCH', 'Handoff source and approval blueprint revisions disagree', 'handoff.blueprintRevision')
-  }
-  if (handoff.source.blueprint_sha256 !== handoff.approval.blueprint_sha256) {
-    return workflowError('DIGEST_MISMATCH', 'Handoff source and approval blueprint digests disagree', 'handoff.blueprintSha256')
-  }
-  if (handoff.source.review_manifest_sha256 !== handoff.approval.review_manifest_sha256) {
-    return workflowError('DIGEST_MISMATCH', 'Handoff source and approval review digests disagree', 'handoff.reviewManifestSha256')
+  if (handoff.approval.scope !== 'current_task') {
+    return workflowError('APPROVAL_REQUIRED', 'Handoff approval scope must be exactly current_task', 'approval.scope')
   }
   if (handoff.approval.blueprint_revision !== blueprint.value.revision) {
     return workflowError('STALE_APPROVAL', 'Handoff blueprint revision is stale', 'blueprint.revision')
@@ -990,6 +1046,9 @@ function areaTargetProjection(document: UnknownRecord): UnknownRecord[] {
     range: structuredClone(area.range),
     remap: area.remap === undefined ? null : structuredClone(area.remap),
     placementPolicy: area.placementPolicy ?? null,
+    canvas: area.canvas === undefined ? null : structuredClone(area.canvas),
+    axisMin: area.axisMin ?? null,
+    axisMax: area.axisMax ?? null,
   }))
   return stableSortById(projected.map((area) => ({ ...area, id: String(area.id) })))
 }
@@ -1160,6 +1219,12 @@ export function classifyRevisionChange(input: {
   }
   const approvedDocument = isRecord(input.approved.document) ? input.approved.document : {}
   const currentDocument = isRecord(input.current.document) ? input.current.document : {}
+  if (!sameProjection(
+    canonicalDocumentDesignProjection(approvedDocument),
+    canonicalDocumentDesignProjection(currentDocument),
+  )) {
+    reasons.add('design:document')
+  }
   if (!sameProjection(areaTargetProjection(approvedDocument), areaTargetProjection(currentDocument))) {
     reasons.add('production:area-targets')
   }
