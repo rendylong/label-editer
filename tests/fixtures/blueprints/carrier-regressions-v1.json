@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "revision": "carrier-regressions-20260828.v1",
+  "carrierDefaults": {
+    "carrier": "direct_surface_print",
+    "evidence": [
+      "fixture_evidence:canonical-carrier-contracts"
+    ],
+    "alternative": "applied_label",
+    "tradeoff": "Applied labels provide a physical substrate and edge but add die-cut and adhesion checks.",
+    "assumptions": [
+      "All process feasibility remains subject to supplier and physical sample review."
+    ]
+  },
+  "assets": [],
+  "areas": [
+    {
+      "id": "carrier.direct:curved",
+      "side": "front",
+      "carrier": "direct_surface_print",
+      "artboard": { "widthMm": 40, "heightMm": 40, "background": "transparent" },
+      "placementIntent": "Sparse two-color screen print on a curved colored bottle with package material visible outside ink.",
+      "placementPolicy": "fit",
+      "layers": [
+        {
+          "id": "direct.ink:arc",
+          "kind": "shape",
+          "boundsMm": { "x": 7, "y": 7, "width": 26, "height": 18 },
+          "anchor": "center",
+          "rotation": -6,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [
+            { "process": "screen_print", "spotName": "DIRECT_COPPER", "requiredMask": "color" }
+          ],
+          "shape": "ellipse",
+          "fill": "transparent",
+          "stroke": "#D57A42",
+          "strokeWidthMm": 0.8
+        },
+        {
+          "id": "direct.copy:screen",
+          "kind": "text",
+          "boundsMm": { "x": 8, "y": 27, "width": 24, "height": 5 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 1,
+          "processes": [
+            { "process": "screen_print", "spotName": "DIRECT_IVORY", "requiredMask": "color" }
+          ],
+          "text": "DIRECT INK",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 3.2,
+          "fontWeight": 600,
+          "letterSpacingEm": 0.16,
+          "lineHeight": 1.1,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#F1E6D2"
+        }
+      ]
+    },
+    {
+      "id": "carrier.applied:paper",
+      "side": "back",
+      "carrier": "applied_label",
+      "artboard": { "widthMm": 40, "heightMm": 40, "background": "transparent" },
+      "placementIntent": "Opaque paper label with explicit rounded boundary, material and adhesive.",
+      "placementPolicy": "fit",
+      "substrate": {
+        "kind": "opaque",
+        "color": "#F2EDE1",
+        "opacity": 1,
+        "boundary": { "shape": "rounded_rectangle", "radiusMm": 2 },
+        "material": "uncoated paper",
+        "adhesive": "pressure-sensitive acrylic"
+      },
+      "layers": [
+        {
+          "id": "paper.copy:offset",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 7, "width": 30, "height": 10 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [
+            { "process": "offset_print", "spotName": "PAPER_BLACK", "requiredMask": "color" }
+          ],
+          "text": "PAPER LABEL\nPLACEHOLDER COPY",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 2.5,
+          "fontWeight": 500,
+          "letterSpacingEm": 0.04,
+          "lineHeight": 1.2,
+          "alignment": "left",
+          "wrapPolicy": "word",
+          "maxLines": 2,
+          "color": "#211D19"
+        }
+      ]
+    },
+    {
+      "id": "carrier.clear:selective-white",
+      "side": "left",
+      "carrier": "clear_label",
+      "artboard": { "widthMm": 40, "heightMm": 40, "background": "transparent" },
+      "placementIntent": "Transparent film with a selective white-underbase mark; package material remains visible outside printed ink.",
+      "placementPolicy": "fit",
+      "substrate": {
+        "kind": "transparent",
+        "opacity": 0.08,
+        "boundary": { "shape": "rounded_rectangle", "radiusMm": 1.5 },
+        "material": "clear film",
+        "adhesive": "clear pressure-sensitive adhesive"
+      },
+      "layers": [
+        {
+          "id": "clear.mark:white-underbase",
+          "kind": "shape",
+          "boundsMm": { "x": 12, "y": 12, "width": 16, "height": 16 },
+          "anchor": "center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [
+            { "process": "digital_print", "spotName": "CLEAR_COPPER", "requiredMask": "color" },
+            { "process": "white_underbase", "requiredMask": "white_underbase" }
+          ],
+          "shape": "ellipse",
+          "fill": "#B76A3A",
+          "stroke": "#B76A3A",
+          "strokeWidthMm": 0
+        }
+      ]
+    },
+    {
+      "id": "carrier.foil:marks-only",
+      "side": "right",
+      "carrier": "foil_or_ink_only",
+      "artboard": { "widthMm": 40, "heightMm": 40, "background": "transparent" },
+      "placementIntent": "Sparse foil wordmark and open mark only, with no panel or paper material defaults.",
+      "placementPolicy": "fit",
+      "layers": [
+        {
+          "id": "foil.mark:open",
+          "kind": "shape",
+          "boundsMm": { "x": 9, "y": 7, "width": 22, "height": 15 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "FOIL_COPPER", "requiredMask": "metalness" }
+          ],
+          "shape": "path",
+          "pathData": "M 0 15 L 0 0 L 22 0 L 22 15",
+          "pathViewBox": [0, 0, 22, 15],
+          "fillRule": "nonzero",
+          "fill": "transparent",
+          "stroke": "#B76A3A",
+          "strokeWidthMm": 0.5
+        },
+        {
+          "id": "foil.wordmark",
+          "kind": "text",
+          "boundsMm": { "x": 8, "y": 27, "width": 24, "height": 4 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 1,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "FOIL_COPPER", "requiredMask": "metalness" }
+          ],
+          "text": "FOIL ONLY",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 2.8,
+          "fontWeight": 600,
+          "letterSpacingEm": 0.15,
+          "lineHeight": 1.1,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#B76A3A"
+        }
+      ]
+    },
+    {
+      "id": "carrier.bare:front",
+      "side": "front",
+      "carrier": "bare",
+      "artboard": { "widthMm": 40, "heightMm": 40, "background": "transparent" },
+      "placementIntent": "No label or decorative geometry on the bare package front.",
+      "placementPolicy": "fit",
+      "layers": []
+    }
+  ]
+}

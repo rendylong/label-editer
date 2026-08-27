@@ -3,10 +3,17 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { chromium } from 'playwright'
 import { describe, expect, it } from 'vitest'
 import { compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
 import type { ReviewEvidenceRequest } from '../src/agent/contracts'
 import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
+import { applyStructuredLabelSpec } from '../src/app/labelSpec'
+import { canonicalRasterHeight } from '../src/app/canvasLayout'
+import { computeLabelSetup } from '../src/app/modelLoader'
+import { serializeLabelProject } from '../src/app/projectSchema'
+import { extractMeshAccessors, isMeshWorldMirrored, meshLocalFrontDirection, readGlb } from '../src/glb/analyze'
+import { makeDefaultRemap } from '../src/glb/uvRemap'
 // @ts-expect-error CLI is directly executable ESM.
 import { runCli } from '../scripts/label-cli.mjs'
 // @ts-expect-error Plugin runtime is directly executable ESM.
@@ -15,14 +22,374 @@ import { createPluginRuntime } from '../scripts/plugin-runtime.mjs'
 import { createOperations } from '../scripts/lib/operations.mjs'
 // @ts-expect-error Project control is directly executable ESM.
 import { revisionOf } from '../scripts/lib/project-control.mjs'
+// @ts-expect-error Design review is directly executable ESM.
+import { renderDesignReview } from '../scripts/lib/design-review.mjs'
 
 const defaultModel = '/Users/apple/realibox/cosmetic-bottles-glb/02_perfume_glass_with_cap.glb'
 const modelPath = process.env.GLB_LABEL_E2E_MODEL ?? defaultModel
 const runRealE2E = existsSync(modelPath)
 const runLiveE2E = runRealE2E && process.env.GLB_LABEL_LIVE_E2E === '1'
+const laviraModelPath = '/Users/apple/realibox/cosmetic-bottles-glb/07_luxury_perfume_bottle_wood_glass.glb'
+const laviraMockupPath = '/Users/apple/realibox/cosmetic-bottles-glb/lavira-ember-woods-20260826/label-mockup.html'
+const laviraBlueprintPath = path.resolve('tests/fixtures/blueprints/lavira-ember-woods-v1.json')
+const carrierBlueprintPath = path.resolve('tests/fixtures/blueprints/carrier-regressions-v1.json')
+const runTask12E2E = existsSync(laviraModelPath) && existsSync(laviraMockupPath)
+  && existsSync(laviraBlueprintPath) && existsSync(carrierBlueprintPath)
 
 function hash(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+type Task12Package = {
+  root: string
+  blueprint: LayoutBlueprintV1
+  blueprintBytes: Buffer
+  blueprintPath: string
+  designReviewDir: string
+  designManifestBytes: Buffer
+  inputBytes: Buffer
+  inputPath: string
+  spec: ReturnType<typeof serializeLabelProject>
+}
+
+let task12GeometryPromise: Promise<{
+  document: Awaited<ReturnType<typeof readGlb>>
+  mesh: ReturnType<typeof extractMeshAccessors>
+  mirrored: boolean
+  frontDirection: [number, number, number]
+}> | undefined
+
+function task12Geometry() {
+  task12GeometryPromise ??= (async () => {
+    const document = await readGlb(await readFile(laviraModelPath))
+    return {
+      document,
+      mesh: extractMeshAccessors(document, 1),
+      mirrored: isMeshWorldMirrored(document, 1),
+      frontDirection: meshLocalFrontDirection(document, 1),
+    }
+  })()
+  return task12GeometryPromise
+}
+
+async function task12PackageRoot(): Promise<string> {
+  const requested = process.env.GLB_LABEL_TASK12_EVIDENCE_DIR
+  const parent = requested ? path.resolve(requested) : tmpdir()
+  await mkdir(parent, { recursive: true })
+  return mkdtemp(path.join(parent, 'task-12-browser-'))
+}
+
+async function task12Shells(blueprint: LayoutBlueprintV1) {
+  const { mesh, mirrored, frontDirection } = await task12Geometry()
+  return blueprint.areas.map((area) => {
+    const back = area.side === 'back'
+    const sourceRange = back
+      ? { uStart: 0.35, uWidth: 0.3, vStart: 0.035, vHeight: 0.665, aspect: 0.9095857956574818 }
+      : { uStart: 0.375, uWidth: 0.25, vStart: 0.1, vHeight: 0.56, aspect: 0.9001113230557523 }
+    const artboardAspect = area.artboard.widthMm / area.artboard.heightMm
+    const centerU = sourceRange.uStart + sourceRange.uWidth / 2
+    const remap = makeDefaultRemap(mesh, mirrored, frontDirection)
+    remap.mode = 'cylindrical'
+    remap.wrap = 1
+    remap.offset = back ? 0.25 : 0.75
+    remap.mirrorU = false
+    let uWidth = sourceRange.uWidth * artboardAspect / sourceRange.aspect
+    for (let iteration = 0; iteration < 3; iteration += 1) {
+      const candidate = {
+        uStart: centerU - uWidth / 2,
+        uWidth,
+        vStart: sourceRange.vStart,
+        vHeight: sourceRange.vHeight,
+      }
+      const actualAspect = computeLabelSetup(mesh, remap, candidate, 'overlay').spec.aspect
+      if (Math.abs(actualAspect - artboardAspect) <= 1e-10) break
+      uWidth *= artboardAspect / actualAspect
+    }
+    return {
+      blueprintAreaId: area.id,
+      name: area.id,
+      target: { stableSelector: 'mesh:1/node:6' },
+      surfaceMode: 'overlay' as const,
+      // Preserve the evidence placement center/height while narrowing the UV span to the exact physical artboard aspect.
+      range: {
+        uStart: centerU - uWidth / 2,
+        uWidth,
+        vStart: sourceRange.vStart,
+        vHeight: sourceRange.vHeight,
+      },
+      remap: { mode: 'cylindrical' as const, wrap: 1, offset: back ? 0.25 : 0.75, mirrorU: false },
+    }
+  })
+}
+
+async function prepareTask12Package(
+  root: string,
+  name: string,
+  blueprintBytes: Buffer,
+): Promise<Task12Package> {
+  const packageRoot = path.join(root, name)
+  await mkdir(packageRoot, { recursive: true })
+  const blueprintPath = path.join(packageRoot, 'layout-blueprint.json')
+  await writeFile(blueprintPath, blueprintBytes)
+  const blueprint = JSON.parse(blueprintBytes.toString('utf8')) as LayoutBlueprintV1
+  const designReviewDir = path.join(packageRoot, 'design-review')
+  await renderDesignReview({
+    blueprintPath,
+    outputDir: designReviewDir,
+    width: 960,
+    height: 720,
+    pxPerMm: 5,
+    createdAt: '2026-08-28T00:00:00.000Z',
+  })
+  const designManifestPath = path.join(designReviewDir, 'design-review-manifest.json')
+  const designManifestBytes = await readFile(designManifestPath)
+  const blueprintSha256 = hash(blueprintBytes)
+  const designManifestSha256 = hash(designManifestBytes)
+  const areas = compileBlueprintToSpecAreas(blueprint, await task12Shells(blueprint))
+  for (const area of areas) {
+    area.designBinding = {
+      blueprintRevision: blueprint.revision,
+      blueprintSha256,
+      reviewManifestSha256: designManifestSha256,
+    }
+  }
+  const { mesh, mirrored, frontDirection } = await task12Geometry()
+  const projectAreas = areas.map((area) => {
+    const artboard = area.artboard
+    if (!artboard) throw new Error(`Compiled Task 12 area is missing its physical artboard: ${area.id}`)
+    const remap = makeDefaultRemap(mesh, mirrored, frontDirection)
+    const requestedRemap = area.remap as {
+      mode?: 'auto' | 'cylindrical' | 'planar'
+      wrap?: number
+      offset?: number
+      mirrorU?: boolean
+    } | undefined
+    if (requestedRemap?.mode && requestedRemap.mode !== 'auto') remap.mode = requestedRemap.mode
+    if (requestedRemap?.wrap !== undefined) remap.wrap = requestedRemap.wrap
+    if (requestedRemap?.offset !== undefined) remap.offset = requestedRemap.offset
+    if (requestedRemap?.mirrorU !== undefined) remap.mirrorU = requestedRemap.mirrorU
+    const setup = computeLabelSetup(mesh, remap, area.range, 'overlay')
+    const targetAspect = artboard.widthMm / artboard.heightMm
+    const bakeWidth = artboard.widthMm === 50 && artboard.heightMm === 66 ? 513 : 512
+    const base = {
+      id: area.id,
+      name: area.name,
+      meshIndex: 1,
+      nodeName: 'Circle.002_Logo_0',
+      surfaceMode: 'overlay' as const,
+      side: area.side,
+      remap,
+      range: structuredClone(area.range),
+      canvas: {
+        width: bakeWidth,
+        height: canonicalRasterHeight(bakeWidth, targetAspect),
+        aspect: targetAspect,
+      },
+      axisMin: setup.axisMin,
+      axisMax: setup.axisMax,
+      layers: [],
+      globalCraft: { craft: [] },
+      fonts: [],
+      referenceVisible: false,
+      undoStack: [],
+      redoStack: [],
+    }
+    return applyStructuredLabelSpec(base, { version: 2, areas: [area] }, area.id).areas[0]
+  })
+  const spec = serializeLabelProject(path.basename(laviraModelPath), projectAreas)
+  const inputBytes = Buffer.from(`${JSON.stringify(spec, null, 2)}\n`)
+  const inputPath = path.join(packageRoot, 'working.json')
+  const handoff: EditorHandoffV2 = {
+    handoff_version: 2,
+    status: 'approved',
+    source: {
+      design_spec: 'task-12-evidence.md',
+      mockup_html: 'design-review/mockup.html',
+      blueprint: 'layout-blueprint.json',
+      design_review_manifest: 'design-review/design-review-manifest.json',
+      blueprint_revision: blueprint.revision,
+      blueprint_sha256: blueprintSha256,
+      review_manifest_sha256: designManifestSha256,
+    },
+    approval: {
+      mode: 'explicit_approval',
+      scope: 'current_task',
+      blueprint_revision: blueprint.revision,
+      blueprint_sha256: blueprintSha256,
+      review_manifest_sha256: designManifestSha256,
+    },
+    model: { package_type: 'bottle' },
+    areas: blueprint.areas.map((area) => ({
+      id: area.id,
+      side: area.side,
+      carrier: area.carrier,
+      placement: area.placementIntent,
+      physical_size_mm: { width: area.artboard.widthMm, height: area.artboard.heightMm },
+      blueprint_area_id: area.id,
+    })),
+    assets: [],
+    production_constraints: {},
+    assumptions: [],
+    blockers: [],
+  }
+  await Promise.all([
+    writeFile(inputPath, inputBytes),
+    writeFile(path.join(packageRoot, 'editor-handoff.json'), `${JSON.stringify(handoff, null, 2)}\n`),
+  ])
+  return {
+    root: packageRoot,
+    blueprint,
+    blueprintBytes,
+    blueprintPath,
+    designReviewDir,
+    designManifestBytes,
+    inputBytes,
+    inputPath,
+    spec,
+  }
+}
+
+async function runTask12Review(fixture: Task12Package) {
+  const outputDir = path.join(fixture.root, 'production-review')
+  const stdout: string[] = []
+  const stderr: string[] = []
+  const runtime = await createPluginRuntime({
+    allowedRoots: [process.cwd(), path.dirname(laviraModelPath), fixture.root],
+  })
+  const resilientRuntime = {
+    ...runtime,
+    async callBridge(session: unknown, method: string, input: unknown) {
+      let lastError: unknown
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        try {
+          return await runtime.callBridge(session, method, input)
+        } catch (error) {
+          lastError = error
+          if (!(error instanceof Error) || !error.message.includes('Agent Bridge is unavailable')) throw error
+          await new Promise((resolve) => setTimeout(resolve, 25))
+        }
+      }
+      throw lastError
+    },
+  }
+  let code = -1
+  try {
+    code = await runCli([
+      'review', fixture.inputPath,
+      '--glb', laviraModelPath,
+      '--output', outputDir,
+      '--width', '640',
+      '--height', '640',
+      '--json',
+    ], {
+      operations: createOperations(resilientRuntime, { progress: (value: string) => stderr.push(value) }),
+      stdout: (value: string) => stdout.push(value),
+      stderr: (value: string) => stderr.push(value),
+    })
+  } finally {
+    await runtime.close()
+  }
+  expect(code, [...stderr, ...stdout].join('\n')).toBe(0)
+  expect(stdout).toHaveLength(1)
+  expect(stdout[0]).not.toMatch(/leaseToken|token=/)
+  return {
+    outputDir,
+    envelope: JSON.parse(stdout[0]),
+    manifestBytes: await readFile(path.join(outputDir, 'review-manifest.json')),
+  }
+}
+
+async function browserPngStats(filePaths: string[]): Promise<Array<{
+  width: number
+  height: number
+  transparent: number
+  opaque: number
+  colorBuckets: number
+  corners: number[][]
+  center: number[]
+}>> {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    const result = []
+    for (const filePath of filePaths) {
+      const png = (await readFile(filePath)).toString('base64')
+      result.push(await page.evaluate(async (base64) => {
+        const image = new Image()
+        image.src = `data:image/png;base64,${base64}`
+        await image.decode()
+        const canvas = document.createElement('canvas')
+        canvas.width = image.naturalWidth
+        canvas.height = image.naturalHeight
+        const context = canvas.getContext('2d', { willReadFrequently: true })!
+        context.drawImage(image, 0, 0)
+        const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
+        let transparent = 0
+        let opaque = 0
+        const buckets = new Set<number>()
+        for (let offset = 0; offset < pixels.length; offset += 4) {
+          if (pixels[offset + 3] === 0) transparent += 1
+          if (pixels[offset + 3] === 255) opaque += 1
+          buckets.add((pixels[offset] >> 5) << 12 | (pixels[offset + 1] >> 5) << 8
+            | (pixels[offset + 2] >> 5) << 4 | (pixels[offset + 3] >> 6))
+        }
+        const at = (x: number, y: number) => {
+          const offset = (y * canvas.width + x) * 4
+          return Array.from(pixels.slice(offset, offset + 4))
+        }
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          transparent,
+          opaque,
+          colorBuckets: buckets.size,
+          corners: [
+            at(0, 0), at(canvas.width - 1, 0),
+            at(0, canvas.height - 1), at(canvas.width - 1, canvas.height - 1),
+          ],
+          center: at(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2)),
+        }
+      }, png))
+    }
+    return result
+  } finally {
+    await browser.close()
+  }
+}
+
+async function browserHtmlFacts(html: string, areaId: string) {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 960, height: 720 } })
+    await page.setContent(html, { waitUntil: 'domcontentloaded' })
+    return await page.evaluate((id) => {
+      const area = document.querySelector(`[data-area-id="${CSS.escape(id)}"]`)
+      if (!(area instanceof HTMLElement)) throw new Error(`Missing area ${id}`)
+      const style = getComputedStyle(area)
+      const textFacts = Object.fromEntries([...area.querySelectorAll<HTMLElement>('[data-kind="text"]')].map((layer) => {
+        const text = layer.querySelector<HTMLElement>('.text-geometry')
+        const box = layer.getBoundingClientRect()
+        return [layer.dataset.layerId!, {
+          width: box.width,
+          height: box.height,
+          fontSize: text ? Number.parseFloat(getComputedStyle(text).fontSize) : 0,
+          text: text?.textContent ?? '',
+        }]
+      }))
+      document.body.classList.add('capture-clean')
+      return {
+        carrier: area.getAttribute('data-carrier'),
+        panelCount: area.querySelectorAll('.carrier-panel,.carrier-film-extent,.carrier-boundary-path').length,
+        backgroundColor: style.backgroundColor,
+        borderRadius: style.borderRadius,
+        boxShadow: style.boxShadow,
+        diagnosticDisplay: getComputedStyle(document.querySelector('.diagnostic')!).display,
+        textFacts,
+      }
+    }, areaId)
+  } finally {
+    await browser.close()
+  }
 }
 
 function glbJson(bytes: Uint8Array): Record<string, any> {
@@ -111,6 +478,176 @@ function reviewEvidenceFixture(): { spec: Record<string, unknown>; request: Revi
 }
 
 describe('GLB label plugin E2E', () => {
+  it.runIf(runTask12E2E)('renders approved Lavira and direct-print fixtures through real design and production browsers', async () => {
+    const evidenceRoot = await task12PackageRoot()
+    const laviraBytes = await readFile(laviraBlueprintPath)
+    const carrierSource = JSON.parse(await readFile(carrierBlueprintPath, 'utf8')) as LayoutBlueprintV1
+    const directBlueprint: LayoutBlueprintV1 = {
+      ...carrierSource,
+      revision: 'carrier-direct-print-browser-20260828.v1',
+      areas: carrierSource.areas.filter((area) => [
+        'carrier.direct:curved', 'carrier.applied:paper',
+      ].includes(area.id)),
+    }
+    const directBytes = Buffer.from(`${JSON.stringify(directBlueprint, null, 2)}\n`)
+    const [mockupEvidenceBytes, modelBytes] = await Promise.all([
+      readFile(laviraMockupPath),
+      readFile(laviraModelPath),
+    ])
+    expect(hash(mockupEvidenceBytes)).toBe('bde3f32fab1a653f81264189b094c23620eb534cfa255fd6ac7e39543f6eb10f')
+    expect(hash(modelBytes)).toBe('5ba164ee005374050e40baafefeec21be5fb632643d594e8723304098bf413f7')
+
+    const lavira = await prepareTask12Package(evidenceRoot, 'lavira', laviraBytes)
+    const direct = await prepareTask12Package(evidenceRoot, 'direct-print', directBytes)
+    const laviraHtml = await readFile(path.join(lavira.designReviewDir, 'mockup.html'), 'utf8')
+    const directHtml = await readFile(path.join(direct.designReviewDir, 'mockup.html'), 'utf8')
+    expect(laviraHtml).toContain('余烬森林')
+    expect(laviraHtml).toContain('EMBER WOODS')
+    expect(laviraHtml).toContain('木质低语，余烬未熄。')
+    expect(laviraHtml).toContain('WOODS IN WHISPER. EMBERS REMAIN.')
+    expect(laviraHtml).toContain('PLACEHOLDER')
+    expect(laviraHtml).not.toContain('烬木之息')
+    expect(laviraHtml).not.toMatch(/<script|leaseToken|token=/i)
+    expect(directHtml).not.toMatch(/<script|leaseToken|token=/i)
+
+    const frontFacts = await browserHtmlFacts(laviraHtml, 'lavira.front:approved')
+    const backFacts = await browserHtmlFacts(laviraHtml, 'lavira.back:approved')
+    const directFacts = await browserHtmlFacts(directHtml, 'carrier.direct:curved')
+    expect(frontFacts).toMatchObject({ carrier: 'applied_label', panelCount: 1, diagnosticDisplay: 'none' })
+    expect(backFacts).toMatchObject({ carrier: 'applied_label', panelCount: 1, diagnosticDisplay: 'none' })
+    expect(frontFacts.textFacts['front.product.zh']).toMatchObject({ text: '余烬森林', fontSize: 34 })
+    expect(frontFacts.textFacts['front.product.zh'].width).toBeGreaterThan(100)
+    expect(frontFacts.textFacts['front.product.zh'].fontSize)
+      .toBeGreaterThan(frontFacts.textFacts['front.product.en'].fontSize)
+    expect(backFacts.textFacts['back.regulatory:PLACEHOLDER'].text).toContain('PLACEHOLDER')
+    expect(backFacts.textFacts['back.regulatory:PLACEHOLDER'].height).toBeGreaterThan(20)
+    expect(directFacts).toMatchObject({
+      carrier: 'direct_surface_print',
+      panelCount: 0,
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      borderRadius: '0px',
+      boxShadow: 'none',
+      diagnosticDisplay: 'none',
+    })
+
+    for (const fixture of [lavira, direct]) {
+      const designManifest = JSON.parse(fixture.designManifestBytes.toString('utf8'))
+      expect(designManifest.blueprint).toEqual({
+        revision: fixture.blueprint.revision,
+        sha256: hash(fixture.blueprintBytes),
+      })
+      expect(designManifest.references).toEqual([])
+      expect(designManifest.artifacts.some((artifact: { carrier?: string }) => artifact.carrier === 'bare')).toBe(false)
+      for (const artifact of designManifest.artifacts) {
+        const bytes = await readFile(path.join(fixture.designReviewDir, artifact.path))
+        expect(hash(bytes), artifact.path).toBe(artifact.sha256)
+        if (artifact.mimeType === 'image/png') {
+          expect(bytes.subarray(0, 8), artifact.path)
+            .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+          expect(bytes.readUInt32BE(16), artifact.path).toBe(artifact.width)
+          expect(bytes.readUInt32BE(20), artifact.path).toBe(artifact.height)
+        }
+      }
+    }
+    expect(lavira.blueprint.carrierDefaults.evidence).toContain(
+      'visual_evidence:lavira-ember-woods-20260826/label-mockup.html',
+    )
+    const laviraDesignManifest = JSON.parse(lavira.designManifestBytes.toString('utf8'))
+    expect(laviraDesignManifest.artifacts.find((artifact: { areaId?: string }) => artifact.areaId === 'lavira.front:approved'))
+      .toMatchObject({ width: 240, height: 310, carrier: 'applied_label' })
+    expect(laviraDesignManifest.artifacts.find((artifact: { areaId?: string }) => artifact.areaId === 'lavira.back:approved'))
+      .toMatchObject({ width: 250, height: 330, carrier: 'applied_label' })
+    const directDesignManifest = JSON.parse(direct.designManifestBytes.toString('utf8'))
+    expect(directDesignManifest.artifacts.find((artifact: { areaId?: string }) => artifact.areaId === 'carrier.direct:curved'))
+      .toMatchObject({ width: 200, height: 200, carrier: 'direct_surface_print' })
+
+    const laviraReview = await runTask12Review(lavira)
+    const directReview = await runTask12Review(direct)
+    for (const [fixture, review] of [[lavira, laviraReview], [direct, directReview]] as const) {
+      const manifest = JSON.parse(review.manifestBytes.toString('utf8'))
+      expect(review.envelope).toMatchObject({
+        ok: true,
+        operation: 'render_label_review',
+        data: {
+          outputDir: path.join(await realpath(fixture.root), 'production-review'),
+          revision: revisionOf(fixture.spec),
+          modelFingerprint: hash(modelBytes),
+        },
+      })
+      expect(manifest).toMatchObject({
+        version: 1,
+        input: {
+          kind: 'label-project-v3',
+          revision: revisionOf(fixture.spec),
+          sha256: hash(fixture.inputBytes),
+        },
+        blueprint: { revision: fixture.blueprint.revision, sha256: hash(fixture.blueprintBytes) },
+        designReviewManifest: { sha256: hash(fixture.designManifestBytes) },
+        model: { fingerprint: hash(modelBytes) },
+        areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        areas: fixture.blueprint.areas.map(({ id, side, carrier }) => ({ id, side, carrier })),
+      })
+      expect(manifest.artifacts).toHaveLength(7)
+      expect(manifest.artifacts.map((artifact: { viewKind: string }) => artifact.viewKind)).toEqual([
+        'flat-artwork', 'surface-face', 'flat-artwork', 'surface-face',
+        'model-front', 'model-back', 'review-sheet',
+      ])
+      expect(manifest.artifacts.every((artifact: { width: number; height: number }) => (
+        artifact.width === 640 && artifact.height === 640
+      ))).toBe(true)
+      expect(manifest.artifacts.every((artifact: { path: string }) => (
+        /^[A-Za-z0-9][A-Za-z0-9._-]*\.png$/.test(artifact.path) && !artifact.path.includes(':')
+      ))).toBe(true)
+      expect(review.manifestBytes.toString('utf8')).not.toMatch(/leaseToken|token=/)
+      const expectedFiles = ['review-manifest.json', ...manifest.artifacts.map((artifact: { path: string }) => artifact.path)].sort()
+      expect((await readdir(review.outputDir)).sort()).toEqual(expectedFiles)
+      for (const artifact of manifest.artifacts) {
+        const bytes = await readFile(path.join(review.outputDir, artifact.path))
+        expect(bytes.byteLength, artifact.path).toBeGreaterThan(1_000)
+        expect(bytes.subarray(0, 8), artifact.path)
+          .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        expect(bytes.readUInt32BE(16), artifact.path).toBe(artifact.width)
+        expect(bytes.readUInt32BE(20), artifact.path).toBe(artifact.height)
+        expect(hash(bytes), artifact.path).toBe(artifact.sha256)
+      }
+    }
+
+    const laviraPngs = [
+      'label-front.png', 'surface-front.png', 'label-back.png', 'surface-back.png',
+      'model-front.png', 'model-back.png', 'review-sheet.png',
+    ].map((name) => path.join(laviraReview.outputDir, name))
+    const laviraStats = await browserPngStats(laviraPngs)
+    expect(laviraStats.every((stats) => stats.width === 640 && stats.height === 640)).toBe(true)
+    expect(laviraStats.every((stats) => stats.opaque > 0 && stats.colorBuckets > 4)).toBe(true)
+    const [directAreaStats, directFlatStats, directSurfaceStats] = await browserPngStats([
+      path.join(direct.designReviewDir, 'areas/carrier.direct-curved.png'),
+      path.join(directReview.outputDir, 'label-front.png'),
+      path.join(directReview.outputDir, 'surface-front.png'),
+    ])
+    expect(directAreaStats).toMatchObject({ width: 200, height: 200 })
+    expect(directAreaStats.colorBuckets).toBeGreaterThan(4)
+    expect(new Set(directAreaStats.corners.map((rgba) => JSON.stringify(rgba))).size).toBeGreaterThan(1)
+    expect(directFlatStats.colorBuckets).toBeGreaterThan(4)
+    expect(directSurfaceStats.colorBuckets).toBeGreaterThan(8)
+    expect(directSurfaceStats.center).not.toEqual(directSurfaceStats.corners[0])
+
+    const previousManifest = Buffer.from(laviraReview.manifestBytes)
+    const conflictStdout: string[] = []
+    const conflictCode = await runCli([
+      'review', lavira.inputPath,
+      '--glb', laviraModelPath,
+      '--output', laviraReview.outputDir,
+      '--json',
+    ], {
+      runtimeOptions: { allowedRoots: [process.cwd(), path.dirname(laviraModelPath), lavira.root] },
+      stdout: (value: string) => conflictStdout.push(value),
+      stderr: () => undefined,
+    })
+    expect(conflictCode).toBe(9)
+    expect(JSON.parse(conflictStdout[0])).toMatchObject({ ok: false, error: { code: 'OUTPUT_CONFLICT' } })
+    expect(await readFile(path.join(laviraReview.outputDir, 'review-manifest.json'))).toEqual(previousManifest)
+  }, 300_000)
+
   it.runIf(runRealE2E)('captures a gate-bound clean review through the packaged browser bridge', async () => {
     const requestedEvidenceDir = process.env.GLB_LABEL_TASK9_EVIDENCE_DIR
     const evidenceDir = requestedEvidenceDir

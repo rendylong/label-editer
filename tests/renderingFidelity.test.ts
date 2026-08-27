@@ -2,17 +2,26 @@ import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { Document as GltfDocument } from '@gltf-transform/core'
 import * as THREE from 'three'
+import { compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
+import { compareBlueprintFidelity, projectEditableArea } from '../src/agent/fidelityCheck'
+import { validateLayoutBlueprint, type LayoutBlueprintV1 } from '../src/agent/designContracts'
 import { readGlb } from '../src/glb/analyze'
-import { renderMasks } from '../src/label/craft'
+import { renderCarrierMasks, renderMasks } from '../src/label/craft'
 import * as craft from '../src/label/craft'
 import type { ShapeGeometry, ShapeKind, ShapeLayer } from '../src/label/types'
 import * as labelCanvas from '../src/label/LabelCanvas'
 import * as labelTextures from '../src/glb/textures'
 import * as sceneController from '../src/scene/SceneController'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
-import { serializeLabelProject } from '../src/app/projectSchema'
+import { canonicalRasterHeight } from '../src/app/canvasLayout'
+import { parseLabelProject, serializeLabelProject } from '../src/app/projectSchema'
+import { carrierReadinessChecks } from '../src/label/exportReadiness'
+import { resolveCarrierSurface } from '../src/label/paper'
+import { validatePrintReadiness } from '../src/label/printReadiness'
 import { useLabelStore } from '../src/state/stores'
 import type { LabelAreaConfig } from '../src/label/types'
+import laviraFixture from './fixtures/blueprints/lavira-ember-woods-v1.json'
+import carrierFixture from './fixtures/blueprints/carrier-regressions-v1.json'
 
 const SAMPLE = new URL('../public/sample/面霜瓶.glb', import.meta.url)
 
@@ -518,14 +527,30 @@ class TestCanvasContext {
 
   constructor(private readonly canvas: TestCanvas) {}
 
-  fillRect(): void {
+  fillRect(x = 0, y = 0, width = this.canvas.width, height = this.canvas.height): void {
     const [r, g, b] = colorChannels(String(this.fillStyle))
-    this.pixels = new Uint8ClampedArray(this.canvas.width * this.canvas.height * 4)
-    for (let i = 0; i < this.pixels.length; i += 4) {
-      this.pixels[i] = r
-      this.pixels[i + 1] = g
-      this.pixels[i + 2] = b
-      this.pixels[i + 3] = 255
+    if (this.pixels.length !== this.canvas.width * this.canvas.height * 4) {
+      this.pixels = new Uint8ClampedArray(this.canvas.width * this.canvas.height * 4)
+    }
+    for (let py = Math.max(0, y); py < Math.min(this.canvas.height, y + height); py += 1) {
+      for (let px = Math.max(0, x); px < Math.min(this.canvas.width, x + width); px += 1) {
+        const offset = (py * this.canvas.width + px) * 4
+        this.pixels[offset] = r
+        this.pixels[offset + 1] = g
+        this.pixels[offset + 2] = b
+        this.pixels[offset + 3] = 255
+      }
+    }
+  }
+
+  clearRect(x = 0, y = 0, width = this.canvas.width, height = this.canvas.height): void {
+    if (this.pixels.length !== this.canvas.width * this.canvas.height * 4) {
+      this.pixels = new Uint8ClampedArray(this.canvas.width * this.canvas.height * 4)
+    }
+    for (let py = Math.max(0, y); py < Math.min(this.canvas.height, y + height); py += 1) {
+      for (let px = Math.max(0, x); px < Math.min(this.canvas.width, x + width); px += 1) {
+        this.pixels.fill(0, (py * this.canvas.width + px) * 4, (py * this.canvas.width + px + 1) * 4)
+      }
     }
   }
 
@@ -985,5 +1010,193 @@ describe('3D 渲染细节保真', () => {
     const extensions = doc.getRoot().listExtensionsUsed().map((extension) => extension.extensionName)
 
     expect(extensions).toEqual(expect.arrayContaining(['KHR_texture_transform', 'KHR_materials_clearcoat']))
+  })
+})
+
+function fixtureShell(area: LayoutBlueprintV1['areas'][number], bakeWidth: number): LabelAreaConfig {
+  const aspect = area.artboard.widthMm / area.artboard.heightMm
+  return {
+    id: area.id,
+    name: area.id,
+    meshIndex: 1,
+    nodeName: 'Circle.002_Logo_0',
+    surfaceMode: 'overlay',
+    side: area.side,
+    remap: {
+      mode: 'cylindrical', axis: [0, 0, 1], origin: [0, 0, 0], radius: 1,
+      wrap: 1, offset: area.side === 'back' ? 0.25 : 0.75,
+      planarBox: { min: [-1, -1, -1], max: [1, 1, 1] },
+    },
+    range: { uStart: 0.25, uWidth: 0.5, vStart: 0.1, vHeight: 0.8 },
+    canvas: { width: bakeWidth, height: canonicalRasterHeight(bakeWidth, aspect), aspect },
+    layers: [], globalCraft: { craft: [] }, fonts: [], referenceVisible: false,
+    undoStack: [], redoStack: [],
+  }
+}
+
+function renderBlueprintAt(blueprint: LayoutBlueprintV1, bakeWidth: number): LabelAreaConfig[] {
+  const specs = compileBlueprintToSpecAreas(blueprint)
+  return blueprint.areas.map((area) => applyStructuredLabelSpec(
+    fixtureShell(area, bakeWidth),
+    { version: 2, areas: [specs.find((candidate) => candidate.id === area.id)!] },
+  ).areas[0])
+}
+
+function canvasPixel(canvas: HTMLCanvasElement | undefined, x: number, y: number): number[] | undefined {
+  if (!canvas) return undefined
+  const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data
+  const offset = (y * canvas.width + x) * 4
+  return Array.from(data.slice(offset, offset + 4))
+}
+
+describe('Task 12 approved Lavira and carrier fixture fidelity', () => {
+  const lavira = validateLayoutBlueprint(structuredClone(laviraFixture))
+  const carriers = validateLayoutBlueprint(structuredClone(carrierFixture))
+
+  it.each([1024, 4096])('preserves approved Lavira physical design at canonical %i-wide bake', (bakeWidth) => {
+    const rendered = renderBlueprintAt(lavira, bakeWidth)
+    const projection = rendered.map(projectEditableArea)
+    const roundTrip = parseLabelProject(serializeLabelProject('lavira.glb', rendered))
+    const roundTripAreas: LabelAreaConfig[] = roundTrip.areas.map((area) => ({
+      ...area,
+      undoStack: [],
+      redoStack: [],
+    }))
+
+    expect(compareBlueprintFidelity({ blueprint: lavira, editableAreas: rendered })).toEqual({ pass: true, issues: [] })
+    expect(compareBlueprintFidelity({ blueprint: lavira, editableAreas: roundTripAreas })).toEqual({ pass: true, issues: [] })
+    expect(projection.map((area) => area.artboard)).toEqual(lavira.areas.map((area) => area.artboard))
+    for (const [index, area] of rendered.entries()) {
+      const artboard = lavira.areas[index].artboard
+      expect(area.canvas).toEqual({
+        width: bakeWidth,
+        height: canonicalRasterHeight(bakeWidth, artboard.widthMm / artboard.heightMm),
+        aspect: artboard.widthMm / artboard.heightMm,
+      })
+      expect(area.placementPolicy).toBe('fit')
+    }
+  })
+
+  it('freezes the exact approved copy, Chinese-dominant hierarchy, editable geometry, and visual-evidence boundary', () => {
+    const front = lavira.areas.find((area) => area.side === 'front')!
+    const back = lavira.areas.find((area) => area.side === 'back')!
+    const text = (area: typeof front) => area.layers.filter((layer) => layer.kind === 'text')
+      .map((layer) => layer.text)
+
+    expect(text(front)).toEqual([
+      'LAVIRA', '余烬森林', 'EMBER WOODS', '木质低语，余烬未熄。',
+      'WOODS IN WHISPER. EMBERS REMAIN.', "男士香水 · MEN'S FRAGRANCE", '净含量 PLACEHOLDER mL',
+    ])
+    expect(text(back)).toEqual([
+      'LAVIRA', '余烬森林', 'EMBER WOODS', '香调构想 / SCENT CONCEPT',
+      '干燥木材、温暖树脂与烟熏余韵。', 'DRY WOODS, WARM RESINS, A SMOKED TRAIL.',
+      '使用方法 / DIRECTIONS：PLACEHOLDER\n成分 / INGREDIENTS：PLACEHOLDER\n备案 / FILING：PLACEHOLDER\n执行标准 / STANDARD：PLACEHOLDER\n责任企业 / RESPONSIBLE ENTITY：PLACEHOLDER\n产地 / ORIGIN：PLACEHOLDER\n批号及限用日期 / BATCH & EXPIRY：见包装 PLACEHOLDER\n净含量 / NET CONTENT：PLACEHOLDER mL',
+      'PLACEHOLDER 0 000000 000000',
+    ])
+    expect(text(front)).not.toContain('烬木之息')
+    const chinese = front.layers.find((layer) => layer.id === 'front.product.zh')!
+    const brand = front.layers.find((layer) => layer.id === 'front.brand')!
+    const english = front.layers.find((layer) => layer.id === 'front.product.en')!
+    expect(chinese.fontSizeMm).toBeGreaterThan(brand.fontSizeMm!)
+    expect(chinese.fontSizeMm).toBeGreaterThan(english.fontSizeMm!)
+    expect(chinese.zIndex).toBeGreaterThan(brand.zIndex)
+    expect(lavira.carrierDefaults.evidence).toEqual([
+      'visual_evidence:lavira-ember-woods-20260826/label-mockup.html',
+    ])
+    expect(JSON.stringify(lavira)).not.toMatch(/<script|javascript:|onerror=/i)
+    expect(lavira.areas.every((area) => area.layers.every((layer) => layer.flattenedFallback === undefined))).toBe(true)
+    expect(lavira.areas.every((area) => area.layers.every((layer) => ['text', 'shape', 'image'].includes(layer.kind)))).toBe(true)
+  })
+
+  it('keeps the copper frame bottom open and every contour ellipse exact in renderer draw output', () => {
+    const front = renderBlueprintAt(lavira, 1024).find((area) => area.side === 'front')!
+    const frame = front.layers.find((layer) => layer.id === 'front.frame:open') as ShapeLayer
+    const frameDraw = drawRecordedShape(frame)
+    const contourLayers = front.layers.filter((layer) => layer.id.startsWith('front.contour.')) as ShapeLayer[]
+
+    expect(frame.pathData).toBe('M 0 56 L 0 0 L 42 0 L 42 56')
+    expect(frame.pathData).not.toMatch(/[zZ]\s*$/)
+    expect(frameDraw.preview.pathCalls.some(([operation]) => operation === 'closePath')).toBe(false)
+    expect(frameDraw.preview.paintCalls).toEqual(['strokeShape'])
+    expect(frameDraw.mask.paintCalls).toContain('stroke')
+    expect(frameDraw.mask.paintCalls).not.toContain('fill')
+    expect(contourLayers.map((layer) => ({
+      bounds: layer.designMetrics?.boundsMm,
+      rotation: layer.rotation,
+      strokeWidthMm: layer.designMetrics?.strokeWidthMm,
+      opacity: layer.opacity,
+    }))).toEqual([
+      { bounds: { x: 2, y: 5, width: 44, height: 24 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 5, y: 7, width: 38, height: 20 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 8, y: 9, width: 32, height: 16 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 11, y: 11, width: 26, height: 12 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 14, y: 13, width: 20, height: 8 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+    ])
+    expect(contourLayers.every((layer) => {
+      const calls = drawRecordedShape(layer).preview.pathCalls
+      return calls.filter(([operation]) => operation === 'bezierCurveTo').length === 4
+        && calls.filter(([operation]) => operation === 'closePath').length === 1
+    })).toBe(true)
+  })
+
+  it('detects stale approved copy and a falsely closed frame as real fidelity failures', () => {
+    const rendered = renderBlueprintAt(lavira, 1024)
+    const front = rendered.find((area) => area.side === 'front')!
+    const chinese = front.layers.find((layer) => layer.id === 'front.product.zh')!
+    const frame = front.layers.find((layer) => layer.id === 'front.frame:open') as ShapeLayer
+    if (chinese.kind === 'text') chinese.text = '烬木之息'
+    frame.pathData = `${frame.pathData} Z`
+
+    const issues = compareBlueprintFidelity({ blueprint: lavira, editableAreas: rendered }).issues
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'TEXT_MISMATCH', layerId: 'front.product.zh' }))
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'VECTOR_MISMATCH', layerId: 'front.frame:open' }))
+  })
+
+  it('renders five canonical carriers without inventing panels and emits only selective clear-film white pixels', () => {
+    const rendered = renderBlueprintAt(carriers, 32)
+    const byCarrier = new Map(rendered.map((area) => [area.carrier, area]))
+    const direct = byCarrier.get('direct_surface_print')!
+    const applied = byCarrier.get('applied_label')!
+    const clear = byCarrier.get('clear_label')!
+    const foil = byCarrier.get('foil_or_ink_only')!
+    const bare = byCarrier.get('bare')!
+
+    expect(carriers.areas.map((area) => area.carrier)).toEqual([
+      'direct_surface_print', 'applied_label', 'clear_label', 'foil_or_ink_only', 'bare',
+    ])
+    expect(resolveCarrierSurface(direct)).toMatchObject({ substrateVisible: false, boundaryVisible: false })
+    expect(resolveCarrierSurface(applied)).toMatchObject({ substrateVisible: true, boundaryVisible: true })
+    expect(resolveCarrierSurface(clear)).toMatchObject({ substrateVisible: false, diagnosticFilmExtent: true })
+    expect(resolveCarrierSurface(foil)).toMatchObject({ substrateVisible: false, boundaryVisible: false })
+    expect(resolveCarrierSurface(bare)).toMatchObject({ substrateVisible: false, boundaryVisible: false })
+    expect(direct).not.toHaveProperty('substrate')
+    expect(foil).not.toHaveProperty('substrate')
+    expect(bare).not.toHaveProperty('substrate')
+    expect(bare.layers).toEqual([])
+    expect(carrierReadinessChecks(direct).map((item) => item.code)).toEqual([
+      'ink-adhesion', 'opacity', 'curvature', 'registration', 'rub-resistance',
+    ])
+    expect(carrierReadinessChecks(applied).map((item) => item.code)).toEqual(['bleed', 'die-cut', 'edge-adhesion'])
+    expect(validatePrintReadiness(bare)).toEqual([])
+    expect(foil.layers.every((layer) => layer.craft.every((effect) => effect.type !== 'matte'))).toBe(true)
+
+    const previousDocument = globalThis.document
+    globalThis.document = { createElement: () => new TestCanvas() } as unknown as Document
+    try {
+      const drawSelectivePixel = (context: CanvasRenderingContext2D, _layer: LabelAreaConfig['layers'][number], gray: number): true => {
+        context.fillStyle = `rgb(${gray},${gray},${gray})`
+        context.fillRect(0, 0, 1, 1)
+        return true
+      }
+      const clearMasks = renderCarrierMasks(clear.canvas.width, clear.canvas.height, drawSelectivePixel, clear)
+      const directMasks = renderCarrierMasks(direct.canvas.width, direct.canvas.height, drawSelectivePixel, direct)
+
+      expect(canvasPixel(clearMasks.whiteUnderbase, 0, 0)).toEqual([255, 255, 255, 255])
+      expect(canvasPixel(clearMasks.whiteUnderbase, 1, 1)).toEqual([0, 0, 0, 255])
+      expect(directMasks).not.toHaveProperty('whiteUnderbase')
+      expect(Object.keys(directMasks)).toEqual([])
+    } finally {
+      globalThis.document = previousDocument
+    }
   })
 })

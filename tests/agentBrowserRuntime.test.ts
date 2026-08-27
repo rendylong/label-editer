@@ -8,12 +8,15 @@ import { createBrowserAgentBridge, isBakeSettleWindowReady } from '../src/agent/
 import { registerAgentPreviewCapture } from '../src/agent/previewCapture'
 import type { QcCameraMetadata, ReviewEvidenceRequest, ReviewViewRequest } from '../src/agent/contracts'
 import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
+import { validateLayoutBlueprint } from '../src/agent/designContracts'
+import { buildReviewCapturePlan } from '../src/agent/reviewCapturePlan'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
 import { designAssetReadinessKey, designFontReadinessKey, isBakeAssetReadyForArea } from '../src/label/exportReadiness'
 import { beginImageAssetLoad, bindImageAssetReceipt } from '../src/label/imageAssetReceipt'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
 import { pngBlob as structuralPngBlob } from './pngTestUtils'
+import carrierRegressionFixture from './fixtures/blueprints/carrier-regressions-v1.json'
 
 const external = vi.hoisted(() => ({
   restoreImportedAreaRuntime: vi.fn(async () => ({ remapOutput: null, meshAccessors: null })),
@@ -29,6 +32,24 @@ it('requires elapsed settle time and multiple unchanged frames before capture re
   expect(isBakeSettleWindowReady(400, 1)).toBe(false)
   expect(isBakeSettleWindowReady(349, 3)).toBe(false)
   expect(isBakeSettleWindowReady(350, 3)).toBe(true)
+})
+
+it('turns opaque carrier fixture ids into a complete path-safe review plan and omits bare geometry', () => {
+  const blueprint = validateLayoutBlueprint(structuredClone(carrierRegressionFixture))
+  const plan = buildReviewCapturePlan({
+    areas: blueprint.areas.map(({ id, side, carrier }) => ({ id, side, carrier })),
+    width: 640,
+    height: 640,
+  })
+  const areaViews = plan.filter((view) => view.areaId !== undefined)
+
+  expect(areaViews).toHaveLength(8)
+  expect(areaViews.some((view) => view.areaId === 'carrier.bare:front')).toBe(false)
+  expect(new Set(areaViews.map((view) => view.carrier))).toEqual(new Set([
+    'direct_surface_print', 'applied_label', 'clear_label', 'foil_or_ink_only',
+  ]))
+  expect(plan.map((view) => view.id).every((id) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(id))).toBe(true)
+  expect(plan.filter((view) => view.areaId?.includes(':')).every((view) => !view.id.includes(':'))).toBe(true)
 })
 
 function pngBlob(value: string): Blob {
@@ -1310,5 +1331,38 @@ describe('browser Agent clean production review runtime', () => {
       ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
     })
     expect(mutated).toBe(true)
+  })
+
+  it('fails closed without upload and preserves live editor state when the review browser is lost before capture', async () => {
+    const { request, owner } = reviewFixture()
+    const before = {
+      areas: useLabelStore.getState().areas,
+      activeAreaId: useLabelStore.getState().activeAreaId,
+      selectedLayerIds: useLabelStore.getState().selectedLayerIds,
+      selectedPartId: useModelStore.getState().selectedPartId,
+      workspaceTab: useUiStore.getState().workspaceTab,
+    }
+    vi.stubGlobal('fetch', vi.fn())
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false,
+      operation: 'render_review_evidence',
+      error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(useLabelStore.getState().areas).toBe(before.areas)
+    expect(useLabelStore.getState().areas[0]).toBe(owner)
+    expect({
+      activeAreaId: useLabelStore.getState().activeAreaId,
+      selectedLayerIds: useLabelStore.getState().selectedLayerIds,
+      selectedPartId: useModelStore.getState().selectedPartId,
+      workspaceTab: useUiStore.getState().workspaceTab,
+    }).toEqual({
+      activeAreaId: before.activeAreaId,
+      selectedLayerIds: before.selectedLayerIds,
+      selectedPartId: before.selectedPartId,
+      workspaceTab: before.workspaceTab,
+    })
   })
 })

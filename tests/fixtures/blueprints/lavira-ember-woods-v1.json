@@ -1,0 +1,583 @@
+{
+  "version": 1,
+  "revision": "lavira-ember-woods-approved-c-20260826.v1",
+  "carrierDefaults": {
+    "carrier": "applied_label",
+    "evidence": [
+      "visual_evidence:lavira-ember-woods-20260826/label-mockup.html"
+    ],
+    "assumptions": [
+      "Physical label dimensions are approved concept proportions, not a supplier die line.",
+      "All literal PLACEHOLDER fields require regulatory and production confirmation."
+    ]
+  },
+  "assets": [],
+  "areas": [
+    {
+      "id": "lavira.front:approved",
+      "side": "front",
+      "carrier": "applied_label",
+      "artboard": {
+        "widthMm": 48,
+        "heightMm": 62,
+        "background": "transparent"
+      },
+      "placementIntent": "Centered lower-front charcoal stele label; preserve the full 48 by 62 mm artboard without stretch or unapproved crop.",
+      "placementPolicy": "fit",
+      "substrate": {
+        "kind": "opaque",
+        "color": "#171714",
+        "opacity": 1,
+        "boundary": {
+          "shape": "rounded_rectangle",
+          "radiusMm": 2
+        },
+        "material": "charcoal uncoated paper",
+        "adhesive": "pressure-sensitive adhesive PLACEHOLDER"
+      },
+      "layers": [
+        {
+          "id": "front.frame:open",
+          "kind": "shape",
+          "boundsMm": { "x": 3, "y": 3, "width": 42, "height": 56 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 0.9,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" }
+          ],
+          "shape": "path",
+          "pathData": "M 0 56 L 0 0 L 42 0 L 42 56",
+          "pathViewBox": [0, 0, 42, 56],
+          "fillRule": "nonzero",
+          "fill": "transparent",
+          "stroke": "#B76A3A",
+          "strokeWidthMm": 0.25
+        },
+        {
+          "id": "front.contour.01",
+          "kind": "shape",
+          "boundsMm": { "x": 2, "y": 5, "width": 44, "height": 24 },
+          "anchor": "center",
+          "rotation": -8,
+          "opacity": 0.26,
+          "visible": true,
+          "zIndex": 1,
+          "processes": [
+            { "process": "emboss", "spotName": "CONTOUR_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
+          ],
+          "shape": "ellipse",
+          "fill": "transparent",
+          "stroke": "#B7AA91",
+          "strokeWidthMm": 0.2
+        },
+        {
+          "id": "front.contour.02",
+          "kind": "shape",
+          "boundsMm": { "x": 5, "y": 7, "width": 38, "height": 20 },
+          "anchor": "center",
+          "rotation": -8,
+          "opacity": 0.26,
+          "visible": true,
+          "zIndex": 2,
+          "processes": [
+            { "process": "emboss", "spotName": "CONTOUR_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
+          ],
+          "shape": "ellipse",
+          "fill": "transparent",
+          "stroke": "#B7AA91",
+          "strokeWidthMm": 0.2
+        },
+        {
+          "id": "front.contour.03",
+          "kind": "shape",
+          "boundsMm": { "x": 8, "y": 9, "width": 32, "height": 16 },
+          "anchor": "center",
+          "rotation": -8,
+          "opacity": 0.26,
+          "visible": true,
+          "zIndex": 3,
+          "processes": [
+            { "process": "emboss", "spotName": "CONTOUR_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
+          ],
+          "shape": "ellipse",
+          "fill": "transparent",
+          "stroke": "#B7AA91",
+          "strokeWidthMm": 0.2
+        },
+        {
+          "id": "front.contour.04",
+          "kind": "shape",
+          "boundsMm": { "x": 11, "y": 11, "width": 26, "height": 12 },
+          "anchor": "center",
+          "rotation": -8,
+          "opacity": 0.26,
+          "visible": true,
+          "zIndex": 4,
+          "processes": [
+            { "process": "emboss", "spotName": "CONTOUR_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
+          ],
+          "shape": "ellipse",
+          "fill": "transparent",
+          "stroke": "#B7AA91",
+          "strokeWidthMm": 0.2
+        },
+        {
+          "id": "front.contour.05",
+          "kind": "shape",
+          "boundsMm": { "x": 14, "y": 13, "width": 20, "height": 8 },
+          "anchor": "center",
+          "rotation": -8,
+          "opacity": 0.26,
+          "visible": true,
+          "zIndex": 5,
+          "processes": [
+            { "process": "emboss", "spotName": "CONTOUR_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
+          ],
+          "shape": "ellipse",
+          "fill": "transparent",
+          "stroke": "#B7AA91",
+          "strokeWidthMm": 0.2
+        },
+        {
+          "id": "front.brand",
+          "kind": "text",
+          "boundsMm": { "x": 7, "y": 6, "width": 34, "height": 5 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 10,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" }
+          ],
+          "text": "LAVIRA",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 3.6,
+          "fontWeight": 500,
+          "letterSpacingEm": 0.34,
+          "lineHeight": 1.05,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#B76A3A"
+        },
+        {
+          "id": "front.ember:mark",
+          "kind": "shape",
+          "boundsMm": { "x": 21.5, "y": 18, "width": 5, "height": 5 },
+          "anchor": "center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 15,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" },
+            { "process": "emboss", "spotName": "EMBER_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
+          ],
+          "shape": "ellipse",
+          "fill": "#B76A3A",
+          "stroke": "#B76A3A",
+          "strokeWidthMm": 0
+        },
+        {
+          "id": "front.product.zh",
+          "kind": "text",
+          "boundsMm": { "x": 4, "y": 27, "width": 40, "height": 9 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 20,
+          "processes": [
+            { "process": "offset_print", "spotName": "IVORY_INK_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "余烬森林",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Songti SC", "Noto Serif CJK SC", "Georgia", "serif"],
+          "fontSizeMm": 6.8,
+          "fontWeight": 500,
+          "letterSpacingEm": 0.12,
+          "lineHeight": 1.05,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#E9E1D2"
+        },
+        {
+          "id": "front.product.en",
+          "kind": "text",
+          "boundsMm": { "x": 6, "y": 37, "width": 36, "height": 4 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 21,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" }
+          ],
+          "text": "EMBER WOODS",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 2.2,
+          "fontWeight": 500,
+          "letterSpacingEm": 0.3,
+          "lineHeight": 1.05,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#B76A3A"
+        },
+        {
+          "id": "front.tagline.zh",
+          "kind": "text",
+          "boundsMm": { "x": 6, "y": 43, "width": 36, "height": 3 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 22,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "木质低语，余烬未熄。",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Songti SC", "Noto Serif CJK SC", "Georgia", "serif"],
+          "fontSizeMm": 2,
+          "fontWeight": 400,
+          "letterSpacingEm": 0.02,
+          "lineHeight": 1.2,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#C9BEAD"
+        },
+        {
+          "id": "front.tagline.en",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 47, "width": 38, "height": 2.5 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 23,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "WOODS IN WHISPER. EMBERS REMAIN.",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 1.4,
+          "fontWeight": 400,
+          "letterSpacingEm": 0.09,
+          "lineHeight": 1.2,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#C9BEAD"
+        },
+        {
+          "id": "front.category",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 53, "width": 38, "height": 2.5 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 24,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "男士香水 · MEN'S FRAGRANCE",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "PingFang SC", "sans-serif"],
+          "fontSizeMm": 1.6,
+          "fontWeight": 400,
+          "letterSpacingEm": 0.13,
+          "lineHeight": 1.1,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#C9BEAD"
+        },
+        {
+          "id": "front.volume",
+          "kind": "text",
+          "boundsMm": { "x": 8, "y": 57, "width": 32, "height": 2 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 25,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "净含量 PLACEHOLDER mL",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "PingFang SC", "sans-serif"],
+          "fontSizeMm": 1.4,
+          "fontWeight": 400,
+          "letterSpacingEm": 0.04,
+          "lineHeight": 1.1,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#9F9586"
+        }
+      ]
+    },
+    {
+      "id": "lavira.back:approved",
+      "side": "back",
+      "carrier": "applied_label",
+      "artboard": {
+        "widthMm": 50,
+        "heightMm": 66,
+        "background": "transparent"
+      },
+      "placementIntent": "Centered back information label; preserve the full 50 by 66 mm artboard without stretch or unapproved crop.",
+      "placementPolicy": "fit",
+      "substrate": {
+        "kind": "opaque",
+        "color": "#171714",
+        "opacity": 1,
+        "boundary": {
+          "shape": "rounded_rectangle",
+          "radiusMm": 2
+        },
+        "material": "charcoal uncoated paper",
+        "adhesive": "pressure-sensitive adhesive PLACEHOLDER"
+      },
+      "layers": [
+        {
+          "id": "back.frame",
+          "kind": "shape",
+          "boundsMm": { "x": 3, "y": 3, "width": 44, "height": 60 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 0.9,
+          "visible": true,
+          "zIndex": 0,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" }
+          ],
+          "shape": "rounded_rectangle",
+          "fill": "transparent",
+          "stroke": "#B76A3A",
+          "strokeWidthMm": 0.25,
+          "cornerRadiusMm": 1.2
+        },
+        {
+          "id": "back.brand",
+          "kind": "text",
+          "boundsMm": { "x": 7, "y": 6, "width": 36, "height": 4 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 10,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" }
+          ],
+          "text": "LAVIRA",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 2.8,
+          "fontWeight": 500,
+          "letterSpacingEm": 0.3,
+          "lineHeight": 1.05,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#B76A3A"
+        },
+        {
+          "id": "back.product.zh",
+          "kind": "text",
+          "boundsMm": { "x": 6, "y": 12, "width": 38, "height": 5 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 11,
+          "processes": [
+            { "process": "offset_print", "spotName": "IVORY_INK_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "余烬森林",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Songti SC", "Noto Serif CJK SC", "Georgia", "serif"],
+          "fontSizeMm": 3.4,
+          "fontWeight": 500,
+          "letterSpacingEm": 0.1,
+          "lineHeight": 1.05,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#E9E1D2"
+        },
+        {
+          "id": "back.product.en",
+          "kind": "text",
+          "boundsMm": { "x": 8, "y": 18, "width": 34, "height": 3 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 12,
+          "processes": [
+            { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" }
+          ],
+          "text": "EMBER WOODS",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 2,
+          "fontWeight": 500,
+          "letterSpacingEm": 0.18,
+          "lineHeight": 1.05,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#B76A3A"
+        },
+        {
+          "id": "back.concept.title",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 24, "width": 40, "height": 3 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 13,
+          "processes": [
+            { "process": "offset_print", "spotName": "IVORY_INK_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "香调构想 / SCENT CONCEPT",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "PingFang SC", "sans-serif"],
+          "fontSizeMm": 1.9,
+          "fontWeight": 600,
+          "letterSpacingEm": 0.08,
+          "lineHeight": 1.1,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#E9E1D2"
+        },
+        {
+          "id": "back.concept.zh",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 28, "width": 40, "height": 3 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 14,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "干燥木材、温暖树脂与烟熏余韵。",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Songti SC", "Noto Serif CJK SC", "Georgia", "serif"],
+          "fontSizeMm": 1.8,
+          "fontWeight": 400,
+          "letterSpacingEm": 0.02,
+          "lineHeight": 1.15,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#E9E1D2"
+        },
+        {
+          "id": "back.concept.en",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 32, "width": 40, "height": 4 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 15,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "DRY WOODS, WARM RESINS, A SMOKED TRAIL.",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 1.4,
+          "fontWeight": 400,
+          "letterSpacingEm": 0.04,
+          "lineHeight": 1.15,
+          "alignment": "center",
+          "wrapPolicy": "word",
+          "maxLines": 2,
+          "color": "#C9BEAD"
+        },
+        {
+          "id": "back.regulatory:PLACEHOLDER",
+          "kind": "text",
+          "boundsMm": { "x": 5, "y": 38, "width": 40, "height": 18 },
+          "anchor": "top_left",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 16,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "使用方法 / DIRECTIONS：PLACEHOLDER\n成分 / INGREDIENTS：PLACEHOLDER\n备案 / FILING：PLACEHOLDER\n执行标准 / STANDARD：PLACEHOLDER\n责任企业 / RESPONSIBLE ENTITY：PLACEHOLDER\n产地 / ORIGIN：PLACEHOLDER\n批号及限用日期 / BATCH & EXPIRY：见包装 PLACEHOLDER\n净含量 / NET CONTENT：PLACEHOLDER mL",
+          "language": "zh-Hans",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "PingFang SC", "sans-serif"],
+          "fontSizeMm": 1.35,
+          "fontWeight": 400,
+          "letterSpacingEm": 0,
+          "lineHeight": 1.35,
+          "alignment": "left",
+          "wrapPolicy": "word",
+          "maxLines": 8,
+          "color": "#C9BEAD"
+        },
+        {
+          "id": "back.barcode:PLACEHOLDER",
+          "kind": "text",
+          "boundsMm": { "x": 10, "y": 59, "width": 30, "height": 2 },
+          "anchor": "top_center",
+          "rotation": 0,
+          "opacity": 1,
+          "visible": true,
+          "zIndex": 17,
+          "processes": [
+            { "process": "offset_print", "spotName": "MUTED_IVORY_PLACEHOLDER", "requiredMask": "color" }
+          ],
+          "text": "PLACEHOLDER 0 000000 000000",
+          "language": "en",
+          "writingDirection": "ltr",
+          "fontStack": ["Arial", "sans-serif"],
+          "fontSizeMm": 1.25,
+          "fontWeight": 400,
+          "letterSpacingEm": 0.15,
+          "lineHeight": 1.1,
+          "alignment": "center",
+          "wrapPolicy": "none",
+          "maxLines": 1,
+          "color": "#9F9586"
+        }
+      ]
+    }
+  ]
+}
