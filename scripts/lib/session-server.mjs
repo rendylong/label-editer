@@ -135,8 +135,8 @@ export async function createSessionServer({
     if (session.reviewLease !== lease) return
     // A prepared receipt proves that the client read and hashed the candidate,
     // not that the caller crossed its final synchronous freshness barrier. Until
-    // an explicit success signal (or a next-consumer read) seals it, expiry must
-    // restore the prior committed set.
+    // an explicit receipt-bound confirmation seals it, expiry must restore the
+    // prior committed set.
     rollbackReviewLease(session, lease)
   }
 
@@ -207,19 +207,26 @@ export async function createSessionServer({
       && Object.entries(expected).every(([key, value]) => candidate[key] === value)
   }
 
-  function confirmationIdentity(body, expected) {
+  function confirmationIdentity(body) {
     if (!body || typeof body !== 'object' || Array.isArray(body)
       || Object.keys(body).length !== 4
       || !Object.hasOwn(body, 'leaseToken') || !Object.hasOwn(body, 'generation')
       || !Object.hasOwn(body, 'expiresAt') || !Object.hasOwn(body, 'artifacts')
       || !Array.isArray(body.artifacts)
-      || (expected && (body.artifacts.length !== expected.length
-        || body.artifacts.some((candidate, index) => !matchingReceipt(candidate, expected[index]))))) return null
+      || typeof body.leaseToken !== 'string'
+      || !Number.isSafeInteger(body.generation) || body.generation < 1
+      || !Number.isSafeInteger(body.expiresAt) || body.expiresAt < 1
+      || body.artifacts.length > maxReviewBatchArtifacts) return null
     return sha256Bytes(Buffer.from(JSON.stringify({
       generation: body.generation,
       expiresAt: body.expiresAt,
       artifacts: body.artifacts,
     })))
+  }
+
+  function confirmationMatchesExpected(body, expected) {
+    return body.artifacts.length === expected.length
+      && body.artifacts.every((candidate, index) => matchingReceipt(candidate, expected[index]))
   }
 
   function namespaceIsolated(session) {
@@ -450,11 +457,11 @@ export async function createSessionServer({
           if (request.method === 'POST' && parts[5] === 'confirm') {
             const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
             const outcome = await serializeSessionMutation(session, () => {
-              const active = session.reviewLease
-              const expected = active?.batchId === batchId && active.committed ? [...active.committed.values()] : undefined
-              const identity = confirmationIdentity(body, expected)
-              const lease = requestLease(session, batchId, request, body, ['prepared'], { renew: false })
-              if (!lease) {
+              const identity = confirmationIdentity(body)
+              const cached = Number.isSafeInteger(body?.generation)
+                ? session.reviewSettlements.get(settlementKey(batchId, body.generation))
+                : undefined
+              if (cached) {
                 const replay = identity
                   ? replayReviewSettlement(session, batchId, request, body, 'confirm', identity)
                   : null
@@ -462,7 +469,16 @@ export async function createSessionServer({
                   ? { status: 200, payload: replay }
                   : { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact confirmation' } }
               }
-              if (!identity || body.expiresAt !== lease.expiresAt
+              const active = session.reviewLease
+              if (!active || active.batchId !== batchId || active.generation !== body?.generation) {
+                return { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact confirmation' } }
+              }
+              const expected = active.committed ? [...active.committed.values()] : []
+              const lease = requestLease(session, batchId, request, body, ['prepared'], { renew: false })
+              if (!lease) {
+                return { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact confirmation' } }
+              }
+              if (!identity || !confirmationMatchesExpected(body, expected) || body.expiresAt !== lease.expiresAt
                 || !committedNamespaceIsolated(session, lease.committed)) {
                 return { status: 409, payload: { ok: false, error: 'Review artifact confirmation is incomplete or mismatched' } }
               }

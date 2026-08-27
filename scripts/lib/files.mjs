@@ -112,6 +112,12 @@ async function writeDurableExclusive(fileSystem, filePath, bytes) {
   await syncDirectory(fileSystem, path.dirname(filePath))
 }
 
+async function writeDurableMarker(fileSystem, markerPath, token) {
+  const temporary = `${markerPath}.${token}.tmp`
+  await writeDurableExclusive(fileSystem, temporary, new Uint8Array())
+  await renameAndSync(fileSystem, temporary, markerPath)
+}
+
 async function removeAndSync(fileSystem, target, options) {
   await fileSystem.rm(target, options)
   await syncDirectory(fileSystem, path.dirname(target))
@@ -163,39 +169,44 @@ function assertTransaction(journal, outputDir) {
 
 async function recoverLockedPublication(fileSystem, lockPath, outputDir) {
   const journalPath = path.join(lockPath, 'transaction.json')
-  const markerPath = path.join(lockPath, 'staged.complete')
+  const stagedMarkerPath = path.join(lockPath, 'staged.complete')
+  const verifiedMarkerPath = path.join(lockPath, 'published.verified')
   const journal = await readJsonIfPresent(fileSystem, journalPath)
   if (!journal) return
   const { temporary, backup } = assertTransaction(journal, outputDir)
-  const [staged, outputExists, temporaryExists, backupExists] = await Promise.all([
-    pathExists(fileSystem, markerPath),
+  const [staged, verified, outputExists, temporaryExists, backupExists] = await Promise.all([
+    pathExists(fileSystem, stagedMarkerPath),
+    pathExists(fileSystem, verifiedMarkerPath),
     pathExists(fileSystem, outputDir),
     pathExists(fileSystem, temporary),
     pathExists(fileSystem, backup),
   ])
 
-  if (!staged) {
-    if (!outputExists && backupExists) await renameAndSync(fileSystem, backup, outputDir)
+  if (!staged || !verified) {
+    if (journal.hadExisting && backupExists) {
+      if (outputExists) await removeAndSync(fileSystem, outputDir, { recursive: true, force: true })
+      await renameAndSync(fileSystem, backup, outputDir)
+    } else if (!journal.hadExisting && outputExists) {
+      await removeAndSync(fileSystem, outputDir, { recursive: true, force: true })
+    } else if (backupExists) {
+      await removeAndSync(fileSystem, backup, { recursive: true, force: true })
+    }
+    if (temporaryExists) await removeAndSync(fileSystem, temporary, { recursive: true, force: true })
+  } else if (outputExists) {
+    if (temporaryExists) await removeAndSync(fileSystem, temporary, { recursive: true, force: true })
+    if (backupExists) await removeAndSync(fileSystem, backup, { recursive: true, force: true })
+  } else {
+    if (journal.hadExisting && backupExists) await renameAndSync(fileSystem, backup, outputDir)
     else if (backupExists) await removeAndSync(fileSystem, backup, { recursive: true, force: true })
     if (temporaryExists) await removeAndSync(fileSystem, temporary, { recursive: true, force: true })
-  } else if (backupExists && temporaryExists && !outputExists) {
-    await renameAndSync(fileSystem, temporary, outputDir)
-    await removeAndSync(fileSystem, backup, { recursive: true, force: true })
-  } else if (backupExists && outputExists && !temporaryExists) {
-    await removeAndSync(fileSystem, backup, { recursive: true, force: true })
-  } else if (!backupExists && temporaryExists && !outputExists) {
-    await renameAndSync(fileSystem, temporary, outputDir)
-  } else if (!backupExists && temporaryExists && outputExists) {
-    await removeAndSync(fileSystem, temporary, { recursive: true, force: true })
-  } else if (backupExists && !temporaryExists && !outputExists) {
-    await renameAndSync(fileSystem, backup, outputDir)
-  } else if (backupExists && temporaryExists && outputExists) {
-    await removeAndSync(fileSystem, temporary, { recursive: true, force: true })
-    await removeAndSync(fileSystem, backup, { recursive: true, force: true })
   }
 
-  await removeAndSync(fileSystem, markerPath, { force: true })
+  // Removing the journal is the durable terminal decision. If cleanup crashes
+  // after this point, a later owner keeps the already-converged output and
+  // removes the entire external lock directory without reinterpreting markers.
   await removeAndSync(fileSystem, journalPath, { force: true })
+  await removeAndSync(fileSystem, stagedMarkerPath, { force: true })
+  await removeAndSync(fileSystem, verifiedMarkerPath, { force: true })
 }
 
 async function releasePublicationLock(fileSystem, lockPath, token) {
@@ -330,7 +341,8 @@ export async function publishAtomically(outputDir, artifacts, {
   const lockPath = path.join(parent, `.${base}.publish.lock`)
   const journalPath = path.join(lockPath, 'transaction.json')
   const journalTemporary = path.join(lockPath, `transaction.${token}.tmp`)
-  const markerPath = path.join(lockPath, 'staged.complete')
+  const stagedMarkerPath = path.join(lockPath, 'staged.complete')
+  const verifiedMarkerPath = path.join(lockPath, 'published.verified')
   const fileSystem = { ...DEFAULT_PUBLICATION_FILE_SYSTEM, ...fileSystemOverrides }
   await assertSafePublicationRoot(fileSystem, outputDir)
   await acquirePublicationLock(fileSystem, lockPath, outputDir, token, { rejectConcurrent })
@@ -369,28 +381,12 @@ export async function publishAtomically(outputDir, artifacts, {
     if (validateStaged) await validateStaged(temporary)
     if (beforeCommit) await beforeCommit(temporary)
     await assertSafePublicationRoot(fileSystem, outputDir)
-    await writeDurableExclusive(fileSystem, markerPath, new Uint8Array())
+    await writeDurableMarker(fileSystem, stagedMarkerPath, token)
     if (exists) await renameAndSync(fileSystem, outputDir, backup)
     await renameAndSync(fileSystem, temporary, outputDir)
-    if (validatePublished) {
-      try {
-        await validatePublished(outputDir)
-      } catch (error) {
-        if (exists) {
-          await renameAndSync(fileSystem, outputDir, temporary)
-          await renameAndSync(fileSystem, backup, outputDir)
-          await removeAndSync(fileSystem, temporary, { recursive: true, force: true })
-        } else {
-          await removeAndSync(fileSystem, outputDir, { recursive: true, force: true })
-        }
-        await removeAndSync(fileSystem, markerPath, { force: true })
-        await removeAndSync(fileSystem, journalPath, { force: true })
-        journalInstalled = false
-        throw error
-      }
-    }
+    if (validatePublished) await validatePublished(outputDir)
+    await writeDurableMarker(fileSystem, verifiedMarkerPath, token)
     if (exists) await removeAndSync(fileSystem, backup, { recursive: true, force: true })
-    await removeAndSync(fileSystem, markerPath, { force: true })
     await removeAndSync(fileSystem, journalPath, { force: true })
     journalInstalled = false
   } catch (error) {

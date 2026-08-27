@@ -38,6 +38,7 @@ const childPublisher = String.raw`
   const boundary = process.env.FAIL_BOUNDARY || ''
   let initializationDelayMs = Number(process.env.INITIALIZATION_DELAY_MS || 0)
   const crash = () => process.exit(86)
+  let verifiedMarkerWritten = false
   const fileSystem = {
     async open(target, flags) {
       if (boundary === 'initialize-owner' && target.endsWith('owner.json')) crash()
@@ -46,19 +47,30 @@ const childPublisher = String.raw`
         initializationDelayMs = 0
         await new Promise((resolve) => setTimeout(resolve, delay))
       }
-      return open(target, flags)
+      const handle = await open(target, flags)
+      if (boundary === 'after-verified-marker' && verifiedMarkerWritten
+        && target.endsWith('.publish.lock') && flags === 'r') {
+        return new Proxy(handle, {
+          get(subject, property) {
+            if (property === 'sync') return async () => { await subject.sync(); crash() }
+            const value = Reflect.get(subject, property, subject)
+            return typeof value === 'function' ? value.bind(subject) : value
+          },
+        })
+      }
+      return handle
     },
     async rename(source, target) {
       await rename(source, target)
       if (boundary === 'rename-journal' && target.endsWith('transaction.json')) crash()
       if (boundary === 'rename-existing' && source === output && target.endsWith('.backup')) crash()
       if (boundary === 'rename-staging' && source.endsWith('.tmp') && target === output) crash()
+      if (target.endsWith('published.verified')) verifiedMarkerWritten = true
       if (boundary === 'rename-lock-release' && source.endsWith('.publish.lock') && target.endsWith('.released')) crash()
     },
     async rm(target, options) {
       await rm(target, options)
       if (boundary === 'cleanup-backup' && target.endsWith('.backup')) crash()
-      if (boundary === 'cleanup-marker' && target.endsWith('staged.complete')) crash()
       if (boundary === 'cleanup-journal' && target.endsWith('transaction.json')) crash()
       if (boundary === 'cleanup-lock' && target.endsWith('.released')) crash()
     },
@@ -70,6 +82,7 @@ const childPublisher = String.raw`
   try {
     await publishAtomically(output, artifacts, {
       force: process.env.FORCE === '1', sessionId: round, fileSystem,
+      validatePublished: async () => { if (boundary === 'validate-published') crash() },
     })
   } catch (error) {
     if (error && error.code === 'OUTPUT_CONFLICT') process.exitCode = 9
@@ -147,11 +160,10 @@ describe('atomic directory publication recovery', () => {
   it.each([
     ['initialize-owner', 'old'],
     ['rename-journal', 'old'],
-    ['rename-existing', 'new-rename-existing'],
-    ['rename-staging', 'new-rename-staging'],
+    ['rename-existing', 'old'],
+    ['rename-staging', 'old'],
     ['rename-lock-release', 'new-rename-lock-release'],
     ['cleanup-backup', 'new-cleanup-backup'],
-    ['cleanup-marker', 'new-cleanup-marker'],
     ['cleanup-journal', 'new-cleanup-journal'],
     ['cleanup-lock', 'new-cleanup-lock'],
   ])('recovers a complete interrupted round after %s', async (boundary, expectedRound) => {
@@ -166,6 +178,35 @@ describe('atomic directory publication recovery', () => {
       .rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
     expect(await readRound(output)).toBe(expectedRound)
     expect(await readdir(root)).toEqual(['round-0'])
+  })
+
+  it.each([
+    ['validate-published', false, 'absent'],
+    ['validate-published', true, 'old'],
+    ['after-verified-marker', false, 'new-after-verified-marker'],
+    ['after-verified-marker', true, 'new-after-verified-marker'],
+  ] as const)('recovers %s crash with prior output %s to %s and removes transaction residue', async (boundary, prior, expected) => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'round-0')
+    if (prior) await publishAtomically(output, artifacts('old'), { sessionId: 'old' })
+
+    const interrupted = await runPublisher({
+      output, round: `new-${boundary}`, force: prior, boundary,
+    })
+    expect(interrupted, interrupted.stderr).toMatchObject({ code: 86 })
+
+    if (expected === 'absent') {
+      await expect(publishAtomically(output, artifacts('probe'), {
+        sessionId: 'probe', beforeCommit: async () => { throw new Error('recovery probe') },
+      })).rejects.toThrow('recovery probe')
+      await expect(stat(output)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readdir(root)).toEqual([])
+    } else {
+      await expect(publishAtomically(output, artifacts('probe'), { sessionId: 'probe' }))
+        .rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
+      expect(await readRound(output)).toBe(expected)
+      expect(await readdir(root)).toEqual(['round-0'])
+    }
   })
 
   it('serializes concurrent forced publishers to one complete old-or-new round', async () => {

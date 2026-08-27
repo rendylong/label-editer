@@ -535,6 +535,43 @@ describe('review artifact lease transactions', () => {
     } finally { await server.close() }
   })
 
+  it('replays an old exact confirmation without consulting or mutating a newer same-batch generation', async () => {
+    const { server, session, base, auth } = await fixture()
+    try {
+      const firstLease = await begin(base, auth, 'same-batch')
+      const first = await stage(base, auth, firstLease, 'first-private-front', 'front', 1) as {
+        id: string; resultId: string; sha256: string; byteLength: number; mimeType: string; url: string
+      }
+      expect((await commit(base, auth, firstLease, [first])).status).toBe(201)
+      expect((await readCommitted(first.url, firstLease)).status).toBe(200)
+      const firstReceipt = await acknowledgeReadback(base, auth, firstLease, [first])
+      const firstReceiptBody = await firstReceipt.json() as { expiresAt: number }
+      const firstConfirmation = await confirmReadback(base, auth, firstLease, firstReceiptBody.expiresAt, [first])
+      const firstPayload = await firstConfirmation.json()
+      expect(firstConfirmation.status).toBe(200)
+
+      const secondLease = await begin(base, auth, 'same-batch')
+      const second = await stage(base, auth, secondLease, 'second-private-front', 'front', 2) as {
+        id: string; resultId: string; sha256: string; byteLength: number; mimeType: string; url: string
+      }
+      expect((await commit(base, auth, secondLease, [second])).status).toBe(201)
+      expect((await readCommitted(second.url, secondLease)).status).toBe(200)
+      expect((await acknowledgeReadback(base, auth, secondLease, [second])).status).toBe(200)
+
+      const exactReplay = await confirmReadback(base, auth, firstLease, firstReceiptBody.expiresAt, [first])
+      expect(exactReplay.status).toBe(200)
+      expect(await exactReplay.json()).toEqual(firstPayload)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'second-private-front' }])
+
+      expect((await confirmReadback(base, auth, firstLease, firstReceiptBody.expiresAt, [{
+        ...first, sha256: '0'.repeat(64),
+      }])).status).toBe(409)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'second-private-front' }])
+      expect((await finish(base, auth, secondLease, 'abort')).status).toBe(200)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'first-private-front' }])
+    } finally { await server.close() }
+  })
+
   it('rejects a mismatched explicit seal without replacing the prior complete set', async () => {
     const { server, session, base, auth } = await fixture()
     try {
