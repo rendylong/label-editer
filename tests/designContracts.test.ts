@@ -144,6 +144,18 @@ function productionReviewManifest(): ReviewManifestV1 {
       id: 'surface-front', path: 'surface-front.png', sha256: SHA_A,
       mimeType: 'image/png', width: 1600, height: 1600,
       viewKind: 'surface-face', areaId: 'front', carrier: 'direct_surface_print',
+      camera: { position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
+    }, {
+      id: 'model-front', path: 'model-front.png', sha256: SHA_A,
+      mimeType: 'image/png', width: 1600, height: 1600, viewKind: 'model-front',
+      camera: { position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
+    }, {
+      id: 'model-back', path: 'model-back.png', sha256: SHA_B,
+      mimeType: 'image/png', width: 1600, height: 1600, viewKind: 'model-back',
+      camera: { position: [0, 0, -3], direction: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
+    }, {
+      id: 'review-sheet', path: 'review-sheet.png', sha256: SHA_A,
+      mimeType: 'image/png', width: 1600, height: 1600, viewKind: 'review-sheet',
     }],
   }
 }
@@ -400,6 +412,43 @@ describe('shared design contracts', () => {
     const missingArea = productionReviewManifest()
     missingArea.areas.push({ id: 'back', side: 'back', carrier: 'applied_label' })
     expect(() => validateReviewManifest(missingArea)).toThrow(/back.*flat-artwork.*surface-face/i)
+  })
+
+  it.each([
+    ['missing model-front', (value: ReviewManifestV1) => {
+      value.artifacts = value.artifacts.filter((artifact) => artifact.viewKind !== 'model-front')
+    }],
+    ['duplicate flat mapping', (value: ReviewManifestV1) => {
+      const duplicate = structuredClone(value.artifacts.find((artifact) => artifact.viewKind === 'flat-artwork')!)
+      duplicate.id = 'label-front-copy'; duplicate.path = 'label-front-copy.png'; value.artifacts.push(duplicate)
+    }],
+    ['camera on flat artwork', (value: ReviewManifestV1) => {
+      value.artifacts.find((artifact) => artifact.viewKind === 'flat-artwork')!.camera = {
+        position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45,
+      }
+    }],
+    ['missing surface camera', (value: ReviewManifestV1) => {
+      delete value.artifacts.find((artifact) => artifact.viewKind === 'surface-face')!.camera
+    }],
+    ['area binding on global view', (value: ReviewManifestV1) => {
+      const artifact = value.artifacts.find((candidate) => candidate.viewKind === 'model-front')!
+      artifact.areaId = 'front'; artifact.carrier = 'direct_surface_print'
+    }],
+  ] as const)('rejects production semantic incompleteness: %s', (_label, mutate) => {
+    const value = productionReviewManifest(); mutate(value)
+    expect(() => validateReviewManifest(value)).toThrow(/complete|camera|mapping|global|model-front/i)
+  })
+
+  it('forbids area evidence for bare carriers', () => {
+    const value = productionReviewManifest()
+    value.areas[0].carrier = 'bare'
+    value.artifacts = value.artifacts.filter((artifact) => !['flat-artwork', 'surface-face'].includes(artifact.viewKind))
+    expect(validateReviewManifest(value).version).toBe(1)
+    value.artifacts.push({
+      id: 'bare-flat', path: 'bare-flat.png', sha256: SHA_A, mimeType: 'image/png', width: 1600, height: 1600,
+      viewKind: 'flat-artwork', areaId: 'front', carrier: 'bare',
+    })
+    expect(() => validateReviewManifest(value)).toThrow(/bare|exact|mapping/i)
   })
 
   it('strictly validates design and production review manifests', () => {

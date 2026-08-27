@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -267,6 +267,51 @@ describe('atomic directory publication recovery', () => {
 
     expect(await readRound(output)).toBe('old')
     expect(await readdir(root)).toEqual(['review'])
+  })
+
+  it.each([
+    ['validateStaged', false], ['validateStaged', true],
+    ['beforeCommit', false], ['beforeCommit', true],
+  ] as const)('never installs staging when %s fails (prior output: %s)', async (hook, prior) => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    if (prior) await publishAtomically(output, artifacts('old'), { sessionId: 'old' })
+    const injected = async () => { throw new Error(`injected ${hook} failure`) }
+
+    await expect(publishAtomically(output, artifacts('new'), {
+      force: prior,
+      sessionId: 'new',
+      ...(hook === 'validateStaged' ? { validateStaged: injected } : { beforeCommit: injected }),
+    })).rejects.toThrow(`injected ${hook} failure`)
+
+    if (prior) expect(await readRound(output)).toBe('old')
+    else await expect(stat(output)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(root)).toEqual(prior ? ['review'] : [])
+  })
+
+  it('removes a newly installed output when post-publication validation fails without a prior output', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    await expect(publishAtomically(output, artifacts('new'), {
+      sessionId: 'new', validatePublished: async () => { throw new Error('post-publish failure') },
+    })).rejects.toThrow('post-publish failure')
+    await expect(stat(output)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(root)).toEqual([])
+  })
+
+  it('rejects a final-component output symlink without replacing it or touching its target', async () => {
+    const root = await temporaryDirectory()
+    const target = path.join(root, 'target')
+    const output = path.join(root, 'review')
+    await mkdir(target)
+    await writeFile(path.join(target, 'sentinel.txt'), 'preserved')
+    await symlink(target, output)
+
+    await expect(publishAtomically(output, artifacts('new'), { force: true, sessionId: 'new' }))
+      .rejects.toMatchObject({ code: 'PATH_NOT_ALLOWED' })
+    expect(await readlink(output)).toBe(target)
+    expect(await readFile(path.join(target, 'sentinel.txt'), 'utf8')).toBe('preserved')
+    expect((await readdir(root)).sort()).toEqual(['review', 'target'])
   })
 
   it('exposes exactly one complete design review under concurrent non-forced publication', async () => {

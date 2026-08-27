@@ -1,6 +1,6 @@
 import Ajv2020 from 'ajv/dist/2020.js'
 import { randomBytes } from 'node:crypto'
-import { open, readFile, rm, stat } from 'node:fs/promises'
+import { lstat, open, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { failure, success } from './envelope.mjs'
 import { publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
@@ -10,6 +10,8 @@ import { buildReviewManifest, validateReviewDirectory, validateReviewManifest } 
 import { startLivePreview } from './live-preview.mjs'
 
 const schemaPath = path.resolve(import.meta.dirname, '../../src/agent/label-spec-v2.schema.json')
+const MAX_REVIEW_JSON_BYTES = 16 * 1024 * 1024
+const MAX_REVIEW_MODEL_BYTES = 256 * 1024 * 1024
 
 async function readSchema() {
   return JSON.parse(await readFile(schemaPath, 'utf8'))
@@ -65,6 +67,12 @@ function isLabelProjectValue(value) {
 
 async function assertOutputAvailable(runtime, outputPath, force) {
   const resolved = await resolveAllowedOutputPath(runtime.allowedRoots, outputPath)
+  const outputInfo = await lstat(resolved).catch((error) => error?.code === 'ENOENT' ? undefined : Promise.reject(error))
+  if (outputInfo?.isSymbolicLink()) {
+    const error = new Error(`Output path final component must not be a symlink: ${resolved}`)
+    error.code = 'PATH_NOT_ALLOWED'
+    throw error
+  }
   if (force) return resolved
   if (await stat(resolved).then(() => true, () => false)) {
     const error = new Error(`Output already exists: ${resolved}`)
@@ -249,6 +257,12 @@ async function resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, f
     throw missing
   }
   const output = await resolveAllowedOutputPath(rootPolicy, outputDir)
+  const outputInfo = await lstat(output).catch((error) => error?.code === 'ENOENT' ? undefined : Promise.reject(error))
+  if (outputInfo?.isSymbolicLink()) {
+    const error = new Error(`Review output final component must not be a symlink: ${output}`)
+    error.code = 'PATH_NOT_ALLOWED'
+    throw error
+  }
   for (const protectedPath of [input, model, handoff, blueprint, designReviewManifest]) {
     if (pathContains(output, protectedPath)) {
       throw reviewUsageError(`Review output must not alias or contain a protected source: ${protectedPath}`)
@@ -262,17 +276,64 @@ async function resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, f
   return { input, model, handoff, blueprint, designReviewManifest, output }
 }
 
+function fileSnapshotIdentity(info) {
+  return {
+    dev: String(info.dev),
+    ino: String(info.ino),
+    size: String(info.size),
+    mtimeNs: String(info.mtimeNs),
+    ctimeNs: String(info.ctimeNs),
+  }
+}
+
+async function readStableReviewFile(filePath, label, maxBytes) {
+  const beforePath = await lstat(filePath, { bigint: true })
+  if (!beforePath.isFile() || beforePath.isSymbolicLink()) throw reviewUsageError(`${label} must be a regular file`)
+  if (beforePath.size < 1n || beforePath.size > BigInt(maxBytes)) {
+    throw reviewUsageError(`${label} exceeds the bounded review input size`)
+  }
+  const handle = await open(filePath, 'r')
+  try {
+    const beforeHandle = await handle.stat({ bigint: true })
+    if (JSON.stringify(fileSnapshotIdentity(beforeHandle)) !== JSON.stringify(fileSnapshotIdentity(beforePath))) {
+      throw staleReviewError(`${label} changed before bounded readback`)
+    }
+    const bytes = new Uint8Array(await handle.readFile())
+    const [afterHandle, afterPath] = await Promise.all([
+      handle.stat({ bigint: true }),
+      lstat(filePath, { bigint: true }),
+    ])
+    const identity = fileSnapshotIdentity(beforePath)
+    if (bytes.byteLength !== Number(beforePath.size)
+      || JSON.stringify(fileSnapshotIdentity(afterHandle)) !== JSON.stringify(identity)
+      || JSON.stringify(fileSnapshotIdentity(afterPath)) !== JSON.stringify(identity)) {
+      throw staleReviewError(`${label} changed during bounded readback`)
+    }
+    return { bytes, sha256: sha256Bytes(bytes), identity }
+  } finally {
+    await handle.close()
+  }
+}
+
 async function readReviewSnapshot(sources, { parse = false } = {}) {
   const names = ['input', 'model', 'handoff', 'blueprint', 'designReviewManifest']
-  const values = await Promise.all(names.map((name) => readFile(sources[name])))
-  const hashes = Object.fromEntries(values.map((bytes, index) => [names[index], sha256Bytes(bytes)]))
-  if (!parse) return { hashes }
+  const snapshots = await Promise.all(names.map((name) => readStableReviewFile(
+    sources[name],
+    name === 'model' ? 'Review model' : `Review ${name}`,
+    name === 'model' ? MAX_REVIEW_MODEL_BYTES : MAX_REVIEW_JSON_BYTES,
+  )))
+  const values = snapshots.map((snapshot) => snapshot.bytes)
+  const hashes = Object.fromEntries(snapshots.map((snapshot, index) => [names[index], snapshot.sha256]))
+  const identities = Object.fromEntries(snapshots.map((snapshot, index) => [names[index], snapshot.identity]))
+  if (!parse) return { hashes, identities }
   const input = decodeReviewJson(new Uint8Array(values[0]), 'Review input')
   const handoff = decodeReviewJson(new Uint8Array(values[2]), 'editor-handoff.json')
   const blueprint = decodeReviewJson(new Uint8Array(values[3]), 'layout blueprint')
   const designReviewManifest = decodeReviewJson(new Uint8Array(values[4]), 'design review manifest')
   return {
     hashes,
+    identities,
+    modelBytes: new Uint8Array(values[1]),
     input,
     handoff,
     blueprint,
@@ -281,7 +342,8 @@ async function readReviewSnapshot(sources, { parse = false } = {}) {
 }
 
 function assertReviewSnapshot(expected, actual, boundary) {
-  if (JSON.stringify(expected.hashes) !== JSON.stringify(actual.hashes)) {
+  if (JSON.stringify(expected.hashes) !== JSON.stringify(actual.hashes)
+    || JSON.stringify(expected.identities) !== JSON.stringify(actual.identities)) {
     throw staleReviewError(`Review production-gate source changed at ${boundary}`)
   }
 }
@@ -697,7 +759,10 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
           designReviewManifestJson: initial.designReviewManifest.text,
         }
 
-        session = await runtime.createSession({ glbPath: sources.model })
+        session = await runtime.createSession({
+          glbBytes: initial.modelBytes,
+          modelName: path.basename(sources.model),
+        })
         progress('Loading model in browser renderer')
         const inspected = await loadSessionModel(runtime, session)
         const modelFingerprint = inspected.data.fingerprint

@@ -266,14 +266,39 @@ describe('plugin runtime security', () => {
           }),
         })
       }
+      const confirm = async (batch: string, expiresAt: number, artifacts: Array<{
+        id: string
+        resultId: string
+        sha256: string
+        byteLength: number
+        mimeType: string
+        width?: number
+        height?: number
+      }>) => {
+        const lease = leases.get(batch)!
+        return fetch(`${base}/stage/${batch}/confirm?${auth}`, {
+          method: 'POST', headers: { ...leaseHeaders(batch), 'content-type': 'application/json' },
+          body: JSON.stringify({
+            leaseToken: lease.leaseToken, generation: lease.generation, expiresAt,
+            artifacts: artifacts.map(({ id, resultId, sha256, byteLength, mimeType, width, height }) => ({
+              id, resultId, sha256, byteLength, mimeType,
+              ...(width === undefined ? {} : { width }),
+              ...(height === undefined ? {} : { height }),
+            })),
+          }),
+        })
+      }
       const abort = (batch: string) => fetch(`${base}/stage/${batch}?${auth}`, { method: 'DELETE', headers: leaseHeaders(batch) })
 
       const first = await stage('attempt-one', 'attempt-one--front', 'front', 1)
       expect(first).toMatchObject({ id: 'attempt-one--front', resultId: 'front' })
       expect((await commit('attempt-one', [first.id], ['front'])).status).toBe(201)
       expect((await fetch(first.url, { headers: leaseHeaders('attempt-one') })).status).toBe(200)
-      expect((await receipt('attempt-one', [first])).status).toBe(200)
-      expect((await finalize('attempt-one')).status).toBe(200)
+      const firstReceipt = await receipt('attempt-one', [first])
+      expect(firstReceipt.status).toBe(200)
+      const firstReceiptBody = await firstReceipt.json()
+      expect((await finalize('attempt-one')).status).toBe(409)
+      expect((await confirm('attempt-one', firstReceiptBody.expiresAt, [first])).status).toBe(200)
       expect((await fetch(first.url)).status).toBe(200)
 
       const failed = await stage('attempt-two', 'attempt-two--front', 'front', 2)
@@ -284,8 +309,10 @@ describe('plugin runtime security', () => {
       const second = await stage('attempt-three', 'attempt-three--front', 'front', 3)
       expect((await commit('attempt-three', [second.id], ['front'])).status).toBe(201)
       expect((await fetch(second.url, { headers: leaseHeaders('attempt-three') })).status).toBe(200)
-      expect((await receipt('attempt-three', [second])).status).toBe(200)
-      expect((await finalize('attempt-three')).status).toBe(200)
+      const secondReceipt = await receipt('attempt-three', [second])
+      expect(secondReceipt.status).toBe(200)
+      const secondReceiptBody = await secondReceipt.json()
+      expect((await confirm('attempt-three', secondReceiptBody.expiresAt, [second])).status).toBe(200)
       expect((await fetch(first.url)).status).toBe(404)
       const current = await fetch(second.url)
       expect(current.status).toBe(200)

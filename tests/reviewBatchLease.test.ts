@@ -147,15 +147,17 @@ async function confirmReadback(
   })
 }
 
-async function verifyAndFinalize(
+async function verifyAndConfirm(
   base: string,
   auth: string,
   lease: Lease,
   artifacts: Array<{ id: string; resultId: string; sha256: string; url: string }>,
 ): Promise<Response> {
   for (const artifact of artifacts) expect((await readCommitted(artifact.url, lease)).status).toBe(200)
-  expect((await acknowledgeReadback(base, auth, lease, artifacts)).status).toBe(200)
-  return finish(base, auth, lease, 'finalize')
+  const receipt = await acknowledgeReadback(base, auth, lease, artifacts)
+  expect(receipt.status).toBe(200)
+  const receiptBody = await receipt.json() as { expiresAt: number }
+  return confirmReadback(base, auth, lease, receiptBody.expiresAt, artifacts)
 }
 
 function gatedBody(bytes: Uint8Array): {
@@ -187,14 +189,14 @@ function gatedBody(bytes: Uint8Array): {
 }
 
 describe('review artifact lease transactions', () => {
-  it('replaces the complete logical result set and only reclaims prior artifacts after finalize', async () => {
+  it('replaces the complete logical result set and only reclaims prior artifacts after receipt-bound confirm', async () => {
     const { server, session, base, auth } = await fixture()
     try {
       const first = await begin(base, auth, 'front-back')
       const front1 = await stage(base, auth, first, 'first-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       const back1 = await stage(base, auth, first, 'first-back', 'back', 2) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, first, [front1, back1])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, first, [front1, back1])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, first, [front1, back1])).status).toBe(200)
 
       const second = await begin(base, auth, 'front-only-abort')
       const front2 = await stage(base, auth, second, 'second-front', 'front', 3) as { id: string; resultId: string; url: string }
@@ -210,7 +212,7 @@ describe('review artifact lease transactions', () => {
       const third = await begin(base, auth, 'front-only-final')
       const front3 = await stage(base, auth, third, 'third-front', 'front', 4) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, third, [front3])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, third, [front3])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, third, [front3])).status).toBe(200)
       expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'third-front' }])
       expect((await fetch(front1.url)).status).toBe(404)
       expect((await fetch(back1.url)).status).toBe(404)
@@ -242,12 +244,14 @@ describe('review artifact lease transactions', () => {
       expect(await oldAbortReplay.json()).toEqual(firstAbortPayload)
       expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'c-front' }])
       expect((await readCommitted(c.url, leaseC)).status).toBe(200)
-      expect((await acknowledgeReadback(base, auth, leaseC, [c])).status).toBe(200)
-      const firstFinalize = await finish(base, auth, leaseC, 'finalize')
-      expect(firstFinalize.status).toBe(200)
-      const replayedFinalize = await finish(base, auth, leaseC, 'finalize')
-      expect(replayedFinalize.status).toBe(200)
-      expect(await replayedFinalize.json()).toEqual(await firstFinalize.json())
+      const receipt = await acknowledgeReadback(base, auth, leaseC, [c])
+      expect(receipt.status).toBe(200)
+      const receiptBody = await receipt.json() as { expiresAt: number }
+      const firstConfirm = await confirmReadback(base, auth, leaseC, receiptBody.expiresAt, [c])
+      expect(firstConfirm.status).toBe(200)
+      const replayedConfirm = await confirmReadback(base, auth, leaseC, receiptBody.expiresAt, [c])
+      expect(replayedConfirm.status).toBe(200)
+      expect(await replayedConfirm.json()).toEqual(await firstConfirm.json())
     } finally { await server.close() }
   })
 
@@ -257,7 +261,7 @@ describe('review artifact lease transactions', () => {
       const originalLease = await begin(base, auth, 'timer-original')
       const original = await stage(base, auth, originalLease, 'timer-original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, originalLease, [original])).status).toBe(200)
 
       const abandoned = await begin(base, auth, 'timer-abandoned')
       const replacement = await stage(base, auth, abandoned, 'timer-replacement-front', 'front', 2) as { id: string; resultId: string }
@@ -416,7 +420,7 @@ describe('review artifact lease transactions', () => {
       const originalLease = await begin(base, auth, 'cancel-original')
       const original = await stage(base, auth, originalLease, 'cancel-original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, originalLease, [original])).status).toBe(200)
 
       const candidateLease = await begin(base, auth, 'cancel-candidate')
       const candidate = await stage(base, auth, candidateLease, 'cancel-candidate-front', 'front', 2) as { id: string; resultId: string; sha256: string; url: string }
@@ -432,13 +436,13 @@ describe('review artifact lease transactions', () => {
     } finally { await server.close() }
   })
 
-  it('keeps a receipt-confirmed candidate recoverable until an explicit success signal or next consumer seals it', async () => {
+  it('keeps ordinary GET read-only for a prepared candidate with or without lease headers', async () => {
     const { server, session, base, auth } = await fixture({ reviewLeaseMs: 100 })
     try {
       const originalLease = await begin(base, auth, 'verified-original')
       const original = await stage(base, auth, originalLease, 'verified-original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, originalLease, [original])).status).toBe(200)
 
       const candidateLease = await begin(base, auth, 'verified-candidate')
       const candidate = await stage(base, auth, candidateLease, 'verified-candidate-front', 'front', 2) as { id: string; resultId: string; sha256: string; url: string }
@@ -450,24 +454,35 @@ describe('review artifact lease transactions', () => {
       expect((await finish(base, auth, candidateLease, 'abort')).status).toBe(200)
       expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-original-front' }])
 
-      const recoveredLease = await begin(base, auth, 'verified-recovered')
-      const recovered = await stage(base, auth, recoveredLease, 'verified-recovered-front', 'front', 3) as { id: string; resultId: string; sha256: string; url: string }
-      expect((await commit(base, auth, recoveredLease, [recovered])).status).toBe(201)
-      expect((await readCommitted(recovered.url, recoveredLease)).status).toBe(200)
-      expect((await acknowledgeReadback(base, auth, recoveredLease, [recovered])).status).toBe(200)
+      const preparedLease = await begin(base, auth, 'verified-prepared')
+      const prepared = await stage(base, auth, preparedLease, 'verified-prepared-front', 'front', 3) as { id: string; resultId: string; sha256: string; url: string }
+      expect((await commit(base, auth, preparedLease, [prepared])).status).toBe(201)
+      expect((await readCommitted(prepared.url, preparedLease)).status).toBe(200)
+      expect((await acknowledgeReadback(base, auth, preparedLease, [prepared])).status).toBe(200)
 
-      // The first consumer that follows a successful bridge result may seal by
-      // dereferencing its candidate locator without lease headers.
-      expect((await fetch(recovered.url)).status).toBe(200)
-      const next = await begin(base, auth, 'verified-next')
-      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-recovered-front' }])
-      expect((await finish(base, auth, recoveredLease, 'abort')).status).toBe(409)
-      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-recovered-front' }])
-      expect((await finish(base, auth, next, 'abort')).status).toBe(200)
+      expect((await readCommitted(prepared.url, preparedLease)).status).toBe(200)
+      expect((await fetch(prepared.url)).status).toBe(200)
+      expect((await finish(base, auth, preparedLease, 'abort')).status).toBe(200)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-original-front' }])
     } finally { await server.close() }
   })
 
-  it('seals a receipt-confirmed candidate even when the success acknowledgement body is lost', async () => {
+  it('does not renew a prepared lease when GET authenticates its readback headers', async () => {
+    const { server, base, auth } = await fixture({ reviewLeaseMs: 120 })
+    try {
+      const lease = await begin(base, auth, 'get-does-not-renew')
+      const artifact = await stage(base, auth, lease, 'candidate-front', 'front', 3) as { id: string; resultId: string; sha256: string; url: string }
+      expect((await commit(base, auth, lease, [artifact])).status).toBe(201)
+      expect((await readCommitted(artifact.url, lease)).status).toBe(200)
+      expect((await acknowledgeReadback(base, auth, lease, [artifact])).status).toBe(200)
+      await new Promise((resolve) => setTimeout(resolve, 80))
+      expect((await readCommitted(artifact.url, lease)).status).toBe(200)
+      await new Promise((resolve) => setTimeout(resolve, 70))
+      expect((await acquire(base, auth, 'after-read-only-get')).status).toBe(201)
+    } finally { await server.close() }
+  })
+
+  it('rejects legacy finalize without sealing a receipt-confirmed candidate', async () => {
     const { server, session, base, auth } = await fixture()
     try {
       const lease = await begin(base, auth, 'lost-success-ack')
@@ -476,18 +491,10 @@ describe('review artifact lease transactions', () => {
       expect((await readCommitted(artifact.url, lease)).status).toBe(200)
       expect((await acknowledgeReadback(base, auth, lease, [artifact])).status).toBe(200)
 
-      const success = await finish(base, auth, lease, 'finalize')
-      expect(success.status).toBe(200)
-      await success.body?.cancel()
-      const later = await begin(base, auth, 'after-lost-success-ack')
-      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'lost-success-front' }])
-
-      const replay = await finish(base, auth, lease, 'finalize')
-      expect(replay.status).toBe(200)
-      expect(await replay.json()).toEqual({
-        ok: true, batchId: lease.batchId, generation: lease.generation, finalized: true,
-      })
-      expect((await finish(base, auth, later, 'abort')).status).toBe(200)
+      expect((await finish(base, auth, lease, 'finalize')).status).toBe(409)
+      expect((await finish(base, auth, lease, 'abort')).status).toBe(200)
+      expect(server.getArtifacts(session.id)).toEqual([])
+      expect((await fetch(artifact.url)).status).toBe(404)
     } finally { await server.close() }
   })
 
@@ -539,7 +546,7 @@ describe('review artifact lease transactions', () => {
         url: string
       }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, originalLease, [original])).status).toBe(200)
 
       const candidateLease = await begin(base, auth, 'seal-candidate')
       const candidate = await stage(base, auth, candidateLease, 'candidate-front', 'front', 2) as {
@@ -570,7 +577,7 @@ describe('review artifact lease transactions', () => {
       const lease = await begin(base, auth, 'legacy-collision-review')
       const artifact = await stage(base, auth, lease, 'private-review-front', 'front', 5) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, lease, [artifact])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, lease, [artifact])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, lease, [artifact])).status).toBe(200)
 
       for (const id of ['private-review-front', 'front']) {
         const collision = await fetch(`${base}/${id}?${auth}`, {
@@ -621,7 +628,7 @@ describe('review artifact lease transactions', () => {
       const originalLease = await begin(base, auth, 'original')
       const original = await stage(base, auth, originalLease, 'original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
-      expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
+      expect((await verifyAndConfirm(base, auth, originalLease, [original])).status).toBe(200)
 
       const crashed = await begin(base, auth, 'crashed')
       const replacement = await stage(base, auth, crashed, 'replacement-front', 'front', 2) as { id: string; resultId: string; url: string }

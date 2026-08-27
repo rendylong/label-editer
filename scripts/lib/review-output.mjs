@@ -3,7 +3,12 @@ import { lstat, readFile, readdir, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import Ajv2020 from 'ajv/dist/2020.js'
 import reviewManifestSchema from '../../src/agent/review-manifest-v1.schema.json' with { type: 'json' }
-import { isStrictRfc3339DateTime, validateManifestSemantics } from './design-manifest-core.mjs'
+import {
+  isStrictRfc3339DateTime,
+  productionReviewIdentity,
+  productionReviewPlan,
+  validateManifestSemantics,
+} from './design-manifest-core.mjs'
 import { parsePortablePng } from './png-core.mjs'
 
 const MAX_PNG_BYTES = 32 * 1024 * 1024
@@ -61,30 +66,6 @@ function assertSafeArtifactPath(value) {
     || !/^[A-Za-z0-9][A-Za-z0-9._-]*\.png$/.test(value)) {
     fail(`Unsafe review artifact path: ${String(value)}`)
   }
-}
-
-function plannedViewKinds(areas) {
-  const planned = []
-  for (const area of areas) {
-    if (area.carrier === 'bare') continue
-    planned.push({ kind: 'flat-artwork', areaId: area.id, carrier: area.carrier })
-    planned.push({ kind: 'surface-face', areaId: area.id, carrier: area.carrier })
-  }
-  planned.push({ kind: 'model-front' }, { kind: 'model-back' }, { kind: 'review-sheet' })
-  return planned
-}
-
-function viewIdentity(view) {
-  return `${view.kind}\u0000${view.areaId ?? ''}\u0000${view.carrier ?? ''}`
-}
-
-function artifactIdentity(artifact) {
-  return `${artifact.viewKind}\u0000${artifact.areaId ?? ''}\u0000${artifact.carrier ?? ''}`
-}
-
-function assertCamera(camera, required, label) {
-  if (required && !camera) fail(`${label} is missing camera metadata`)
-  if (!required && camera) fail(`${label} must not include camera metadata`)
 }
 
 function sideIsUnique(area, areas) {
@@ -166,12 +147,10 @@ export function validateReviewManifest(manifest, context) {
   for (const artifact of manifest.artifacts) assertSafeArtifactPath(artifact.path)
 
   const evidenceViews = context.evidence.views
-  const planned = plannedViewKinds(context.areas).map(viewIdentity).sort()
-  const actualViews = evidenceViews.map(viewIdentity).sort()
+  const planned = productionReviewPlan(context.areas).map(productionReviewIdentity).sort()
+  const actualViews = evidenceViews.map(productionReviewIdentity).sort()
   if (!equalJson(actualViews, planned)) fail('Review evidence is not exactly complete for the current areas')
   assertUnique(evidenceViews.map((view) => view.id), 'review view id', normalizedCollisionKey)
-  const manifestIdentities = manifest.artifacts.map(artifactIdentity).sort()
-  if (!equalJson(manifestIdentities, planned)) fail('Review manifest artifacts are not exactly complete')
 
   const viewsById = new Map(evidenceViews.map((view) => [view.id, view]))
   const sealedByResult = new Map(context.artifacts.map((artifact) => [artifact.resultId ?? artifact.id, artifact]))
@@ -194,14 +173,15 @@ export function validateReviewManifest(manifest, context) {
       maxPixels: MAX_PIXELS,
     })
     assertEqual(artifact, artifactFromView(view, sealed, context.areas), `Artifact ${artifact.id}`)
-    const cameraRequired = ['surface-face', 'model-front', 'model-back'].includes(view.kind)
-    assertCamera(view.camera, cameraRequired, `Evidence view ${view.id}`)
-    assertCamera(artifact.camera, cameraRequired, `Artifact ${artifact.id}`)
   }
   return manifest
 }
 
 export async function validateReviewDirectory(outputDirectory, context) {
+  const rootInfo = await lstat(outputDirectory)
+  if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
+    fail('Review output root must be a direct regular directory, not a symlink')
+  }
   const root = await realpath(outputDirectory)
   const entries = await readdir(root, { withFileTypes: true })
   for (const entry of entries) {

@@ -1,12 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 const ACTIVE_PUBLICATIONS = new Set()
 const PUBLICATION_LOCK_WAIT_MS = 30_000
 const PUBLICATION_LOCK_RETRY_MS = 20
 const EMPTY_LOCK_GRACE_MS = 200
-const DEFAULT_PUBLICATION_FILE_SYSTEM = { mkdir, open, readFile, readdir, rename, rm, stat }
+const DEFAULT_PUBLICATION_FILE_SYSTEM = { lstat, mkdir, open, readFile, readdir, rename, rm, stat }
 
 export class PathPolicyError extends Error {
   constructor(message) {
@@ -77,6 +77,19 @@ function pathExists(fileSystem, target) {
       throw error
     },
   )
+}
+
+async function assertSafePublicationRoot(fileSystem, outputDir) {
+  let info
+  try {
+    info = await fileSystem.lstat(outputDir)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return
+    throw error
+  }
+  if (info.isSymbolicLink()) {
+    throw new PathPolicyError(`Output path final component must not be a symlink: ${outputDir}`)
+  }
 }
 
 async function syncDirectory(fileSystem, directory) {
@@ -319,10 +332,12 @@ export async function publishAtomically(outputDir, artifacts, {
   const journalTemporary = path.join(lockPath, `transaction.${token}.tmp`)
   const markerPath = path.join(lockPath, 'staged.complete')
   const fileSystem = { ...DEFAULT_PUBLICATION_FILE_SYSTEM, ...fileSystemOverrides }
+  await assertSafePublicationRoot(fileSystem, outputDir)
   await acquirePublicationLock(fileSystem, lockPath, outputDir, token, { rejectConcurrent })
   let primaryError
   let journalInstalled = false
   try {
+    await assertSafePublicationRoot(fileSystem, outputDir)
     const exists = await pathExists(fileSystem, outputDir)
     if (exists && !force) {
       const error = new Error(`Output already exists: ${outputDir}`)
@@ -352,8 +367,9 @@ export async function publishAtomically(outputDir, artifacts, {
       await writeDurableExclusive(fileSystem, artifactPath, artifact.bytes)
     }
     if (validateStaged) await validateStaged(temporary)
-    await writeDurableExclusive(fileSystem, markerPath, new Uint8Array())
     if (beforeCommit) await beforeCommit(temporary)
+    await assertSafePublicationRoot(fileSystem, outputDir)
+    await writeDurableExclusive(fileSystem, markerPath, new Uint8Array())
     if (exists) await renameAndSync(fileSystem, outputDir, backup)
     await renameAndSync(fileSystem, temporary, outputDir)
     if (validatePublished) {

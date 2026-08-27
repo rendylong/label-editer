@@ -123,7 +123,7 @@ export async function createSessionServer({
     return payload
   }
 
-  function sealReviewLease(session, lease, { remember = true, action = 'finalize', payload, confirmationSha256 } = {}) {
+  function sealReviewLease(session, lease, { remember = true, action = 'confirm', payload, confirmationSha256 } = {}) {
     clearReviewLeaseTimer(lease)
     if (session.reviewLease === lease) session.reviewLease = null
     const settlement = payload ?? { ok: true, batchId: lease.batchId, generation: lease.generation, finalized: true }
@@ -482,21 +482,8 @@ export async function createSessionServer({
             return
           }
           if (request.method === 'POST' && parts[5] === 'finalize') {
-            const body = JSON.parse((await readBody(request, 4096)).toString('utf8'))
-            const outcome = await serializeSessionMutation(session, () => {
-              const lease = requestLease(session, batchId, request, body, ['prepared'])
-              if (!lease) {
-                const replay = replayReviewSettlement(session, batchId, request, body, 'finalize')
-                return replay
-                  ? { status: 200, payload: replay }
-                  : { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact lease' } }
-              }
-              if (!committedNamespaceIsolated(session, lease.committed)) {
-                return { status: 409, payload: { ok: false, error: 'Artifact namespace changed before finalize' } }
-              }
-              return { status: 200, payload: sealReviewLease(session, lease) }
-            })
-            json(response, outcome.status, outcome.payload)
+            await readBody(request, 4096)
+            json(response, 409, { ok: false, error: 'Receipt-bound review artifact confirmation is required' })
             return
           }
           if (request.method === 'DELETE' && parts.length === 5) {
@@ -561,14 +548,9 @@ export async function createSessionServer({
             const hasLeaseClaim = request.headers['x-artifact-lease-token'] !== undefined
               || request.headers['x-artifact-generation'] !== undefined
             if (hasLeaseClaim) {
-              const lease = requestLease(session, artifact.batchId, request, undefined, ['committed', 'prepared'])
+              const lease = requestLease(session, artifact.batchId, request, undefined, ['committed', 'prepared'], { renew: false })
               if (!lease) return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
-            } else if (session.reviewLease.phase === 'prepared') {
-              // A receipt-confirmed transaction stays recoverable until success.
-              // Dereferencing it as a normal (non-transaction) consumer is itself
-              // the synchronous success boundary, so seal before exposing bytes.
-              sealReviewLease(session, session.reviewLease)
-            } else {
+            } else if (session.reviewLease.phase === 'committed') {
               return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
             }
           }

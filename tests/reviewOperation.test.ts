@@ -55,6 +55,7 @@ function harness(input: Awaited<ReturnType<typeof fixture>>, options: {
   mutationBoundary?: 'capture' | 'seal' | 'readback' | 'stage' | 'pre-rename'
   mutatePath?: string
   sealError?: boolean
+  sessionSetupAba?: boolean
 } = {}) {
   const bytes = pngBytes(64, 48)
   const digest = sha256(bytes)
@@ -85,10 +86,19 @@ function harness(input: Awaited<ReturnType<typeof fixture>>, options: {
   }
   let reads = 0
   let sessions = 0
+  const sessionInputs: any[] = []
   const calls: string[] = []
   const runtime = {
     allowedRoots: [input.root],
-    async createSession() { sessions += 1; return { id: 'review-session', modelName: 'bottle.glb', inputUrl: 'http://local/model' } },
+    async createSession(sessionInput: any) {
+      sessions += 1
+      sessionInputs.push(sessionInput)
+      if (options.sessionSetupAba) {
+        await writeFile(input.glbPath, 'glb-mutated')
+        await writeFile(input.glbPath, 'glb-original')
+      }
+      return { id: 'review-session', modelName: 'bottle.glb', inputUrl: 'http://local/model' }
+    },
     async callBridge(_session: unknown, method: string) {
       calls.push(method)
       if (method === 'loadModel') return { ok: true, data: { name: 'bottle.glb', fingerprint: `sha256:${'4'.repeat(64)}`, meshes: [], warnings: [] }, warnings: [] }
@@ -128,7 +138,7 @@ function harness(input: Awaited<ReturnType<typeof fixture>>, options: {
     },
     addAsset() { throw new Error('No local assets') },
   }
-  return { runtime, calls, mutations, get sessions() { return sessions } }
+  return { runtime, calls, mutations, sessionInputs, get sessions() { return sessions } }
 }
 
 afterEach(async () => {
@@ -144,6 +154,10 @@ describe('label review operation', () => {
     })
 
     expect(result.ok).toBe(true)
+    expect(test.sessionInputs).toHaveLength(1)
+    expect(test.sessionInputs[0]).not.toHaveProperty('glbPath')
+    expect(test.sessionInputs[0]).toMatchObject({ modelName: 'bottle.glb' })
+    expect(Buffer.from(test.sessionInputs[0].glbBytes).toString('utf8')).toBe('glb-original')
     expect(test.calls).toEqual(['loadModel', 'applyProject', 'waitForReady', 'renderReviewEvidence'])
     expect(await readdir(input.outputDir)).toEqual(expect.arrayContaining([
       'label-front.png', 'surface-front.png', 'model-front.png', 'model-back.png', 'review-sheet.png', 'review-manifest.json',
@@ -155,6 +169,18 @@ describe('label review operation', () => {
       input: { kind: 'label-project-v3', revision: revisionOf(input.document), sha256: sha256(`${JSON.stringify(input.document)}\n`) },
       model: { fingerprint: `sha256:${'4'.repeat(64)}` }, areaTargetsSha256: '5'.repeat(64),
     })
+  })
+
+  it('detects an A-to-B-to-A model mutation during session setup while rendering only the initial bytes', async () => {
+    const input = await fixture()
+    const test = harness(input, { sessionSetupAba: true })
+    const result = await createOperations(test.runtime).review({
+      inputPath: input.inputPath, glbPath: input.glbPath, outputDir: input.outputDir,
+    })
+    expect(result).toMatchObject({ ok: false, error: { code: 'STALE_APPROVAL' } })
+    expect(Buffer.from(test.sessionInputs[0].glbBytes).toString('utf8')).toBe('glb-original')
+    expect(test.sessionInputs[0]).not.toHaveProperty('glbPath')
+    await expect(readdir(input.outputDir)).rejects.toThrow()
   })
 
   it('rejects an existing output before opening a browser session', async () => {

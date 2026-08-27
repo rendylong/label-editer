@@ -164,4 +164,20 @@ describe('production review manifest', () => {
     await writeFile(path.join(output, 'review-manifest.json'), `${JSON.stringify(value.manifest, null, 2)}\n`)
     await expect(validateReviewDirectory(output, value)).rejects.toThrow(/non-file|regular file|symlink/i)
   })
+
+  it('rejects a final-component symlink used as the review directory root', async () => {
+    const value = fixture()
+    const root = await mkdtemp(path.join(tmpdir(), 'review-output-root-symlink-'))
+    temporaryDirectories.push(root)
+    const output = path.join(root, 'output')
+    const alias = path.join(root, 'alias')
+    await mkdir(output)
+    for (const artifact of value.manifest.artifacts) {
+      const stored = value.artifacts.find((candidate: any) => candidate.id === artifact.id)!
+      await writeFile(path.join(output, artifact.path), stored.bytes)
+    }
+    await writeFile(path.join(output, 'review-manifest.json'), `${JSON.stringify(value.manifest, null, 2)}\n`)
+    await symlink(output, alias)
+    await expect(validateReviewDirectory(alias, value)).rejects.toThrow(/root|symlink|regular directory/i)
+  })
 })

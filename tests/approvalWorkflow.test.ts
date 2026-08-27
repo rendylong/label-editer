@@ -206,6 +206,18 @@ function productionManifest(input: {
     }, {
       id: 'surface-front', path: 'surface-front.png', sha256: '6'.repeat(64), mimeType: 'image/png',
       width: 1600, height: 1600, viewKind: 'surface-face', areaId: 'front', carrier: 'direct_surface_print',
+      camera: { position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
+    }, {
+      id: 'model-front', path: 'model-front.png', sha256: '7'.repeat(64), mimeType: 'image/png',
+      width: 1600, height: 1600, viewKind: 'model-front',
+      camera: { position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
+    }, {
+      id: 'model-back', path: 'model-back.png', sha256: '8'.repeat(64), mimeType: 'image/png',
+      width: 1600, height: 1600, viewKind: 'model-back',
+      camera: { position: [0, 0, -3], direction: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
+    }, {
+      id: 'review-sheet', path: 'review-sheet.png', sha256: '9'.repeat(64), mimeType: 'image/png',
+      width: 1600, height: 1600, viewKind: 'review-sheet',
     }],
   }
 }
@@ -658,6 +670,18 @@ describe('production approval gate', () => {
     })
   })
 
+  it('recomputes shared production manifest completeness instead of trusting an approval digest', async () => {
+    const state = workflowFixture()
+    state.productionManifest.artifacts = state.productionManifest.artifacts
+      .filter((artifact: any) => artifact.viewKind !== 'model-front')
+    state.productionApproval.review_manifest_sha256 = sha256(JSON.stringify(state.productionManifest))
+    await expectWorkflowCode(
+      verifyProductionGate(productionGateInput(state)),
+      'DIGEST_MISMATCH',
+      'productionReviewManifest',
+    )
+  })
+
   it('accepts a canonical Project v3 with the same exact production bindings', async () => {
     const state = workflowFixture()
     state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
@@ -682,7 +706,9 @@ describe('production approval gate', () => {
     ['production review digest', (state: any) => { state.productionApproval.review_manifest_sha256 = '0'.repeat(64) }, 'approval.reviewManifestSha256'],
     ['production area binding', (state: any) => {
       state.productionManifest.areas[0].carrier = 'applied_label'
-      state.productionManifest.artifacts.forEach((artifact: any) => { artifact.carrier = 'applied_label' })
+      state.productionManifest.artifacts
+        .filter((artifact: any) => artifact.areaId === 'front')
+        .forEach((artifact: any) => { artifact.carrier = 'applied_label' })
     }, 'reviewManifest.areas'],
   ])('fails closed for a stale %s', async (_label, mutate, field) => {
     const state = workflowFixture(); mutate(state)
