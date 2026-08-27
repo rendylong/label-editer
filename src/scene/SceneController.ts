@@ -647,9 +647,12 @@ export class SceneController {
           reason: `Clean production ${request.kind} review`,
         }
 
-    const existingLights = this.scene.children
-      .filter((object): object is THREE.Light => object instanceof THREE.Light)
-      .map((light) => ({ light, visible: light.visible }))
+    const reviewEnvironment = this.environmentTarget?.texture
+    if (!reviewEnvironment) throw qcCaptureError('BROWSER_NOT_READY', 'Neutral review environment is unavailable')
+    const existingLights: Array<{ light: THREE.Light; visible: boolean }> = []
+    this.scene.traverse((object) => {
+      if (object instanceof THREE.Light) existingLights.push({ light: object, visible: object.visible })
+    })
     const temporaryLights = createLightStudioLights()
     const temporaryLightObjects = [
       temporaryLights.hemisphere, temporaryLights.key, temporaryLights.fill, temporaryLights.rim,
@@ -673,7 +676,7 @@ export class SceneController {
       for (const { light } of existingLights) light.visible = false
       this.scene.add(...temporaryLightObjects)
       this.scene.background = new THREE.Color(LIGHT_STUDIO.background)
-      this.scene.environmentIntensity = LIGHT_STUDIO_RENDERING.environmentIntensity
+      installStudioEnvironment(this.scene, reviewEnvironment, LIGHT_STUDIO_RENDERING.environmentIntensity)
       this.scene.overrideMaterial = null
       this.renderer.outputColorSpace = THREE.SRGBColorSpace
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping

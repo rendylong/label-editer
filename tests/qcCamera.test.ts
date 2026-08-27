@@ -31,6 +31,7 @@ interface QcControllerInternals {
     toneMappingExposure: number
   }
   scene: THREE.Scene
+  environmentTarget: { texture: THREE.Texture }
   composer: { setSize(width: number, height: number): void; render(): void }
   outline: { selectedObjects: THREE.Object3D[]; setSize(width: number, height: number): void; enabled: boolean }
   grid: THREE.GridHelper
@@ -53,6 +54,7 @@ function qcControllerHarness(areaRotationY = Math.PI / 2): { controller: SceneCo
   model.add(area)
   const scene = new THREE.Scene()
   const environment = new THREE.Texture()
+  const reviewEnvironment = new THREE.Texture()
   scene.background = new THREE.Color(0x123456)
   scene.environment = environment
   scene.environmentIntensity = 0.91
@@ -84,6 +86,7 @@ function qcControllerHarness(areaRotationY = Math.PI / 2): { controller: SceneCo
       toneMappingExposure: 1.37,
     },
     scene,
+    environmentTarget: { texture: reviewEnvironment },
     composer: { setSize: vi.fn(), render: vi.fn() },
     outline: { selectedObjects: outlineSelection, setSize: vi.fn(), enabled: true },
     grid,
@@ -142,9 +145,13 @@ function captureState(internals: QcControllerInternals) {
     outputColorSpace: internals.renderer.outputColorSpace,
     toneMapping: internals.renderer.toneMapping,
     exposure: internals.renderer.toneMappingExposure,
-    lights: internals.scene.children.filter((child): child is THREE.Light => child instanceof THREE.Light).map((light) => ({
-      object: light, visible: light.visible, color: light.color.getHex(), intensity: light.intensity, position: light.position.toArray(),
-    })),
+    lights: (() => {
+      const lights: THREE.Light[] = []
+      internals.scene.traverse((child) => { if (child instanceof THREE.Light) lights.push(child) })
+      return lights.map((light) => ({
+        object: light, visible: light.visible, color: light.color.getHex(), intensity: light.intensity, position: light.position.toArray(),
+      }))
+    })(),
     frontMarkerVisible: internals.frontMarker.visible,
     areaControlVisible: internals.areaControlGroup.visible,
   }
@@ -304,7 +311,7 @@ describe('QC camera math', () => {
       controlsEnabled: false, controlsAutoRotate: false, autoRotate: false,
       outlineSelection: [], outlineEnabled: false, gridVisible: false,
       background: LIGHT_STUDIO.background,
-      environment: before.environment,
+      environment: internals.environmentTarget.texture,
       environmentIntensity: LIGHT_STUDIO_RENDERING.environmentIntensity,
       overrideMaterial: null,
       outputColorSpace: THREE.SRGBColorSpace,
@@ -317,6 +324,28 @@ describe('QC camera math', () => {
       expect.objectContaining({ visible: false }),
     ])
     expect(during?.lights.filter((light) => light.object !== before.lights[0].object)).toHaveLength(4)
+    expect(captureState(internals)).toEqual(before)
+  })
+
+  it('hides nested model lights for the clean scene and restores their exact visibility', async () => {
+    const { controller, internals } = qcControllerHarness()
+    const nestedGroup = new THREE.Group()
+    const nestedVisible = new THREE.PointLight(0xff0000, 9)
+    const nestedHidden = new THREE.SpotLight(0x00ff00, 7)
+    nestedHidden.visible = false
+    nestedGroup.add(nestedVisible, nestedHidden)
+    internals.model.add(nestedGroup)
+    const before = captureState(internals)
+    let during: ReturnType<typeof captureState> | undefined
+    internals.encodePng = async () => {
+      during = captureState(internals)
+      return new Blob(['png'], { type: 'image/png' })
+    }
+
+    await captureReview(controller, REVIEW_SURFACE_REQUEST)
+
+    expect(during?.lights.find((entry) => entry.object === nestedVisible)?.visible).toBe(false)
+    expect(during?.lights.find((entry) => entry.object === nestedHidden)?.visible).toBe(false)
     expect(captureState(internals)).toEqual(before)
   })
 

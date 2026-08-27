@@ -1,6 +1,7 @@
 import { deriveDesignFontRequests } from './fontRuntime'
 import { canonicalLayerOrder } from './layerOrder'
 import type { LabelAreaConfig } from './types'
+import { sha256HexSync } from '../agent/syncSha256'
 
 export type CarrierReadinessCode =
   | 'ink-adhesion'
@@ -88,4 +89,28 @@ export function designFontReadinessKey(area: Pick<LabelAreaConfig, 'layers' | 'f
     canonicalLayerOrder(area.layers).filter((layer) => layer.visible),
     area.fonts,
   ).map((request) => request.key).join('|')
+}
+
+/** Fingerprint every visible external asset identity required by one exact bake. */
+export function designAssetReadinessKey(area: Pick<LabelAreaConfig, 'layers' | 'fonts'>): string {
+  const visible = canonicalLayerOrder(area.layers).filter((layer) => layer.visible)
+  const identity = {
+    fonts: deriveDesignFontRequests(visible, area.fonts).map((request) => request.key),
+    images: visible.flatMap((layer) => layer.kind === 'image' ? [{
+      id: layer.id,
+      src: layer.src,
+      naturalWidth: layer.naturalWidth,
+      naturalHeight: layer.naturalHeight,
+    }] : []),
+  }
+  return `sha256:${sha256HexSync(new TextEncoder().encode(JSON.stringify(identity)))}`
+}
+
+/** A current owner reference alone is insufficient: the successful asset set must match too. */
+export function isBakeAssetReadyForArea(
+  area: Pick<LabelAreaConfig, 'layers' | 'fonts'>,
+  bake: { fontReadinessKey?: string; assetReadinessKey?: string },
+): boolean {
+  return (bake.fontReadinessKey ?? '') === designFontReadinessKey(area)
+    && bake.assetReadinessKey === designAssetReadinessKey(area)
 }

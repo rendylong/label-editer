@@ -19,6 +19,10 @@ export interface FontReadinessRevisionGate {
   dispose: () => void
 }
 
+export function fontLoadReportIsReady(report: FontLoadReport, requiredCount: number): boolean {
+  return report.unavailable.length === 0 && (requiredCount === 0 || report.ready.length > 0)
+}
+
 /** Keeps asynchronous font completions scoped to the current mounted area. */
 export function createFontReadinessRevisionGate(
   onReady: (event: FontReadinessRevision) => void,
@@ -51,18 +55,23 @@ export function useDesignFontReadiness(
   areaId: string | null,
   layers: LabelLayer[],
   uploadedFonts: UploadedFontRecord[],
-): number {
+): { revision: number; ready: boolean } {
   const requests = useMemo(
     () => deriveDesignFontRequests(layers, uploadedFonts),
     [layers, uploadedFonts],
   )
   const signature = requests.map((request) => request.key).join('|')
-  const [ready, setReady] = useState<{ areaId: string | null; revision: number; readinessKey: string }>({ areaId: null, revision: 0, readinessKey: '' })
+  const [ready, setReady] = useState<{
+    areaId: string | null
+    revision: number
+    readinessKey: string
+    report: FontLoadReport
+  }>({ areaId: null, revision: 0, readinessKey: '', report: { ready: [], unavailable: [] } })
   const gateRef = useRef<FontReadinessRevisionGate | null>(null)
 
   if (!gateRef.current) {
     gateRef.current = createFontReadinessRevisionGate((event) => {
-      setReady({ areaId: event.areaId, revision: event.revision, readinessKey: event.readinessKey })
+      setReady({ areaId: event.areaId, revision: event.revision, readinessKey: event.readinessKey, report: event.report })
     })
   }
 
@@ -78,5 +87,10 @@ export function useDesignFontReadiness(
     return () => gate.invalidate()
   }, [areaId, signature])
 
-  return ready.areaId === areaId && ready.readinessKey === signature ? ready.revision : 0
+  if (requests.length === 0) return { revision: 0, ready: true }
+  const current = ready.areaId === areaId && ready.readinessKey === signature
+  return {
+    revision: current ? ready.revision : 0,
+    ready: current && fontLoadReportIsReady(ready.report, requests.length),
+  }
 }

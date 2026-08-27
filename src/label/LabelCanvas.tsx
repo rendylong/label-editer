@@ -12,7 +12,7 @@ import { canonicalLayerOrder } from './layerOrder'
 import { fontCssFor } from './fonts'
 import { resolvedTextDirection } from './textDirection'
 import { useDesignFontReadiness } from './designFontReadiness'
-import { designFontReadinessKey } from './exportReadiness'
+import { designAssetReadinessKey, designFontReadinessKey } from './exportReadiness'
 import { clearTransparentCanvasBorder } from './canvasBorder'
 import {
   renderCarrierMasks,
@@ -267,7 +267,8 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
   const layers = config?.layers ?? []
   const globalCraft = config?.globalCraft.craft ?? []
   const uploadedFonts = config?.fonts ?? []
-  const fontRevision = useDesignFontReadiness(areaId, layers, uploadedFonts)
+  const fontReadiness = useDesignFontReadiness(areaId, layers, uploadedFonts)
+  const fontRevision = fontReadiness.revision
   const visibleFontReadinessKey = useMemo(
     () => config ? designFontReadinessKey(config) : '',
     [config],
@@ -369,6 +370,9 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         ? [layer.id]
         : []
     })
+    const visibleImagesReady = cfg.layers.every((layer) => layer.kind !== 'image' || !layer.visible
+      || (imgBits.get(layer.id)?.src === layer.src))
+    const assetsReady = fontReadiness.ready && visibleImagesReady
     setBake(cfg.id, {
       color,
       ...masks,
@@ -376,10 +380,11 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       version,
       areaOwner: cfg,
       textOverflowLayerIds,
-      fontReadinessKey: visibleFontReadinessKey === '' || fontRevision > 0 ? visibleFontReadinessKey : undefined,
+      fontReadinessKey: fontReadiness.ready ? visibleFontReadinessKey : undefined,
+      assetReadinessKey: assetsReady ? designAssetReadinessKey(cfg) : undefined,
     })
     return true
-  }, [areaId, fontRevision, imgBits, setBake, visibleFontReadinessKey])
+  }, [areaId, fontReadiness.ready, fontRevision, imgBits, setBake, visibleFontReadinessKey])
 
   const flushBake = useCallback((): boolean => {
     const stage = stageRef.current

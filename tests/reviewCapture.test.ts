@@ -9,6 +9,7 @@ import {
   type AgentReviewCaptureContext,
   type AgentReviewCaptureResult,
 } from '../src/agent/previewCapture'
+import { pngBlob } from './pngTestUtils'
 
 function flatRequest(carrier: CarrierMode): ReviewViewRequest {
   return {
@@ -17,7 +18,7 @@ function flatRequest(carrier: CarrierMode): ReviewViewRequest {
   }
 }
 
-function result(request: ReviewViewRequest, blob = new Blob(['png'], { type: 'image/png' })): AgentReviewCaptureResult {
+function result(request: ReviewViewRequest, blob = pngBlob(request.width, request.height)): AgentReviewCaptureResult {
   return { id: request.id, kind: request.kind, blob, width: request.width, height: request.height }
 }
 
@@ -91,8 +92,8 @@ describe('clean review browser composition', () => {
     expect(labelCalls).toHaveLength(6)
     const labels = labelCalls.map((call) => String(call[1])).join(' ')
     expect(labels).toContain('front')
-    expect(labels).toContain('View model-front')
-    expect(labels).not.toMatch(/approved|production[ -]?ready|\bqc\b|certif|press[ -]?ready/i)
+    expect(labels).toContain('View 03 | Model front')
+    expect(labels).not.toMatch(/approved|approval|accepted|passed|production[ -]?ready|manufacturing[ -]?ready|\bqc\b|certif|press[ -]?ready/i)
   })
 
   it.each([
@@ -113,6 +114,24 @@ describe('clean review browser composition', () => {
 
     await expect(composeReviewSheet(sheet, {
       blueprintRevision: 'v1', inputRevision: 'v2', sources: mutate(sources),
+    })).rejects.toMatchObject({ code: 'BROWSER_NOT_READY' })
+    expect(createImageBitmap).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['a 1x1 PNG claiming planned 1600x1600 dimensions', pngBlob(1, 1)],
+    ['an oversized IHDR before bitmap allocation', pngBlob(9000, 9000)],
+  ])('structurally rejects %s', async (_label, blob) => {
+    const flat = flatRequest('clear_label')
+    const sheet: ReviewViewRequest = {
+      id: 'review-sheet', kind: 'review-sheet', width: 1600, height: 1600,
+      sourceViewIds: [flat.id],
+    }
+    vi.stubGlobal('createImageBitmap', vi.fn())
+
+    await expect(composeReviewSheet(sheet, {
+      blueprintRevision: 'opaque-approved-revision', inputRevision: 'opaque-passed-revision',
+      sources: [{ request: flat, result: result(flat, blob) }],
     })).rejects.toMatchObject({ code: 'BROWSER_NOT_READY' })
     expect(createImageBitmap).not.toHaveBeenCalled()
   })

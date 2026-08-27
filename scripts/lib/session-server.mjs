@@ -88,6 +88,75 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
           response.end(asset.bytes)
           return
         }
+        if (parts[2] === 'artifact' && parts[3] === 'stage') {
+          const batchId = parts[4]
+          if (!batchId || !/^[A-Za-z0-9._-]{1,160}$/.test(batchId)) {
+            return json(response, 400, { ok: false, error: 'Invalid artifact batch id' })
+          }
+          if (request.method === 'PUT') {
+            const id = parts[5]
+            if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
+            if (session.artifacts.has(id)) return json(response, 409, { ok: false, error: 'Artifact already exists' })
+            const batch = session.stagedArtifacts.get(batchId) ?? new Map()
+            if (batch.has(id)) return json(response, 409, { ok: false, error: 'Artifact already staged' })
+            const bytes = await readBody(request, maxUploadBytes)
+            const encodedName = request.headers['x-artifact-file-name']
+            const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
+            const artifact = {
+              id,
+              fileName: sanitizeArtifactName(decodedName),
+              mimeType: String(request.headers['content-type'] ?? 'application/octet-stream').split(';')[0],
+              bytes,
+              byteLength: bytes.byteLength,
+              sha256: sha256Bytes(bytes),
+              width: Number(request.headers['x-artifact-width']) || undefined,
+              height: Number(request.headers['x-artifact-height']) || undefined,
+              areaId: typeof request.headers['x-artifact-area-id'] === 'string'
+                ? decodeURIComponent(request.headers['x-artifact-area-id'])
+                : undefined,
+              channel: typeof request.headers['x-artifact-channel'] === 'string'
+                ? request.headers['x-artifact-channel']
+                : undefined,
+              url: `${origin}/session/${session.id}/artifact/${encodeURIComponent(id)}?token=${session.token}`,
+            }
+            batch.set(id, artifact)
+            session.stagedArtifacts.set(batchId, batch)
+            json(response, 201, artifact)
+            return
+          }
+          if (request.method === 'POST' && parts[5] === 'commit') {
+            const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
+            const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : null
+            const batch = session.stagedArtifacts.get(batchId)
+            if (!batch || !artifactIds || artifactIds.length !== batch.size
+              || artifactIds.some((id, index) => typeof id !== 'string' || id !== [...batch.keys()][index])) {
+              return json(response, 409, { ok: false, error: 'Artifact batch is incomplete or mismatched' })
+            }
+            if (artifactIds.some((id) => session.artifacts.has(id))) {
+              return json(response, 409, { ok: false, error: 'Artifact already exists' })
+            }
+            const committed = new Map(batch)
+            for (const [id, artifact] of committed) session.artifacts.set(id, artifact)
+            session.committedArtifactBatches.set(batchId, committed)
+            session.stagedArtifacts.delete(batchId)
+            json(response, 201, { ok: true, artifactIds })
+            return
+          }
+          if (request.method === 'DELETE' && parts.length === 5) {
+            session.stagedArtifacts.delete(batchId)
+            const committed = session.committedArtifactBatches.get(batchId)
+            if (committed) {
+              for (const [id, artifact] of committed) {
+                if (session.artifacts.get(id) === artifact) session.artifacts.delete(id)
+              }
+              session.committedArtifactBatches.delete(batchId)
+            }
+            json(response, 200, { ok: true })
+            return
+          }
+          json(response, 404, { ok: false, error: 'Artifact batch route not found' })
+          return
+        }
         if (parts[2] === 'artifact' && request.method === 'PUT') {
           const id = parts[3]
           if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
@@ -169,6 +238,8 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
         token: randomBytes(32).toString('base64url'),
         assets: new Map(),
         artifacts: new Map(),
+        stagedArtifacts: new Map(),
+        committedArtifactBatches: new Map(),
       }
       sessions.set(session.id, session)
       return { id: session.id, token: session.token }

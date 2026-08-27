@@ -127,4 +127,54 @@ describe('plugin runtime security', () => {
       await server.close()
     }
   })
+
+  it('keeps a review artifact batch unreadable until commit and purges the whole attempt', async () => {
+    const editorRoot = await mkdtemp(path.join(tmpdir(), 'glb-label-editor-batch-'))
+    await writeFile(path.join(editorRoot, 'index.html'), '<main>editor</main>')
+    const server = await createSessionServer({ editorRoot })
+    try {
+      const session = server.createSession()
+      const base = `${server.origin}/session/${session.id}/artifact`
+      const auth = `token=${session.token}`
+      for (const id of ['front', 'back']) {
+        const staged = await fetch(`${base}/stage/review-attempt/${id}?${auth}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'image/png', 'x-artifact-file-name': encodeURIComponent(`${id}.png`) },
+          body: new Uint8Array([1, 2, 3]),
+        })
+        expect(staged.status).toBe(201)
+        expect(await staged.json()).toMatchObject({
+          id, fileName: `${id}.png`, mimeType: 'image/png', byteLength: 3,
+          url: `${base}/${id}?${auth}`,
+        })
+        expect((await fetch(`${base}/${id}?${auth}`)).status).toBe(404)
+      }
+      expect(server.getArtifacts(session.id)).toEqual([])
+
+      const purged = await fetch(`${base}/stage/review-attempt?${auth}`, { method: 'DELETE' })
+      expect(purged.status).toBe(200)
+      expect(server.getArtifacts(session.id)).toEqual([])
+
+      for (const id of ['front', 'back']) {
+        expect((await fetch(`${base}/stage/review-attempt/${id}?${auth}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'image/png', 'x-artifact-file-name': encodeURIComponent(`${id}.png`) },
+          body: new Uint8Array([1, 2, 3]),
+        })).status).toBe(201)
+      }
+      const committed = await fetch(`${base}/stage/review-attempt/commit?${auth}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ artifactIds: ['front', 'back'] }),
+      })
+      expect(committed.status).toBe(201)
+      expect((await committed.json()).artifactIds).toEqual(['front', 'back'])
+      expect((await fetch(`${base}/front?${auth}`)).status).toBe(200)
+
+      expect((await fetch(`${base}/stage/review-attempt?${auth}`, { method: 'DELETE' })).status).toBe(200)
+      expect((await fetch(`${base}/front?${auth}`)).status).toBe(404)
+      expect(server.getArtifacts(session.id)).toEqual([])
+    } finally {
+      await server.close()
+    }
+  })
 })

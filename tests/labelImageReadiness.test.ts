@@ -3,6 +3,7 @@ import { JSDOM } from 'jsdom'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { exportPng } from '../src/app/actions'
+import { designAssetReadinessKey } from '../src/label/exportReadiness'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useUiStore } from '../src/state/stores'
 
@@ -243,6 +244,8 @@ describe('LabelCanvas image readiness ownership', () => {
     const bake = useLabelStore.getState().bakeMap[config.id]?.color as MarkedCanvas | undefined
     expect(bake?.sourceReady).toBe(true)
     expect(bake?.sourceLayerWidth).toBe(200)
+    expect(useLabelStore.getState().bakeMap[config.id]?.assetReadinessKey)
+      .toBe(designAssetReadinessKey(useLabelStore.getState().areas[0]))
   })
 
   it('evicts a rejected source so the next edit can retry and render after one successful load', async () => {
@@ -257,6 +260,9 @@ describe('LabelCanvas image readiness ownership', () => {
       await Promise.resolve()
     })
     expect(dom.window.document.querySelector('[data-image-preview]')).toBeNull()
+    await act(async () => vi.advanceTimersByTime(300))
+    await act(async () => frames.splice(0).forEach((callback) => callback(300)))
+    expect(useLabelStore.getState().bakeMap[config.id]?.assetReadinessKey).toBeUndefined()
 
     await act(async () => useLabelStore.getState().applyAreaOp(config.id, (current) => ({
       ...current,

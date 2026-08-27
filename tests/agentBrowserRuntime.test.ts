@@ -9,9 +9,10 @@ import { registerAgentPreviewCapture } from '../src/agent/previewCapture'
 import type { QcCameraMetadata, ReviewEvidenceRequest, ReviewViewRequest } from '../src/agent/contracts'
 import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
-import { designFontReadinessKey } from '../src/label/exportReadiness'
+import { designAssetReadinessKey, designFontReadinessKey } from '../src/label/exportReadiness'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
+import { pngBlob as structuralPngBlob } from './pngTestUtils'
 
 const external = vi.hoisted(() => ({
   restoreImportedAreaRuntime: vi.fn(async () => ({ remapOutput: null, meshAccessors: null })),
@@ -94,6 +95,7 @@ function bake(owner: LabelAreaConfig, roughness = channelCanvas(255, 42)): BakeR
     spec: owner.canvas,
     version: 1,
     areaOwner: owner,
+    assetReadinessKey: designAssetReadinessKey(owner),
   }
 }
 
@@ -125,8 +127,23 @@ function uploadedDescriptor(id: string): Record<string, unknown> {
     id,
     fileName: `${id}.png`,
     mimeType: 'image/png',
-    url: `/artifact/${id}`,
+    url: `/session/s1/artifact/${id}?token=${token}`,
     byteLength: 1,
+  }
+}
+
+function exactUploadDescriptor(input: URL | RequestInfo, init?: RequestInit, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const url = new URL(String(input), window.location.origin)
+  const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
+  const headers = new Headers(init?.headers)
+  const body = init?.body as Uint8Array | undefined
+  return {
+    id,
+    fileName: decodeURIComponent(headers.get('x-artifact-file-name') ?? id),
+    mimeType: headers.get('content-type') ?? 'application/octet-stream',
+    url: `/session/s1/artifact/${encodeURIComponent(id)}?token=${token}`,
+    byteLength: body?.byteLength ?? 0,
+    ...overrides,
   }
 }
 
@@ -273,10 +290,7 @@ describe('browser Agent QC runtime', () => {
         areaId: headers.get('x-artifact-area-id') ? decodeURIComponent(headers.get('x-artifact-area-id')!) : undefined,
         channel: headers.get('x-artifact-channel') ?? undefined,
       })
-      return {
-        ok: true,
-        json: async () => ({ id: 'server-id-must-not-win', fileName: 'server-name.png', mimeType: 'image/png', url: `/artifact/${id}`, byteLength: 0 }),
-      } as Response
+      return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
     }))
 
     const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
@@ -362,9 +376,8 @@ describe('browser Agent QC runtime', () => {
         return { blob: pngBlob(request.id), camera }
       },
     })
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
-      const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
-      return { ok: true, json: async () => uploadedDescriptor(id) } as Response
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
     }))
 
     const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
@@ -552,14 +565,14 @@ describe('browser Agent QC runtime', () => {
         return { blob: pngBlob(request.id), camera }
       },
     })
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
       if (id === 'qc-model-front') {
         uploadEntered.resolve()
         await releaseUpload.promise
       }
       if (id === 'qc-area-front-label-bump') activeBatches -= 1
-      return { ok: true, json: async () => uploadedDescriptor(id) } as Response
+      return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
     }))
     const bridge = createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
 
@@ -657,9 +670,8 @@ describe('browser Agent QC runtime', () => {
       preview: async () => pngBlob('preview'),
       qc: async (request) => ({ blob: pngBlob(request.id), camera }),
     })
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
-      const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
-      return { ok: true, json: async () => uploadedDescriptor(id) } as Response
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
     }))
 
     const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
@@ -667,7 +679,7 @@ describe('browser Agent QC runtime', () => {
 
     expect(result).toMatchObject({ ok: true, operation: 'render_qc_evidence' })
     if (!result.ok) throw new Error('Expected valid same-origin locator')
-    expect(result.data.views[0].artifact.url).toBe(new URL('/artifact/qc-model-front', window.location.origin).href)
+    expect(result.data.views[0].artifact.url).toBe(new URL(`/session/s1/artifact/qc-model-front?token=${token}`, window.location.origin).href)
   })
 })
 
@@ -701,7 +713,7 @@ describe('browser Agent clean production review runtime', () => {
       preview: async () => pngBlob('preview'),
       qc: async () => { throw new Error('QC capture must remain separate') },
       review: async (request) => ({
-        id: request.id, kind: request.kind, blob: pngBlob(request.id),
+        id: request.id, kind: request.kind, blob: structuralPngBlob(request.width, request.height),
         width: request.width, height: request.height,
         ...(request.kind === 'surface-face' || request.kind === 'model-front' || request.kind === 'model-back' ? { camera } : {}),
         ...await callback(request, captureIndex++),
@@ -710,10 +722,17 @@ describe('browser Agent clean production review runtime', () => {
   }
 
   function acceptUploads(events: string[] = []) {
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
-      events.push(`upload:${id}`)
-      return { ok: true, json: async () => ({ ...uploadedDescriptor(id), bytes: { serverOnly: true } }) } as Response
+      if (init?.method === 'PUT') {
+        events.push(`upload:${id}`)
+        return { ok: true, json: async () => ({ ...exactUploadDescriptor(input, init), bytes: { serverOnly: true } }) } as Response
+      }
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { artifactIds: string[] }
+        return { ok: true, json: async () => ({ ok: true, artifactIds: body.artifactIds }) } as Response
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as Response
     }))
   }
 
@@ -726,6 +745,7 @@ describe('browser Agent clean production review runtime', () => {
       activeAreaId: useLabelStore.getState().activeAreaId,
       selectedLayerIds: useLabelStore.getState().selectedLayerIds,
       selectedPartId: useModelStore.getState().selectedPartId,
+      workspaceTab: useUiStore.getState().workspaceTab,
     }
 
     const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
@@ -748,6 +768,7 @@ describe('browser Agent clean production review runtime', () => {
       activeAreaId: useLabelStore.getState().activeAreaId,
       selectedLayerIds: useLabelStore.getState().selectedLayerIds,
       selectedPartId: useModelStore.getState().selectedPartId,
+      workspaceTab: useUiStore.getState().workspaceTab,
     }).toEqual(before)
   })
 
@@ -818,6 +839,7 @@ describe('browser Agent clean production review runtime', () => {
       selectedLayerIds: useLabelStore.getState().selectedLayerIds,
       selectedPartId: useModelStore.getState().selectedPartId,
       channelView: useUiStore.getState().channelView,
+      workspaceTab: useUiStore.getState().workspaceTab,
     }
     registerReviewCapture()
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 }) as Response))
@@ -836,6 +858,153 @@ describe('browser Agent clean production review runtime', () => {
       selectedLayerIds: useLabelStore.getState().selectedLayerIds,
       selectedPartId: useModelStore.getState().selectedPartId,
       channelView: useUiStore.getState().channelView,
+      workspaceTab: useUiStore.getState().workspaceTab,
     }).toEqual(before)
+  })
+
+  it.each([
+    ['a 1x1 capture claiming the planned dimensions', structuralPngBlob(1, 1)],
+    ['an oversized IHDR', structuralPngBlob(9000, 9000)],
+  ])('rejects %s before any artifact staging or image allocation', async (_label, maliciousBlob) => {
+    const { request } = reviewFixture()
+    registerReviewCapture(async (_view, index) => index === 0 ? { blob: maliciousBlob } : {})
+    vi.stubGlobal('fetch', vi.fn())
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('purges every staged artifact from the attempt when a later stage upload fails', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    const readable = new Set<string>()
+    let putCount = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(String(input), window.location.origin)
+      if (init?.method === 'DELETE') {
+        readable.clear()
+        return { ok: true, json: async () => ({ ok: true }) } as Response
+      }
+      if (init?.method === 'PUT') {
+        const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
+        putCount += 1
+        if (putCount === 2) return { ok: false, status: 503 } as Response
+        readable.add(id)
+        return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as Response
+    }))
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(readable).toEqual(new Set())
+    expect([...((fetch as ReturnType<typeof vi.fn>).mock.calls)].some(([, init]) => init?.method === 'DELETE')).toBe(true)
+  })
+
+  it('rejects a same-origin locator bound to a different session artifact', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => ({
+      ok: true,
+      json: async () => exactUploadDescriptor(input, init, {
+        url: `/session/s1/artifact/model-back?token=${token}`,
+      }),
+    }) as Response))
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+  })
+
+  it.each([
+    ['id', { id: 'model-back' }],
+    ['name', { fileName: 'model-back.png' }],
+    ['MIME', { mimeType: 'image/jpeg' }],
+    ['byte length', { byteLength: 7 }],
+  ])('rejects an upload response with mismatched %s binding', async (_label, mismatch) => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return { ok: true, json: async () => ({ ok: true }) } as Response
+      return { ok: true, json: async () => exactUploadDescriptor(input, init, mismatch) } as Response
+    }))
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+  })
+
+  it('purges an already committed attempt when state mutates during commit', async () => {
+    const { request, owner } = reviewFixture()
+    registerReviewCapture()
+    const staged = new Set<string>()
+    const readable = new Set<string>()
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(String(input), window.location.origin)
+      const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
+      if (init?.method === 'PUT') {
+        staged.add(id)
+        return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
+      }
+      if (init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { artifactIds: string[] }
+        body.artifactIds.forEach((artifactId) => readable.add(artifactId))
+        staged.clear()
+        useLabelStore.getState().applyAreaOp(owner.id, (current) => ({ ...current, name: 'mutated-during-commit' }))
+        return { ok: true, json: async () => ({ ok: true, artifactIds: body.artifactIds }) } as Response
+      }
+      if (init?.method === 'DELETE') {
+        staged.clear()
+        readable.clear()
+        return { ok: true, json: async () => ({ ok: true }) } as Response
+      }
+      throw new Error(`Unexpected fetch: ${url.pathname}`)
+    }))
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(staged).toEqual(new Set())
+    expect(readable).toEqual(new Set())
+  })
+
+  it('fails the final synchronous freshness barrier when state mutates during the last digest', async () => {
+    const { request, owner } = reviewFixture()
+    let capturesComplete = false
+    registerReviewCapture(async (view) => {
+      if (view.kind === 'review-sheet') capturesComplete = true
+      return {}
+    })
+    vi.stubGlobal('fetch', vi.fn())
+    const realDigest = globalThis.crypto.subtle.digest.bind(globalThis.crypto.subtle)
+    const realGetRandomValues = globalThis.crypto.getRandomValues.bind(globalThis.crypto)
+    let mutated = false
+    vi.stubGlobal('crypto', {
+      getRandomValues: realGetRandomValues,
+      subtle: {
+        digest: async (...args: Parameters<SubtleCrypto['digest']>) => {
+          const digest = await realDigest(...args)
+          if (capturesComplete && !mutated) {
+            mutated = true
+            useLabelStore.getState().applyAreaOp(owner.id, (current) => ({ ...current, name: 'mutated-during-digest' }))
+          }
+          return digest
+        },
+      },
+    })
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(mutated).toBe(true)
   })
 })

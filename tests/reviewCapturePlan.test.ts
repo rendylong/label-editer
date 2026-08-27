@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { CarrierMode, LabelSide } from '../src/agent/designContracts'
-import { buildReviewCapturePlan, reviewSheetLabel } from '../src/agent/reviewCapturePlan'
+import {
+  assertReviewEncodedByteBudget,
+  buildReviewCapturePlan,
+  reviewSheetLabel,
+} from '../src/agent/reviewCapturePlan'
 
 function area(id: string, side: LabelSide, carrier: CarrierMode) {
   return { id, side, carrier }
@@ -110,15 +114,33 @@ describe('clean production review capture plan', () => {
 
   it('builds bounded sheet labels without approval, QC, or certification claims', () => {
     const label = reviewSheetLabel({
-      areaToken: 'approved-production-ready-QC-certified',
+      viewId: 'accepted-manufacturing-ready-passed-view',
+      areaToken: 'approved-production-ready-QC-certified', ordinal: 7,
       side: 'front', carrier: 'direct_surface_print',
-      blueprintRevision: 'approved-v1', inputRevision: 'press-ready-v2',
+      blueprintRevision: 'approved-opaque-blueprint-v1', inputRevision: 'passed-opaque-input-v2',
     })
     expect(label.length).toBeLessThanOrEqual(256)
     expect(label.split('\n')).toHaveLength(2)
     expect(label.split('\n').every((line) => line.length <= 72)).toBe(true)
-    expect(label).toContain('front')
-    expect(label).toContain('direct_surface_print')
-    expect(label).not.toMatch(/approved|production[ -]?ready|\bqc\b|certif|press[ -]?ready/i)
+    expect(label).toContain('Front')
+    expect(label).toContain('Direct surface print')
+    expect(label).not.toContain('approved-opaque-blueprint-v1')
+    expect(label).not.toContain('passed-opaque-input-v2')
+    expect(label).not.toContain('accepted-manufacturing-ready-passed-view')
+    expect(label).not.toMatch(/approved|approval|accepted|passed|production[ -]?ready|manufacturing[ -]?ready|\bqc\b|certif|press[ -]?ready/i)
+  })
+
+  it('rejects aggregate capture pixel work before returning an oversized plan', () => {
+    expect(() => buildReviewCapturePlan({
+      areas: Array.from({ length: 20 }, (_, index) => area(`area-${index}`, 'custom', 'direct_surface_print')),
+      width: 4096,
+      height: 4096,
+    })).toThrowError(expect.objectContaining({ code: 'INVALID_USAGE' }))
+  })
+
+  it('enforces a cumulative encoded-byte budget', () => {
+    expect(() => assertReviewEncodedByteBudget(120 * 1024 * 1024, 9 * 1024 * 1024))
+      .toThrowError(expect.objectContaining({ code: 'BROWSER_NOT_READY' }))
+    expect(assertReviewEncodedByteBudget(120 * 1024 * 1024, 8 * 1024 * 1024)).toBe(128 * 1024 * 1024)
   })
 })

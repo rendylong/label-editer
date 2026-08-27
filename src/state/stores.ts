@@ -24,6 +24,8 @@ export interface BakeResult {
   areaOwner?: LabelAreaConfig
   /** Visible-font request identity that was ready when this bake completed. Runtime-only. */
   fontReadinessKey?: string
+  /** Successful visible font + image identity bound to this exact bake. Runtime-only. */
+  assetReadinessKey?: string
 }
 
 // ── modelStore ────────────────────────────────────────────────────────

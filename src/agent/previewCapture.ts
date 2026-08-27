@@ -6,6 +6,7 @@ import type {
   ReviewViewRequest,
 } from './contracts'
 import { reviewSheetLabel } from './reviewCapturePlan'
+import { parsePortablePng } from '../../scripts/lib/png-core.mjs'
 
 export type AgentPreviewCapture = (request: Required<Pick<PreviewRequest, 'width' | 'height'>>) => Promise<Blob>
 
@@ -66,6 +67,26 @@ function assertBoundedSourceDimensions(width: number, height: number): void {
     || width > 8192 || height > 8192 || width * height > 32 * 1024 * 1024) {
     throw reviewNotReady('Review source dimensions are invalid or exceed the bounded allocation')
   }
+}
+
+export async function validatedReviewPngBytes(blob: Blob, width: number, height: number): Promise<Uint8Array> {
+  assertReviewDimensions(width, height)
+  if (blob.type !== 'image/png' || blob.size < 1 || blob.size > 32 * 1024 * 1024) {
+    throw reviewNotReady('Review PNG MIME or encoded size is invalid')
+  }
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  try {
+    parsePortablePng(bytes, {
+      expectedWidth: width,
+      expectedHeight: height,
+      maxWidth: 4096,
+      maxHeight: 4096,
+      maxPixels: 4096 * 4096,
+    })
+  } catch (error) {
+    throw reviewNotReady(`Review PNG structure is invalid: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return bytes
 }
 
 function encodeCanvasPng(canvas: HTMLCanvasElement): Promise<Blob> {
@@ -152,10 +173,10 @@ export async function captureFlatArtworkReview(
   }
 }
 
-function exactSheetSources(
+async function exactSheetSources(
   request: ReviewViewRequest,
   context: AgentReviewCaptureContext,
-): AgentReviewCaptureSource[] {
+): Promise<AgentReviewCaptureSource[]> {
   if (request.kind !== 'review-sheet' || !Array.isArray(request.sourceViewIds)
     || request.sourceViewIds.length < 1 || request.sourceViewIds.length > 130
     || context.sources.length !== request.sourceViewIds.length) {
@@ -175,6 +196,7 @@ function exactSheetSources(
       throw reviewNotReady(`Review sheet source is stale or invalid: ${expectedId}`)
     }
     assertReviewDimensions(source.result.width, source.result.height)
+    await validatedReviewPngBytes(source.result.blob, source.request.width, source.request.height)
     ids.add(key)
   }
   return context.sources
@@ -186,7 +208,7 @@ export async function composeReviewSheet(
   context: AgentReviewCaptureContext,
 ): Promise<AgentReviewCaptureResult> {
   assertReviewDimensions(request.width, request.height)
-  const sources = exactSheetSources(request, context)
+  const sources = await exactSheetSources(request, context)
   if (typeof createImageBitmap !== 'function') throw reviewNotReady('Review image decoder is unavailable')
   const canvas = document.createElement('canvas')
   canvas.width = request.width
@@ -235,6 +257,8 @@ export async function composeReviewSheet(
         areaToken: source.request.areaToken,
         side: source.request.side,
         carrier: source.request.carrier,
+        ordinal: index + 1,
+        kind: source.request.kind,
         blueprintRevision: context.blueprintRevision,
         inputRevision: context.inputRevision,
       }).split('\n')

@@ -1,9 +1,11 @@
 import type { CarrierMode, LabelSide } from './designContracts'
-import type { ReviewViewRequest } from './contracts'
+import type { ReviewViewKind, ReviewViewRequest } from './contracts'
 import { compareOrdinalText } from '../label/layerOrder'
 
 const DEFAULT_REVIEW_DIMENSION = 1600
 const MAX_REVIEW_DIMENSION = 4096
+export const MAX_REVIEW_CAPTURE_PIXELS = 128 * 1024 * 1024
+export const MAX_REVIEW_ENCODED_BYTES = 128 * 1024 * 1024
 const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
 const SIDE_ORDER: readonly LabelSide[] = [
@@ -118,42 +120,60 @@ export function buildReviewCapturePlan(input: {
     id: 'review-sheet', kind: 'review-sheet', width, height,
     sourceViewIds: plan.map((view) => view.id),
   })
+  const aggregatePixels = width * height * plan.length
+  if (!Number.isSafeInteger(aggregatePixels) || aggregatePixels > MAX_REVIEW_CAPTURE_PIXELS) {
+    invalidUsage(`Review capture plan exceeds the ${MAX_REVIEW_CAPTURE_PIXELS}-pixel work budget`)
+  }
   return plan
 }
 
-function withoutClaims(value: string): string {
-  return value
-    .replace(/approved/gi, '[redacted]')
-    .replace(/production[ -]?ready/gi, '[redacted]')
-    .replace(/press[ -]?ready/gi, '[redacted]')
-    .replace(/certif(?:ied|ication|y)?/gi, '[redacted]')
-    .replace(/\bqc\b/gi, '[redacted]')
+export function assertReviewEncodedByteBudget(total: number, next: number): number {
+  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(next) || next < 0
+    || next > MAX_REVIEW_ENCODED_BYTES - total) {
+    const error = new Error(`Review PNG batch exceeds the ${MAX_REVIEW_ENCODED_BYTES}-byte budget`) as Error & {
+      code: 'BROWSER_NOT_READY'
+    }
+    error.code = 'BROWSER_NOT_READY'
+    throw error
+  }
+  return total + next
 }
 
-function compactLabelToken(value: string, maximum = 28): string {
-  const clean = withoutClaims(value).replace(/\s+/g, ' ').trim()
-  if (/^sha256:[a-f0-9]{64}$/i.test(clean)) return `${clean.slice(0, 19)}…`
-  return clean.length <= maximum ? clean : `${clean.slice(0, maximum - 1)}…`
+const SIDE_LABELS: Record<LabelSide, string> = {
+  front: 'Front', back: 'Back', left: 'Left', right: 'Right', wrap: 'Wrap',
+  top: 'Top', bottom: 'Bottom', neck: 'Neck', custom: 'Custom',
+}
+
+const CARRIER_LABELS: Record<CarrierMode, string> = {
+  direct_surface_print: 'Direct surface print', applied_label: 'Applied label',
+  clear_label: 'Clear label', in_mold: 'In mold', foil_or_ink_only: 'Foil or ink only', bare: 'Bare',
+}
+
+const VIEW_LABELS: Record<ReviewViewKind, string> = {
+  'flat-artwork': 'Flat artwork', 'surface-face': 'Surface view',
+  'model-front': 'Model front', 'model-back': 'Model back', 'review-sheet': 'Review sheet',
+}
+
+function shortReference(value: string): string {
+  return stableHash(value, 2166136261)
 }
 
 /** Human evidence labels are descriptive only and cannot state approval/certification. */
 export function reviewSheetLabel(input: {
   viewId?: string
   areaToken?: string
+  ordinal?: number
+  kind?: ReviewViewKind
   side?: LabelSide
   carrier?: CarrierMode
   blueprintRevision: string
   inputRevision: string
 }): string {
-  const areaIdentity = [
-    input.areaToken ? `Area ${compactLabelToken(input.areaToken, 20)}` : undefined,
-    input.side,
-    input.carrier,
-  ].filter((value): value is string => Boolean(value)).join(' | ')
-  const identity = (areaIdentity || `View ${compactLabelToken(input.viewId ?? 'review')}`).slice(0, 72)
-  const evidence = [
-    `Design ${compactLabelToken(input.blueprintRevision)}`,
-    `Input ${compactLabelToken(input.inputRevision)}`,
-  ].join(' | ').slice(0, 72)
+  const ordinal = Number.isInteger(input.ordinal) && (input.ordinal ?? 0) > 0
+    ? String(input.ordinal).padStart(2, '0') : '00'
+  const identity = input.side && input.carrier
+    ? `Area ${ordinal} | ${SIDE_LABELS[input.side]} | ${CARRIER_LABELS[input.carrier]}`
+    : `View ${ordinal} | ${VIEW_LABELS[input.kind ?? 'review-sheet']}`
+  const evidence = `Blueprint ref ${shortReference(input.blueprintRevision)} | Input ref ${shortReference(input.inputRevision)}`
   return `${identity}\n${evidence}`
 }

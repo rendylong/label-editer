@@ -6,16 +6,22 @@ import { restoreImportedAreaRuntime } from '../app/projectImportRuntime'
 import { extractMeshAccessors, isMeshWorldMirrored, meshLocalFrontDirection, readGlb } from '../glb/analyze'
 import { makeDefaultRemap } from '../glb/uvRemap'
 import type { LabelAreaConfig, LabelLayer } from '../label/types'
-import { designFontReadinessKey } from '../label/exportReadiness'
+import { designAssetReadinessKey, isBakeAssetReadyForArea } from '../label/exportReadiness'
 import { validatePrintReadiness } from '../label/printReadiness'
 import { useLabelStore, useModelStore, useUiStore } from '../state/stores'
 import { createExportBundle, type BrowserArtifact } from './artifactExport'
 import { createAgentBridge, type AgentBridgeBootstrap } from './bridge'
-import { captureAgentPreview, captureAgentQcView, captureAgentReviewView, type AgentReviewCaptureSource } from './previewCapture'
+import {
+  captureAgentPreview,
+  captureAgentQcView,
+  captureAgentReviewView,
+  validatedReviewPngBytes,
+  type AgentReviewCaptureSource,
+} from './previewCapture'
 import { inspectModel } from './modelInspection'
 import { validateLabelSpec, type LabelSpecAreaV2, type LabelSpecV2 } from './labelSpecSchema'
 import { buildQcCapturePlan, craftChannelsForArea } from './qcCapturePlan'
-import { buildReviewCapturePlan } from './reviewCapturePlan'
+import { assertReviewEncodedByteBudget, buildReviewCapturePlan } from './reviewCapturePlan'
 import {
   computeAreaTargetsSha256,
   validateLayoutBlueprint,
@@ -315,7 +321,7 @@ async function waitForBakes(
       const bake = state.bakeMap[original.id]
       if (current && bake?.areaOwner === current
         && bake.color.width > 0 && bake.color.height > 0
-        && (bake.fontReadinessKey ?? '') === designFontReadinessKey(current)
+        && isBakeAssetReadyForArea(current, bake)
         && (!requiresPostActivationBake || bake !== previousBake)) break
       if (performance.now() - started > timeoutMs) {
         throw new Error(`Timed out waiting for ${requiresPostActivationBake ? 'post-activation ' : ''}label bake: ${original.name}`)
@@ -335,7 +341,7 @@ async function waitForBakes(
       const current = state.areas.find((area) => area.id === original.id)
       const bake = state.bakeMap[original.id]
       if (!current || bake?.areaOwner !== current || bake.color.width < 1 || bake.color.height < 1
-        || (bake.fontReadinessKey ?? '') !== designFontReadinessKey(current)) {
+        || !isBakeAssetReadyForArea(current, bake)) {
         ready = false
         break
       }
@@ -395,6 +401,7 @@ interface ReviewStateSnapshot {
     version: number
     areaOwner: LabelAreaConfig
     fontReadinessKey: string
+    assetReadinessKey: string
   }>
 }
 
@@ -407,12 +414,13 @@ function snapshotReviewState(): ReviewStateSnapshot {
     if (area.carrier === 'bare') continue
     const value = labels.bakeMap[area.id]
     if (!value || value.areaOwner !== area || value.color.width < 1 || value.color.height < 1
-      || (value.fontReadinessKey ?? '') !== designFontReadinessKey(area)) {
+      || !isBakeAssetReadyForArea(area, value)) {
       throw reviewNotReady('snapshot', `Review bake is not current: ${area.id}`, { areaId: area.id })
     }
     bakes.set(area.id, {
       value, color: value.color, width: value.color.width, height: value.color.height,
       version: value.version, areaOwner: area, fontReadinessKey: value.fontReadinessKey ?? '',
+      assetReadinessKey: value.assetReadinessKey ?? '',
     })
   }
   return {
@@ -436,7 +444,9 @@ function assertReviewStateUnchanged(snapshot: ReviewStateSnapshot, stage: string
     if (value !== expected.value || value.color !== expected.color
       || value.color.width !== expected.width || value.color.height !== expected.height
       || value.version !== expected.version || value.areaOwner !== expected.areaOwner
-      || (value.fontReadinessKey ?? '') !== expected.fontReadinessKey) {
+      || (value.fontReadinessKey ?? '') !== expected.fontReadinessKey
+      || (value.assetReadinessKey ?? '') !== expected.assetReadinessKey
+      || value.assetReadinessKey !== designAssetReadinessKey(expected.areaOwner)) {
       throw reviewNotReady(stage, `Review bake changed during capture (${stage})`, { areaId })
     }
   }
@@ -506,6 +516,7 @@ interface ReviewUiSnapshot {
   selectedLayerIds: string[]
   selectedPartId: string | null
   channelView: ReturnType<typeof useUiStore.getState>['channelView']
+  workspaceTab: ReturnType<typeof useUiStore.getState>['workspaceTab']
 }
 
 function snapshotReviewUi(): ReviewUiSnapshot {
@@ -517,6 +528,7 @@ function snapshotReviewUi(): ReviewUiSnapshot {
     selectedLayerIds: [...labels.selectedLayerIds],
     selectedPartId: useModelStore.getState().selectedPartId,
     channelView: useUiStore.getState().channelView,
+    workspaceTab: useUiStore.getState().workspaceTab,
   }
 }
 
@@ -528,7 +540,7 @@ function restoreReviewUi(snapshot: ReviewUiSnapshot): void {
     selectedLayerIds: [...snapshot.selectedLayerIds],
   })
   useModelStore.setState({ selectedPartId: snapshot.selectedPartId })
-  useUiStore.setState({ channelView: snapshot.channelView })
+  useUiStore.setState({ channelView: snapshot.channelView, workspaceTab: snapshot.workspaceTab })
 }
 
 function reviewPlanAreas(areas: readonly LabelAreaConfig[]): Array<{
@@ -544,8 +556,42 @@ function reviewPlanAreas(areas: readonly LabelAreaConfig[]): Array<{
   })
 }
 
-async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: BrowserArtifact): Promise<ArtifactDescriptor> {
-  const url = new URL(`${bootstrap.artifactUploadBase.replace(/\/$/, '')}/${encodeURIComponent(artifact.id)}`, window.location.origin)
+function assertReviewPlanUnchanged(
+  expected: readonly ReviewViewRequest[],
+  width: number,
+  height: number,
+  stage: string,
+): void {
+  const current = buildReviewCapturePlan({
+    areas: reviewPlanAreas(useLabelStore.getState().areas),
+    width,
+    height,
+  })
+  if (JSON.stringify(current) !== JSON.stringify(expected)) {
+    throw reviewNotReady(stage, `Review capture plan changed during capture (${stage})`)
+  }
+}
+
+function artifactLocator(bootstrap: AgentBridgeBootstrap, artifactId: string): URL {
+  const locator = new URL(`${bootstrap.artifactUploadBase.replace(/\/$/, '')}/${encodeURIComponent(artifactId)}`, window.location.origin)
+  locator.searchParams.set('token', bootstrap.token)
+  return locator
+}
+
+function artifactStageUrl(bootstrap: AgentBridgeBootstrap, batchId: string, suffix = ''): URL {
+  const url = new URL(`${bootstrap.artifactUploadBase.replace(/\/$/, '')}/stage/${encodeURIComponent(batchId)}${suffix}`, window.location.origin)
+  url.searchParams.set('token', bootstrap.token)
+  return url
+}
+
+async function uploadArtifact(
+  bootstrap: AgentBridgeBootstrap,
+  artifact: BrowserArtifact,
+  options: { batchId?: string } = {},
+): Promise<ArtifactDescriptor> {
+  const url = options.batchId
+    ? artifactStageUrl(bootstrap, options.batchId, `/${encodeURIComponent(artifact.id)}`)
+    : artifactLocator(bootstrap, artifact.id)
   url.searchParams.set('token', bootstrap.token)
   const response = await fetch(url, {
     method: 'PUT',
@@ -568,11 +614,11 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
   }
   if (!value || typeof value !== 'object') throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
   const descriptor = value as Partial<ArtifactDescriptor>
-  if (typeof descriptor.id !== 'string' || descriptor.id.length === 0
-    || typeof descriptor.fileName !== 'string' || descriptor.fileName.length === 0
-    || typeof descriptor.mimeType !== 'string' || descriptor.mimeType.length === 0
+  if (descriptor.id !== artifact.id
+    || descriptor.fileName !== artifact.fileName
+    || descriptor.mimeType !== artifact.mimeType
     || typeof descriptor.url !== 'string'
-    || !Number.isInteger(descriptor.byteLength) || (descriptor.byteLength ?? -1) < 0) {
+    || descriptor.byteLength !== artifact.bytes.byteLength) {
     throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
   }
   let locator: URL
@@ -580,10 +626,8 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
     const value = descriptor.url.trim()
     if (value.length === 0) throw new Error('Empty artifact locator')
     locator = new URL(value, window.location.origin)
-    if ((locator.protocol !== 'http:' && locator.protocol !== 'https:')
-      || locator.origin !== window.location.origin) {
-      throw new Error('Artifact locator must be same-origin HTTP(S)')
-    }
+    const expected = artifactLocator(bootstrap, artifact.id)
+    if (locator.href !== expected.href) throw new Error('Artifact locator does not bind the expected session artifact')
   } catch {
     throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
   }
@@ -599,6 +643,41 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
     areaId: artifact.areaId,
     channel: artifact.channel,
   }
+}
+
+let reviewBatchCounter = 0
+
+function nextReviewBatchId(): string {
+  reviewBatchCounter = (reviewBatchCounter + 1) % Number.MAX_SAFE_INTEGER
+  const nonce = new Uint8Array(12)
+  globalThis.crypto.getRandomValues(nonce)
+  const random = [...nonce].map((value) => value.toString(16).padStart(2, '0')).join('')
+  return `review-${reviewBatchCounter}-${random}`
+}
+
+async function commitArtifactBatch(
+  bootstrap: AgentBridgeBootstrap,
+  batchId: string,
+  artifactIds: readonly string[],
+): Promise<void> {
+  const response = await fetch(artifactStageUrl(bootstrap, batchId, '/commit'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ artifactIds }),
+  })
+  if (!response.ok) throw new Error(`Artifact batch commit failed (${response.status})`)
+  let value: unknown
+  try { value = await response.json() } catch { throw new Error('Invalid artifact batch commit response') }
+  const ids = value && typeof value === 'object' && Array.isArray((value as { artifactIds?: unknown }).artifactIds)
+    ? (value as { artifactIds: unknown[] }).artifactIds : undefined
+  if (!ids || ids.length !== artifactIds.length || ids.some((id, index) => id !== artifactIds[index])) {
+    throw new Error('Invalid artifact batch commit response')
+  }
+}
+
+async function purgeArtifactBatch(bootstrap: AgentBridgeBootstrap, batchId: string): Promise<void> {
+  const response = await fetch(artifactStageUrl(bootstrap, batchId), { method: 'DELETE' })
+  if (!response.ok) throw new Error(`Artifact batch purge failed (${response.status})`)
 }
 
 export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): LabelEditorAgentBridgeV1 {
@@ -761,6 +840,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           || typeof gateInput.designReviewManifestJson !== 'string') {
           throw reviewNotReady('design-gate', 'Exact design-gate evidence is required for production review')
         }
+        const gateEvidenceJson = JSON.stringify(gateInput)
         const gate = await verifyDesignGate({
           handoff: gateInput.handoff,
           blueprint: { read: () => reviewEvidenceBytes(gateInput.blueprintJson) },
@@ -783,8 +863,9 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           areas: reviewPlanAreas(useLabelStore.getState().areas), width, height,
         })
         assertReviewStateUnchanged(snapshot, 'after-plan')
-        const captures: AgentReviewCaptureSource[] = []
+        const captures: Array<AgentReviewCaptureSource & { bytes: Uint8Array }> = []
         const resultIds = new Set<string>()
+        let encodedByteTotal = 0
         for (const request of plan) {
           assertReviewStateUnchanged(snapshot, `before-capture:${request.id}`)
           let result: Awaited<ReturnType<typeof captureAgentReviewView>>
@@ -799,7 +880,9 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             throw reviewNotReady(`capture:${request.id}`, `Review capture failed: ${request.id}`)
           }
           assertReviewCaptureResult(request, result, resultIds)
-          captures.push({ request, result })
+          const bytes = await validatedReviewPngBytes(result.blob, request.width, request.height)
+          encodedByteTotal = assertReviewEncodedByteBudget(encodedByteTotal, bytes.byteLength)
+          captures.push({ request, result, bytes })
           assertReviewStateUnchanged(snapshot, `after-capture:${request.id}`)
         }
         if (captures.length !== plan.length) {
@@ -816,50 +899,88 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         if (JSON.stringify(finalGate) !== JSON.stringify(gate)) {
           throw reviewNotReady('final-design-gate', 'Review design gate changed during capture')
         }
+        const areaTargetsSha256 = await computeAreaTargetsSha256(document.value)
         assertReviewStateUnchanged(snapshot, 'before-upload')
+        assertReviewPlanUnchanged(plan, width, height, 'before-upload-plan')
         const finalValidation = reviewValidation()
         assertValidationReady(finalValidation)
         const finalFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
         assertFidelityReady(finalFidelity)
-        const views: ReviewViewResult[] = []
-        for (const source of captures) {
-          assertReviewStateUnchanged(snapshot, `before-upload:${source.request.id}`)
-          const bytes = await blobBytes(source.result.blob)
-          assertReviewStateUnchanged(snapshot, `after-encoding:${source.request.id}`)
-          let artifact: ArtifactDescriptor
-          try {
-            artifact = await uploadArtifact(bootstrap, {
-              id: source.request.id, fileName: `${source.request.id}.png`, mimeType: 'image/png',
-              bytes, width: source.request.width, height: source.request.height,
-              areaId: source.request.areaId,
+        const batchId = nextReviewBatchId()
+        let completed = false
+        try {
+          const views: ReviewViewResult[] = []
+          for (const source of captures) {
+            assertReviewStateUnchanged(snapshot, `before-upload:${source.request.id}`)
+            let artifact: ArtifactDescriptor
+            try {
+              artifact = await uploadArtifact(bootstrap, {
+                id: source.request.id, fileName: `${source.request.id}.png`, mimeType: 'image/png',
+                bytes: source.bytes, width: source.request.width, height: source.request.height,
+                areaId: source.request.areaId,
+              }, { batchId })
+            } catch (error) {
+              throw reviewNotReady(`upload:${source.request.id}`, `Review artifact upload failed: ${source.request.id}`, {
+                cause: error instanceof Error ? error.message : String(error),
+              })
+            }
+            assertReviewStateUnchanged(snapshot, `after-upload:${source.request.id}`)
+            views.push({
+              id: source.request.id, kind: source.request.kind,
+              ...(source.request.areaId ? { areaId: source.request.areaId } : {}),
+              ...(source.request.carrier ? { carrier: source.request.carrier } : {}),
+              artifact,
+              ...(source.result.camera ? { camera: source.result.camera } : {}),
             })
+          }
+          assertReviewStateUnchanged(snapshot, 'before-commit')
+          assertReviewPlanUnchanged(plan, width, height, 'before-commit-plan')
+          try {
+            await commitArtifactBatch(bootstrap, batchId, captures.map((source) => source.request.id))
           } catch (error) {
-            throw reviewNotReady(`upload:${source.request.id}`, `Review artifact upload failed: ${source.request.id}`, {
+            throw reviewNotReady('upload-commit', 'Review artifact batch commit failed', {
               cause: error instanceof Error ? error.message : String(error),
             })
           }
-          assertReviewStateUnchanged(snapshot, `after-upload:${source.request.id}`)
-          views.push({
-            id: source.request.id, kind: source.request.kind,
-            ...(source.request.areaId ? { areaId: source.request.areaId } : {}),
-            ...(source.request.carrier ? { carrier: source.request.carrier } : {}),
-            artifact,
-            ...(source.result.camera ? { camera: source.result.camera } : {}),
-          })
-        }
-        assertReviewStateUnchanged(snapshot, 'before-result')
-        return {
-          inputKind: 'label-project-v3',
-          inputRevision: gate.documentRevision,
-          inputSha256: gate.documentSha256,
-          blueprintRevision: gate.blueprintRevision,
-          blueprintSha256: gate.blueprintSha256,
-          designReviewManifestSha256: gate.designReviewManifestSha256,
-          modelFingerprint: snapshot.modelFingerprint,
-          areaTargetsSha256: await computeAreaTargetsSha256(document.value),
-          views,
-          validation: finalValidation,
-          fidelity: finalFidelity,
+
+          // Final no-await barrier. Every digest and network operation is complete;
+          // no mutable evidence input may change between these checks and return.
+          assertReviewStateUnchanged(snapshot, 'before-result')
+          assertReviewPlanUnchanged(plan, width, height, 'before-result-plan')
+          if (currentReviewDocument().json !== document.json) {
+            throw reviewNotReady('before-result-gate', 'Review design-gate input changed before result')
+          }
+          if (JSON.stringify(gateInput) !== gateEvidenceJson) {
+            throw reviewNotReady('before-result-gate', 'Review design-gate evidence changed before result')
+          }
+          const returnValidation = reviewValidation()
+          assertValidationReady(returnValidation)
+          const returnFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
+          assertFidelityReady(returnFidelity)
+          completed = true
+          return {
+            inputKind: 'label-project-v3',
+            inputRevision: gate.documentRevision,
+            inputSha256: gate.documentSha256,
+            blueprintRevision: gate.blueprintRevision,
+            blueprintSha256: gate.blueprintSha256,
+            designReviewManifestSha256: gate.designReviewManifestSha256,
+            modelFingerprint: snapshot.modelFingerprint,
+            areaTargetsSha256,
+            views,
+            validation: returnValidation,
+            fidelity: returnFidelity,
+          }
+        } finally {
+          if (!completed) {
+            try {
+              await purgeArtifactBatch(bootstrap, batchId)
+            } catch (error) {
+              throw reviewNotReady('upload-rollback', 'Review artifact batch could not be purged', {
+                cause: error instanceof Error ? error.message : String(error),
+              })
+            }
+          }
         }
       } finally {
         restoreReviewUi(uiSnapshot)

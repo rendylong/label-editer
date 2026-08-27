@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LabelLayer, UploadedFontRecord } from '../src/label/types'
-import { createFontReadinessRevisionGate } from '../src/label/designFontReadiness'
+import { createFontReadinessRevisionGate, fontLoadReportIsReady } from '../src/label/designFontReadiness'
 import { deriveDesignFontRequests, type FontLoadReport } from '../src/label/fontRuntime'
 
 function textLayer(id: string, fontFamily: string, fontWeight = 400): LabelLayer {
@@ -12,6 +12,12 @@ function textLayer(id: string, fontFamily: string, fontWeight = 400): LabelLayer
 }
 
 describe('design font readiness', () => {
+  it('does not treat a fallback/unavailable font report as successful readiness', () => {
+    expect(fontLoadReportIsReady({ ready: [], unavailable: ['Brand Face'] }, 1)).toBe(false)
+    expect(fontLoadReportIsReady({ ready: ['Brand Face'], unavailable: [] }, 1)).toBe(true)
+    expect(fontLoadReportIsReady({ ready: [], unavailable: [] }, 0)).toBe(true)
+  })
+
   it('derives and deduplicates only used catalog, uploaded, and system font requests', () => {
     const uploaded: UploadedFontRecord[] = [{ name: 'Brand Font', dataUrl: 'data:font/woff2;base64,AAAA' }]
     const requests = deriveDesignFontRequests([
