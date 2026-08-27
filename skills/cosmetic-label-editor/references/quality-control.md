@@ -1,6 +1,8 @@
 # Cosmetic Label Quality Control
 
-Use this rubric for every production QC run. `label-cli qc` produces evidence; the Agent authors the verdict. Deterministic validation remains a prerequisite, but it cannot decide visual acceptance.
+Use this rubric for every production QC run. Enter only with a current production approval or current-task continuous authorization and a freshly recomputed `verifyProductionGate`. `label-cli qc` produces evidence; the Agent authors the verdict. Deterministic validation remains a prerequisite, but it cannot decide visual acceptance.
+
+Clean review evidence is not diagnostic QC evidence. Keep diagnostic overlays and channel views out of approval images, and never treat user review as a substitute for the checks below.
 
 ## Evidence integrity and revision
 
@@ -109,10 +111,15 @@ Round 0 is mandatory. Any blocking `fail`—a visual defect, evidence gap, stale
 
 1. Run `project`, take its current revision as `baseRevision`, and publish a revision-safe `patch --force` transaction to the same working Spec.
 2. Capture the exact revision returned by the patch and wait until the live preview reports `ready` for that exact revision.
-3. Run `validate` on that Spec/model, then run `qc` into the next immutable round directory. Never overwrite an earlier round.
-4. Run `project` again and require `qc-manifest.json.input.revision` to exactly equal the current project revision.
-5. Inspect every required image again, rewrite the complete rubric verdict, and compare the result with the prior round.
+3. Run `validate` on that Spec/model, then classify the revision change. A design-intent change invalidates both approvals and returns to the first gate. A materially visible mapping change requires a new immutable production review and second-gate approval. Recompute `verifyProductionGate` after the required gate passes.
+4. Run `qc` into the next immutable round directory. Never overwrite an earlier round.
+5. Run `project` again and require `qc-manifest.json.input.revision` to exactly equal the current project revision.
+6. Inspect every required image again, rewrite the complete rubric verdict, and compare the result with the prior round.
 
 Stale evidence may require recapture rather than a content mutation. Use a revision-guarded empty patch when no content delta is needed; stale evidence still cannot bypass the gated sequence.
 
 Repeat the complete sequence for every blocking failure, with only rounds 1, 2, and 3 allowed after round 0. Recheck every changed area and every view affected by a target, mapping, material, craft, or shared asset change as part of the full image inspection. If round 3 still fails, preserve the live preview and all evidence, stop changing the Spec, and report the remaining blockers without apply/export or delivery confirmation.
+
+## Manufacturing boundary
+
+Digital review evidence and QC do not certify print press behavior, adhesive or durability performance, ink trapping, regulatory compliance, or manufacturing readiness. Preserve evidence-backed visual findings, but require supplier sampling and the appropriate manufacturing and regulatory checks.
