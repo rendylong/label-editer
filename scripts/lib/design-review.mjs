@@ -506,7 +506,7 @@ function assertCapture(entry, width, height, label) {
 export async function captureDesignReview({ html, blueprint, width, height, pxPerMm, resolveHtml, capturePlan }) {
   let browser
   try {
-    const plan = capturePlan ?? resolveCapturePlan(blueprint, width, height, pxPerMm)
+    const plan = resolveCapturePlan(blueprint, width, height, pxPerMm)
     browser = await chromium.launch({ headless: true })
     const context = await browser.newContext({ viewport: plan.review, deviceScaleFactor: 1, serviceWorkers: 'block' })
     const externalRequests = []

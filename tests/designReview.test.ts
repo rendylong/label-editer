@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { chromium } from 'playwright'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveLayerRenderTransform } from '../src/label/craft'
 import { traceValidatedSvgPath } from '../src/label/svgPath'
 import { validateVectorPath } from '../src/label/vectorPathValidation'
 // @ts-expect-error Pure Node ESM module is consumed directly by the internal renderer.
-import { buildDesignReviewManifest, renderBlueprintHtml, renderDesignReview, resolveCaptureDimensions } from '../scripts/lib/design-review.mjs'
+import { buildDesignReviewManifest, captureDesignReview, renderBlueprintHtml, renderDesignReview, resolveCaptureDimensions } from '../scripts/lib/design-review.mjs'
 // @ts-expect-error Pure Node ESM runner is consumed directly by tests.
 import { runDesignReviewCli } from '../scripts/render-design-review.mjs'
 
@@ -429,6 +430,25 @@ describe('blueprint-derived design review', () => {
       blueprintPath, outputDir: path.join(root, 'fractional-overflow'), width: 640, height: 480, pxPerMm: 1, capture,
     })).rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
     expect(capture).not.toHaveBeenCalled()
+  })
+
+  it('rejects a forged direct-call capture plan before launching Chromium', async () => {
+    const source = blueprint()
+    source.areas[0].artboard = { ...source.areas[0].artboard, widthMm: 1, heightMm: 4096.49 }
+    const forgedPlan = {
+      review: { width: 1, height: 1 },
+      areas: new Map(source.areas.map((area: any) => [area.id, { width: 1, height: 1, left: 0, top: 0 }])),
+    }
+    const launch = vi.spyOn(chromium, 'launch').mockRejectedValue(new Error('Chromium must not launch'))
+
+    try {
+      await expect(captureDesignReview({
+        html: '<html></html>', blueprint: source, width: 1, height: 1, pxPerMm: 1, capturePlan: forgedPlan,
+      })).rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
+      expect(launch).not.toHaveBeenCalled()
+    } finally {
+      launch.mockRestore()
+    }
   })
 
   it('canonicalizes boundary and near-boundary physical areas to one exact integer capture plan', async () => {
