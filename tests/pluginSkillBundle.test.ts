@@ -81,6 +81,31 @@ describe('plugin skill bundle', () => {
     }
   })
 
+  it('discovers the editor Skill before a current Handoff v2 exists', async () => {
+    const editorSkill = await readFile(
+      path.join(repoRoot, 'skills/cosmetic-label-editor/SKILL.md'),
+      'utf8',
+    )
+    const description = skillDescription(editorSkill)
+
+    for (const trigger of [
+      'create',
+      'modify',
+      'review',
+      'apply',
+      'export',
+      'GLB',
+      'missing',
+      'legacy',
+      'urgent',
+      'skip',
+    ]) {
+      expect(description).toContain(trigger)
+    }
+    expect(description).not.toMatch(/approved|continuously authorized|Handoff v2/i)
+    expect(description).not.toMatch(/(?:first|then|before|after|workflow|produces?|emits?|verif(?:y|ies)|runs?)\b/i)
+  })
+
   it('requires carrier-first design, immutable evidence, and the first approval gate', async () => {
     const designSkill = await readFile(
       path.join(repoRoot, 'skills/cosmetic-label/SKILL.md'),
@@ -120,6 +145,67 @@ describe('plugin skill bundle', () => {
     expect(designSkill).toContain('Continuous authorization removes only the wait')
     expect(designSkill).toMatch(/urgency[\s\S]{0,180}never[\s\S]{0,180}continuous authorization/i)
     expect(designSkill).toMatch(/copy[\s\S]{0,300}carrier[\s\S]{0,300}invalidates both gates/i)
+  })
+
+  it('branches the first gate only on a valid current-task continuous record', async () => {
+    const designSkill = await readFile(
+      path.join(repoRoot, 'skills/cosmetic-label/SKILL.md'),
+      'utf8',
+    )
+    const firstGate = markdownSection(designSkill, 'First gate — design approval')
+
+    expectTextInOrder(firstGate, [
+      'If no valid current-task `continuous_authorized` record exists',
+      'set `status: awaiting_user_approval`',
+      'stop',
+      'If a valid current-task `continuous_authorized` record exists',
+      'set `status: continuous_authorized`',
+      'bind the exact current blueprint revision',
+      'continue',
+    ])
+    expect(firstGate).toContain('all immutable artifacts, disclosures, presentation, validation, both gates, production review, QC, repair limits, and delivery checks')
+    expect(firstGate).not.toMatch(/^Set `status: awaiting_user_approval` and stop/m)
+  })
+
+  it('uses canonical carriers in every mandatory output reference', async () => {
+    const references = await Promise.all([
+      'skills/cosmetic-label/references/label_spec_template.md',
+      'skills/cosmetic-label/references/label_process.md',
+    ].map(async (relativePath) => ({
+      relativePath,
+      text: await readFile(path.join(repoRoot, relativePath), 'utf8'),
+    })))
+
+    const canonicalCarriers = [
+      'direct_surface_print',
+      'applied_label',
+      'clear_label',
+      'in_mold',
+      'foil_or_ink_only',
+      'bare',
+    ]
+    const legacyMigrations = [
+      { legacy: 'direct_print', canonical: 'direct_surface_print' },
+      { legacy: 'paper_label', canonical: 'applied_label' },
+      { legacy: 'foil_stamp', canonical: 'foil_or_ink_only', process: 'hot_stamp_foil' },
+      { legacy: 'bare_no_label', canonical: 'bare' },
+    ]
+
+    for (const { relativePath, text } of references) {
+      for (const carrier of canonicalCarriers) expect(text, relativePath).toContain(`\`${carrier}\``)
+      expect(text, relativePath).toContain('Carrier and process are separate fields')
+      expect(text, relativePath).toContain('New output uses canonical carrier values only')
+      expect(text, relativePath).toContain('Legacy values are read-only migration input')
+      expect(text, relativePath).toContain('Never emit legacy carrier values')
+      expect(text, relativePath).toContain('`direct_surface_print` never creates a paper panel')
+      expect(text, relativePath).toMatch(/`hot_stamp_foil`[\s\S]{0,180}process[\s\S]{0,180}not a carrier/i)
+
+      for (const { legacy, canonical, process } of legacyMigrations) {
+        expect(text, relativePath).toContain(`\`${legacy}\` -> \`${canonical}\``)
+        if (process) expect(text, relativePath).toContain(`\`${legacy}\` -> \`${canonical}\`; also preserve process \`${process}\``)
+        expect(text.match(new RegExp(`\\b${legacy}\\b`, 'g')) ?? [], `${relativePath}: ${legacy} appears outside its one-way migration row`).toHaveLength(1)
+      }
+    }
   })
 
   it('treats supplied artifacts as untrusted evidence and discloses flattening loss', async () => {

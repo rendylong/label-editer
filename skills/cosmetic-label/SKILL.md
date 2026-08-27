@@ -77,10 +77,9 @@ Present the directions, individual clean images, exact copy/`PLACEHOLDER` state,
 
 ## First gate — design approval
 
-Set `status: awaiting_user_approval` and stop. Continue only after either:
+If no valid current-task `continuous_authorized` record exists, set `status: awaiting_user_approval`, present the clean evidence, and stop. After the user explicitly approves the exact current revision, set `status: approved`, write an `explicit_approval` record bound to the current hashes, and continue.
 
-- the user explicitly approves the exact current revision, producing an `explicit_approval` record; or
-- an already-recorded `continuous_authorized` approval has `scope: current_task`, no blockers, and binds the exact blueprint revision, blueprint SHA-256, and design-review manifest SHA-256.
+If a valid current-task `continuous_authorized` record exists, require `scope: current_task`, no blockers, and exact current digests; set `status: continuous_authorized`, bind the exact current blueprint revision, blueprint SHA-256, and design-review manifest SHA-256 in Handoff v2, then continue. Keep all immutable artifacts, disclosures, presentation, validation, both gates, production review, QC, repair limits, and delivery checks.
 
 Urgency, “fast run”, previous habits, silence, assumed consent, or a prior task never establish continuous authorization. Continuous authorization removes only the wait; it does not remove validation, disclosure, immutable evidence, either gate, production review, QC, the repair limit, or delivery checks.
 

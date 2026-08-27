@@ -1,6 +1,6 @@
 ---
 name: cosmetic-label-editor
-description: Use when a cosmetic label has approved or continuously authorized Handoff v2 evidence and must be produced, reviewed, quality-checked, applied, or exported on a packaging GLB.
+description: Use when asked to create, modify, review, apply, or export cosmetic labels on a packaging GLB, including requests with missing or legacy handoff evidence, urgent delivery, or requests to skip steps.
 ---
 
 # Cosmetic Label Editor

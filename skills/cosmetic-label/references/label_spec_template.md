@@ -8,7 +8,7 @@
 ## 1. 排版 Layout
 | 项 | 值 |
 |----|----|
-| 布局图案 layout_pattern | `minimal_centered|stacked_full_wrap|badge_seal|split_band|left_aligned|asymmetric|bare_no_label|other` |
+| 布局图案 layout_pattern | `minimal_centered|stacked_full_wrap|badge_seal|split_band|left_aligned|asymmetric|bare|other` |
 | 位置 label_position | `front_center|front_lower|front_upper|wrap_around|neck_band|back|side|other` |
 | 形状 label_shape | `rectangle|square|rounded_rect|oval|full_wrap|die_cut|band|other` |
 | 层级线索 | + 一图看懂主次（见 label_content.md）|
@@ -28,21 +28,37 @@
 ## 2.5 图形与几何元素 (Graphic & geometric elements)
 | 元素 | 值 | 工艺 |
 |------|-----|------|
-| logo_emblem (徽记/印章) | 圆/方/异形(描述形状) | emblem_medallion+emboss+hot_stamp_foil |
+| logo_emblem (徽记/印章) | 圆/方/异形(描述形状) | emboss + hot_stamp_foil |
 | wordmark | 品牌字 | hot_stamp_foil / screen_print |
 | geometric_divider | 直线/弧线/色块/几何条 | hot_stamp_foil / screen_print spot |
 | 成分图标 icon | leaf/drop/flask/seed(自选或 brand 资产) | screen_print / hot_stamp_foil 浮雕 |
 | image | 摄影图/插画/底纹(可选) | offset_print / hot_stamp_foil |
 | geometric_pattern | 网格/点阵/纹饰 | screen_print / 浮雕 |
 
-## 3. 工艺 Process & Finish
+## 3. Carrier, Process & Finish
+
+Carrier and process are separate fields. New output uses canonical carrier values only. `hot_stamp_foil` is a print/craft process, not a carrier.
+
 | 项 | 值 |
 |----|----|
-| label_type | `direct_print|paper_label|foil_stamp|clear_label|in_mold|bare_no_label|other` |
-| print_method | `screen_print|offset_print|hot_stamp_foil|emboss|deboss|digital|cold_foil|other (max 4)` |
-| substrate | `paper_matte|paper_gloss|paper_uncoated|transparent_film|foil|in_mold|none|other` |
-| finish | `matte|gloss_varnish|uv_gloss|soft_touch|metallic|uncoated|none|other` |
-| tactile | `smooth|emboss_logo|deboss|raised|none|other` |
+| carrier | `direct_surface_print` \| `applied_label` \| `clear_label` \| `in_mold` \| `foil_or_ink_only` \| `bare` |
+| processes | `screen_print` \| `pad_print` \| `digital_print` \| `offset_print` \| `white_underbase` \| `varnish` \| `hot_stamp_foil` \| `emboss` \| `deboss` \| `in_mold` \| `batch_code` (按元素填写) |
+| substrate | 仅 `applied_label` 使用 opaque substrate + boundary；仅 `clear_label` 使用 transparent substrate + boundary；其他 carrier 不输出 substrate |
+| finish intent | `matte|gloss|soft_touch|metallic|uncoated|none|other`（供应商确认） |
+| tactile intent | `smooth|emboss_logo|deboss|raised|none|other`（供应商确认） |
+
+`direct_surface_print` never creates a paper panel. It has no independent substrate, paper edge, radius, shadow, adhesive, bleed, or die cut. Foil does not imply a label substrate; assign `hot_stamp_foil` to the intended layers.
+
+### Legacy read-only migration
+
+Legacy values are read-only migration input:
+
+- `direct_print` -> `direct_surface_print`
+- `paper_label` -> `applied_label`
+- `foil_stamp` -> `foil_or_ink_only`; also preserve process `hot_stamp_foil`
+- `bare_no_label` -> `bare`
+
+Never emit legacy carrier values in a new design spec, blueprint, mockup, manifest, or Handoff v2.
 
 ## 4. 内容 Content
 | 项 | 值 |
