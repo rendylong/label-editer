@@ -6,6 +6,7 @@ import { failure, success } from './envelope.mjs'
 import { publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
 import { inspectProject, patchLabelSpec, revisionOf } from './project-control.mjs'
 import { buildQcManifest, parseQcCameraConfig, qcArtifactRelativePath, validateQcManifest } from './qc-output.mjs'
+import { buildReviewManifest, validateReviewDirectory, validateReviewManifest } from './review-output.mjs'
 import { startLivePreview } from './live-preview.mjs'
 
 const schemaPath = path.resolve(import.meta.dirname, '../../src/agent/label-spec-v2.schema.json')
@@ -182,6 +183,117 @@ function exactQcArtifacts(evidence, received) {
     }
     return artifact
   })
+}
+
+function staleReviewError(message) {
+  const error = new Error(message)
+  error.code = 'STALE_APPROVAL'
+  return error
+}
+
+function reviewUsageError(message) {
+  const error = new Error(message)
+  error.code = 'INVALID_USAGE'
+  return error
+}
+
+function pathContains(parent, target) {
+  const relative = path.relative(parent, target)
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+}
+
+function decodeReviewJson(bytes, label) {
+  let text
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return { text, value: JSON.parse(text) }
+  } catch (error) {
+    const invalid = reviewUsageError(`${label} must be valid UTF-8 JSON`)
+    invalid.cause = error
+    throw invalid
+  }
+}
+
+async function resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, force) {
+  const [input, model] = await Promise.all([
+    resolveAllowedPath(rootPolicy, inputPath),
+    resolveAllowedPath(rootPolicy, glbPath),
+  ])
+  let handoff
+  try {
+    handoff = await resolveAllowedPath(rootPolicy, path.join(path.dirname(input), 'editor-handoff.json'))
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    const missing = new Error('Review requires adjacent approved editor-handoff.json evidence')
+    missing.code = 'APPROVAL_REQUIRED'
+    throw missing
+  }
+  const handoffEvidence = decodeReviewJson(new Uint8Array(await readFile(handoff)), 'editor-handoff.json')
+  const blueprintSource = handoffEvidence.value?.source?.blueprint
+  const designManifestSource = handoffEvidence.value?.source?.design_review_manifest
+  if (typeof blueprintSource !== 'string' || !blueprintSource
+    || typeof designManifestSource !== 'string' || !designManifestSource) {
+    throw reviewUsageError('editor-handoff.json requires source.blueprint and source.design_review_manifest')
+  }
+  let blueprint
+  let designReviewManifest
+  try {
+    [blueprint, designReviewManifest] = await Promise.all([
+      resolveAllowedPath(rootPolicy, path.resolve(path.dirname(handoff), blueprintSource)),
+      resolveAllowedPath(rootPolicy, path.resolve(path.dirname(handoff), designManifestSource)),
+    ])
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+    const missing = new Error('Review approved blueprint or design-review manifest is unavailable')
+    missing.code = 'APPROVAL_REQUIRED'
+    throw missing
+  }
+  const output = await resolveAllowedOutputPath(rootPolicy, outputDir)
+  for (const protectedPath of [input, model, handoff, blueprint, designReviewManifest]) {
+    if (pathContains(output, protectedPath)) {
+      throw reviewUsageError(`Review output must not alias or contain a protected source: ${protectedPath}`)
+    }
+  }
+  if (!force && await stat(output).then(() => true, (error) => error?.code === 'ENOENT' ? false : Promise.reject(error))) {
+    const error = new Error(`Output already exists: ${output}`)
+    error.code = 'OUTPUT_CONFLICT'
+    throw error
+  }
+  return { input, model, handoff, blueprint, designReviewManifest, output }
+}
+
+async function readReviewSnapshot(sources, { parse = false } = {}) {
+  const names = ['input', 'model', 'handoff', 'blueprint', 'designReviewManifest']
+  const values = await Promise.all(names.map((name) => readFile(sources[name])))
+  const hashes = Object.fromEntries(values.map((bytes, index) => [names[index], sha256Bytes(bytes)]))
+  if (!parse) return { hashes }
+  const input = decodeReviewJson(new Uint8Array(values[0]), 'Review input')
+  const handoff = decodeReviewJson(new Uint8Array(values[2]), 'editor-handoff.json')
+  const blueprint = decodeReviewJson(new Uint8Array(values[3]), 'layout blueprint')
+  const designReviewManifest = decodeReviewJson(new Uint8Array(values[4]), 'design review manifest')
+  return {
+    hashes,
+    input,
+    handoff,
+    blueprint,
+    designReviewManifest,
+  }
+}
+
+function assertReviewSnapshot(expected, actual, boundary) {
+  if (JSON.stringify(expected.hashes) !== JSON.stringify(actual.hashes)) {
+    throw staleReviewError(`Review production-gate source changed at ${boundary}`)
+  }
+}
+
+function reviewAreas(document) {
+  const areas = document.areas.map((area) => {
+    if (typeof area.id !== 'string' || !area.id || typeof area.side !== 'string' || typeof area.carrier !== 'string') {
+      throw reviewUsageError(`Review area requires normalized id, side, and carrier: ${String(area?.id)}`)
+    }
+    return { id: area.id, side: area.side, carrier: area.carrier }
+  })
+  return areas
 }
 
 function patchLockPath(targetPath) {
@@ -552,6 +664,150 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
         })
       } catch (error) {
         return failure('render_label_qc', error, { sessionId: session?.id })
+      }
+    },
+
+    async review({
+      inputPath,
+      glbPath,
+      outputDir,
+      width = 1600,
+      height = 1600,
+      force = false,
+    }) {
+      let session
+      try {
+        if (!Number.isInteger(width) || width < 1 || width > 4096
+          || !Number.isInteger(height) || height < 1 || height > 4096) {
+          throw reviewUsageError('Review dimensions must be integers from 1 to 4096')
+        }
+        progress('Resolving approved review evidence')
+        const sources = await resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, force)
+        const initial = await readReviewSnapshot(sources, { parse: true })
+        const project = inspectProject(initial.input.value)
+        const areas = reviewAreas(initial.input.value)
+        const inputBinding = {
+          kind: project.kind,
+          revision: project.revision,
+          sha256: initial.hashes.input,
+        }
+        const designGate = {
+          handoff: initial.handoff.value,
+          blueprintJson: initial.blueprint.text,
+          designReviewManifestJson: initial.designReviewManifest.text,
+        }
+
+        session = await runtime.createSession({ glbPath: sources.model })
+        progress('Loading model in browser renderer')
+        const inspected = await loadSessionModel(runtime, session)
+        const modelFingerprint = inspected.data.fingerprint
+        if (typeof modelFingerprint !== 'string' || !modelFingerprint) {
+          throw reviewUsageError('Browser model inspection did not return a fingerprint')
+        }
+        progress('Applying label design for clean review')
+        const applied = isLabelProjectValue(initial.input.value)
+          ? unwrapBridge(await runtime.callBridge(session, 'applyProject', { project: initial.input.value }))
+          : unwrapBridge(await runtime.callBridge(session, 'applySpec', {
+              spec: initial.input.value,
+              assetUrls: await addSpecAssets(runtime, session, initial.input.value, path.dirname(sources.input)),
+            }))
+        unwrapBridge(await runtime.callBridge(session, 'waitForReady', { timeoutMs: 60_000 }))
+        progress('Capturing clean production-review evidence')
+        const rendered = unwrapBridge(await runtime.callBridge(session, 'renderReviewEvidence', {
+          width,
+          height,
+          designGate,
+        }))
+        const evidence = rendered.data
+        if (evidence.blueprintRevision !== initial.blueprint.value?.revision
+          || evidence.blueprintSha256 !== initial.hashes.blueprint
+          || evidence.designReviewManifestSha256 !== initial.hashes.designReviewManifest
+          || evidence.modelFingerprint !== modelFingerprint
+          || evidence.validation?.ready !== true || evidence.fidelity?.pass !== true) {
+          throw staleReviewError('Captured review evidence does not bind the current approved production gate')
+        }
+        if (runtime.browserErrors(session.id).length > 0) {
+          const error = new Error(`Browser reported errors: ${runtime.browserErrors(session.id).join('; ')}`)
+          error.code = 'BROWSER_NOT_READY'
+          throw error
+        }
+
+        progress('Sealing provisional review evidence')
+        await runtime.confirmReviewEvidence(session.id, evidence.confirmation)
+        const receipts = new Map(evidence.confirmation.artifacts.map((artifact) => [artifact.resultId, artifact]))
+        if (receipts.size !== evidence.views.length || evidence.confirmation.artifacts.length !== evidence.views.length) {
+          throw reviewUsageError('Review confirmation does not exactly match the captured views')
+        }
+        progress('Reading exact sealed review bytes')
+        const artifacts = []
+        for (const view of evidence.views) {
+          const receipt = receipts.get(view.id)
+          if (!receipt) throw reviewUsageError(`Review confirmation is missing view: ${view.id}`)
+          artifacts.push(await runtime.readReviewArtifact(session.id, view, receipt))
+        }
+        if (runtime.browserErrors(session.id).length > 0) {
+          const error = new Error(`Browser reported errors: ${runtime.browserErrors(session.id).join('; ')}`)
+          error.code = 'BROWSER_NOT_READY'
+          throw error
+        }
+
+        assertReviewSnapshot(initial, await readReviewSnapshot(sources), 'before-staging')
+        const manifest = validateReviewManifest(buildReviewManifest({
+          createdAt: new Date().toISOString(),
+          input: inputBinding,
+          areas,
+          evidence,
+          artifacts,
+        }), { input: inputBinding, areas, evidence, artifacts })
+        const paths = new Map(manifest.artifacts.map((artifact) => [artifact.id, artifact.path]))
+        const publicationArtifacts = artifacts.map((artifact) => ({
+          ...artifact,
+          relativePath: paths.get(artifact.id),
+        }))
+        const manifestBytes = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`)
+        publicationArtifacts.push({
+          id: 'review-manifest',
+          fileName: 'review-manifest.json',
+          relativePath: 'review-manifest.json',
+          mimeType: 'application/json',
+          byteLength: manifestBytes.byteLength,
+          sha256: sha256Bytes(manifestBytes),
+          bytes: manifestBytes,
+        })
+        const validationContext = { input: inputBinding, areas, evidence, artifacts }
+        const publishedOutput = await runtime.publishArtifacts(
+          session.id,
+          sources.output,
+          publicationArtifacts,
+          force,
+          {
+            rejectConcurrent: true,
+            validateStaged: (directory) => validateReviewDirectory(directory, validationContext),
+            beforeCommit: async (directory) => {
+              assertReviewSnapshot(initial, await readReviewSnapshot(sources), 'before-final-rename')
+              await validateReviewDirectory(directory, validationContext)
+            },
+            validatePublished: (directory) => validateReviewDirectory(directory, validationContext),
+          },
+        )
+        const manifestPath = path.join(publishedOutput, 'review-manifest.json')
+        return success('render_label_review', {
+          outputDir: publishedOutput,
+          manifestPath,
+          revision: inputBinding.revision,
+          modelFingerprint,
+          artifacts: manifest.artifacts.map((artifact) => ({
+            ...artifact,
+            path: path.join(publishedOutput, artifact.path),
+          })),
+          validation: evidence.validation,
+          fidelity: evidence.fidelity,
+        }, {
+          sessionId: session.id,
+          warnings: [...inspected.warnings, ...applied.warnings, ...rendered.warnings],
+        })
+      } catch (error) {
+        return failure('render_label_review', error, { sessionId: session?.id })
       }
     },
 

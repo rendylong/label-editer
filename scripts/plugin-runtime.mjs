@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { createBrowserSessionManager } from './lib/browser-session.mjs'
 import { normalizeGlb } from './lib/codec.mjs'
@@ -18,6 +19,45 @@ export async function createPluginRuntime(options = {}) {
   const sessions = new Map()
   const cleanups = new Set()
   let closed = false
+  const fetcher = options.fetcher ?? fetch
+
+  function runtimeError(message, code = 'BROWSER_NOT_READY') {
+    const error = new Error(message)
+    error.code = code
+    return error
+  }
+
+  function exactKeys(value, expected) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    const actual = Object.keys(value).sort()
+    const keys = [...expected].sort()
+    return actual.length === keys.length && actual.every((key, index) => key === keys[index])
+  }
+
+  function validateReviewConfirmation(sessionId, confirmation) {
+    if (!exactKeys(confirmation, ['sessionId', 'batchId', 'leaseToken', 'generation', 'expiresAt', 'artifacts'])
+      || confirmation.sessionId !== sessionId
+      || typeof confirmation.batchId !== 'string' || !confirmation.batchId
+      || typeof confirmation.leaseToken !== 'string' || !confirmation.leaseToken
+      || !Number.isSafeInteger(confirmation.generation) || confirmation.generation < 1
+      || !Number.isSafeInteger(confirmation.expiresAt) || confirmation.expiresAt < 1
+      || !Array.isArray(confirmation.artifacts) || confirmation.artifacts.length === 0) {
+      throw runtimeError('Invalid review evidence confirmation', 'INVALID_USAGE')
+    }
+    for (const artifact of confirmation.artifacts) {
+      if (!exactKeys(artifact, ['id', 'resultId', 'sha256', 'byteLength', 'mimeType', 'width', 'height'])
+        || typeof artifact.id !== 'string' || !artifact.id
+        || typeof artifact.resultId !== 'string' || !artifact.resultId
+        || !/^[a-f0-9]{64}$/.test(artifact.sha256)
+        || !Number.isSafeInteger(artifact.byteLength) || artifact.byteLength < 1
+        || artifact.mimeType !== 'image/png'
+        || !Number.isSafeInteger(artifact.width) || artifact.width < 1 || artifact.width > 4096
+        || !Number.isSafeInteger(artifact.height) || artifact.height < 1 || artifact.height > 4096) {
+        throw runtimeError('Invalid review evidence confirmation artifact', 'INVALID_USAGE')
+      }
+    }
+    return confirmation
+  }
 
   async function createSession({ glbPath, glbBytes, modelName } = {}) {
     const rawBytes = glbBytes ?? (glbPath ? await readFile(await resolveAllowedPath(allowedRoots, glbPath)) : undefined)
@@ -79,10 +119,89 @@ export async function createPluginRuntime(options = {}) {
       cleanups.add(cleanup)
       return () => cleanups.delete(cleanup)
     },
-    async publishArtifacts(sessionId, outputDir, artifacts, force = false) {
+    async confirmReviewEvidence(sessionId, input) {
+      const session = getSession(sessionId)
+      const confirmation = validateReviewConfirmation(sessionId, input)
+      const url = `${server.origin}/session/${encodeURIComponent(session.id)}/artifact/stage/${encodeURIComponent(confirmation.batchId)}/confirm?token=${encodeURIComponent(session.token)}`
+      const body = JSON.stringify({
+        leaseToken: confirmation.leaseToken,
+        generation: confirmation.generation,
+        expiresAt: confirmation.expiresAt,
+        artifacts: confirmation.artifacts,
+      })
+      let lastError
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await fetcher(url, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-artifact-lease-token': confirmation.leaseToken,
+              'x-artifact-generation': String(confirmation.generation),
+            },
+            body,
+            redirect: 'error',
+          })
+          if (!response.ok || response.redirected || response.status !== 200 || response.url !== url
+            || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
+            throw runtimeError(`Review evidence seal failed (${response.status})`)
+          }
+          const value = await response.json()
+          if (!exactKeys(value, ['ok', 'batchId', 'generation', 'sealed', 'artifactIds', 'resultIds'])
+            || value.ok !== true || value.batchId !== confirmation.batchId
+            || value.generation !== confirmation.generation || value.sealed !== true
+            || JSON.stringify(value.artifactIds) !== JSON.stringify(confirmation.artifacts.map((artifact) => artifact.id))
+            || JSON.stringify(value.resultIds) !== JSON.stringify(confirmation.artifacts.map((artifact) => artifact.resultId))) {
+            throw runtimeError('Invalid review evidence seal response')
+          }
+          return value
+        } catch (error) {
+          lastError = error
+        }
+      }
+      throw lastError
+    },
+    async readReviewArtifact(sessionId, view, receipt) {
+      const session = getSession(sessionId)
+      if (!view || !receipt || view.id !== receipt.resultId || view.artifact?.id !== view.id
+        || view.artifact?.mimeType !== receipt.mimeType || view.artifact?.byteLength !== receipt.byteLength
+        || view.artifact?.sha256 !== receipt.sha256 || view.artifact?.width !== receipt.width
+        || view.artifact?.height !== receipt.height) {
+        throw runtimeError('Review view does not match its sealed receipt', 'INVALID_USAGE')
+      }
+      const expectedUrl = `${server.origin}/session/${encodeURIComponent(session.id)}/artifact/${encodeURIComponent(receipt.id)}?token=${encodeURIComponent(session.token)}`
+      if (view.artifact.url !== expectedUrl) throw runtimeError('Review artifact locator does not match its sealed receipt', 'INVALID_USAGE')
+      const response = await fetcher(expectedUrl, { method: 'GET', cache: 'no-store', redirect: 'error' })
+      if (!response.ok || response.redirected || response.status !== 200 || response.url !== expectedUrl
+        || response.headers.get('content-type') !== receipt.mimeType
+        || response.headers.get('content-length') !== String(receipt.byteLength)
+        || response.headers.get('x-artifact-id') !== receipt.id
+        || response.headers.get('x-artifact-result-id') !== receipt.resultId
+        || response.headers.get('x-artifact-sha256') !== receipt.sha256) {
+        throw runtimeError(`Invalid sealed review artifact response: ${view.id}`)
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      const digest = createHash('sha256').update(bytes).digest('hex')
+      if (bytes.byteLength !== receipt.byteLength || digest !== receipt.sha256) {
+        throw runtimeError(`Sealed review artifact bytes changed: ${view.id}`)
+      }
+      return {
+        id: receipt.resultId,
+        resultId: receipt.resultId,
+        internalId: receipt.id,
+        fileName: view.artifact.fileName,
+        mimeType: receipt.mimeType,
+        byteLength: receipt.byteLength,
+        sha256: receipt.sha256,
+        width: receipt.width,
+        height: receipt.height,
+        bytes,
+      }
+    },
+    async publishArtifacts(sessionId, outputDir, artifacts, force = false, publicationOptions = {}) {
       getSession(sessionId)
       const output = await resolveAllowedOutputPath(allowedRoots, outputDir)
-      await publishAtomically(output, artifacts, { force, sessionId })
+      await publishAtomically(output, artifacts, { ...publicationOptions, force, sessionId })
       return output
     },
     async publishArtifactFile(sessionId, outputPath, artifact, force = false) {

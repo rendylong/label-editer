@@ -236,6 +236,7 @@ export interface ReviewManifestV1 {
   blueprint: { revision: string; sha256: string }
   designReviewManifest: { sha256: string }
   model: { fingerprint: string }
+  areaTargetsSha256: string
   areas: ManifestArea[]
   artifacts: Array<{
     id: string
@@ -1120,6 +1121,10 @@ export async function verifyProductionGate(input: ProductionGateInput): Promise<
     return workflowError('STALE_APPROVAL', 'Production review model binding is stale', 'reviewManifest.model')
   }
   assertReviewManifestAreas(manifest, document.value)
+  const targetDigest = await areaTargetsSha256(document.value)
+  if (manifest.areaTargetsSha256 !== targetDigest) {
+    return workflowError('STALE_APPROVAL', 'Production review area-target digest is stale', 'reviewManifest.areaTargetsSha256')
+  }
 
   const approval = validateWorkflowApprovalRecord(input.approvalRecord, 'production')
   if (approval.mode === 'continuous_authorized' && design.status !== 'continuous_authorized') {
@@ -1128,7 +1133,6 @@ export async function verifyProductionGate(input: ProductionGateInput): Promise<
   if (!approval.spec_revision || !approval.model_fingerprint || !approval.area_targets_sha256) {
     return workflowError('APPROVAL_REQUIRED', 'Production approval record is missing current production bindings', 'approval.productionBindings')
   }
-  const targetDigest = await areaTargetsSha256(document.value)
   if (approval.design_revision !== blueprint.value.revision) {
     return workflowError('STALE_APPROVAL', 'Production approval design revision is stale', 'approval.designRevision')
   }

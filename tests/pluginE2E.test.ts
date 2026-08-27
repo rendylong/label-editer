@@ -117,8 +117,18 @@ describe('GLB label plugin E2E', () => {
       ? path.resolve(requestedEvidenceDir)
       : await mkdtemp(path.join(tmpdir(), 'glb-label-task9-review-'))
     await mkdir(evidenceDir, { recursive: true })
+    let droppedSealResponse = false
     const runtime = await createPluginRuntime({
       allowedRoots: [process.cwd(), path.dirname(modelPath), evidenceDir],
+      fetcher: async (input: string | URL | Request, init?: RequestInit) => {
+        const response = await fetch(input, init)
+        if (!droppedSealResponse && String(input).includes('/confirm?')) {
+          droppedSealResponse = true
+          await response.arrayBuffer()
+          throw new Error('injected lost seal response')
+        }
+        return response
+      },
     })
     try {
       const session = await runtime.createSession({ glbPath: modelPath })
@@ -145,30 +155,101 @@ describe('GLB label plugin E2E', () => {
         },
       })
       if (!rendered.ok) throw new Error(rendered.error.message)
-      const repeated = await runtime.callBridge(session, 'renderReviewEvidence', fixture.request)
-      expect(repeated, JSON.stringify(repeated)).toMatchObject({
-        ok: true,
-        data: { views: rendered.data.views.map((entry: { id: string }) => ({ id: entry.id, artifact: { id: entry.id } })) },
+      await expect(runtime.confirmReviewEvidence(session.id, rendered.data.confirmation)).resolves.toMatchObject({
+        ok: true, sealed: true, resultIds: rendered.data.views.map((entry: { id: string }) => entry.id),
       })
-      if (!repeated.ok) throw new Error(repeated.error.message)
-      expect(repeated.data.views.map((entry: { artifact: { url: string } }) => entry.artifact.url))
-        .not.toEqual(rendered.data.views.map((entry: { artifact: { url: string } }) => entry.artifact.url))
+      expect(droppedSealResponse).toBe(true)
       const stored = runtime.getArtifacts(session.id)
       expect(stored.map((artifact: { id: string }) => artifact.id)).toEqual(
         rendered.data.views.map((entry: { artifact: { id: string } }) => entry.artifact.id),
       )
-      for (const artifact of stored) {
+      const receipts = new Map(rendered.data.confirmation.artifacts.map((artifact: { resultId: string }) => [artifact.resultId, artifact]))
+      for (const view of rendered.data.views) {
+        const artifact = await runtime.readReviewArtifact(session.id, view, receipts.get(view.id))
         const bytes = Buffer.from(artifact.bytes)
         expect(bytes.subarray(0, 8), artifact.id)
           .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
         expect(hash(bytes), artifact.id).toBe(artifact.sha256)
         await writeFile(path.join(evidenceDir, `${artifact.id}.png`), bytes)
       }
-      await writeFile(path.join(evidenceDir, 'review-evidence.json'), `${JSON.stringify(rendered.data, null, 2)}\n`)
+      await writeFile(path.join(evidenceDir, 'review-evidence.json'), `${JSON.stringify({
+        ...rendered.data,
+        confirmation: { ...rendered.data.confirmation, leaseToken: '[redacted]' },
+      }, null, 2)}\n`)
       expect(runtime.browserErrors(session.id)).toEqual([])
     } finally {
       await runtime.close()
     }
+  }, 180_000)
+
+  it.runIf(runRealE2E)('publishes a realistic 1600 square review through the additive CLI and returns conflict exit 9', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'glb-label-task10-review-'))
+    const fixture = reviewEvidenceFixture()
+    const inputPath = path.join(root, 'working.json')
+    const outputDir = path.join(root, 'review-rev-001')
+    const resolvedOutputDir = path.join(await realpath(root), 'review-rev-001')
+    const inputBytes = `${JSON.stringify(fixture.spec)}\n`
+    await writeFile(inputPath, inputBytes)
+    await writeFile(path.join(root, 'editor-handoff.json'), `${JSON.stringify(fixture.request.designGate.handoff)}\n`)
+    await writeFile(path.join(root, 'layout-blueprint.json'), fixture.request.designGate.blueprintJson)
+    await writeFile(path.join(root, 'design-review-manifest.json'), fixture.request.designGate.designReviewManifestJson)
+    const runtimeOptions = { allowedRoots: [process.cwd(), path.dirname(modelPath), root] }
+    const stdout: string[] = []
+    const stderr: string[] = []
+
+    const code = await runCli([
+      'review', inputPath, '--glb', modelPath, '--output', outputDir,
+      '--width', '1600', '--height', '1600', '--json',
+    ], {
+      runtimeOptions,
+      stdout: (value: string) => stdout.push(value),
+      stderr: (value: string) => stderr.push(value),
+    })
+    expect(code, [...stderr, ...stdout].join('\n')).toBe(0)
+    expect(stdout).toHaveLength(1)
+    const envelope = JSON.parse(stdout[0])
+    expect(envelope).toMatchObject({
+      ok: true, operation: 'render_label_review',
+      data: { outputDir: resolvedOutputDir, manifestPath: path.join(resolvedOutputDir, 'review-manifest.json') },
+    })
+    expect(stdout[0]).not.toMatch(/leaseToken|token=/)
+
+    const manifestBytes = await readFile(path.join(outputDir, 'review-manifest.json'))
+    const manifest = JSON.parse(manifestBytes.toString('utf8'))
+    expect(manifest).toMatchObject({
+      version: 1,
+      input: { kind: 'label-spec-v2', revision: revisionOf(fixture.spec), sha256: hash(new TextEncoder().encode(inputBytes)) },
+      blueprint: { revision: 'task9-browser-review-v1' },
+      artifacts: [
+        { id: 'label-front', path: 'label-front.png', width: 1600, height: 1600 },
+        { id: 'surface-front', path: 'surface-front.png', width: 1600, height: 1600 },
+        { id: 'model-front', path: 'model-front.png', width: 1600, height: 1600 },
+        { id: 'model-back', path: 'model-back.png', width: 1600, height: 1600 },
+        { id: 'review-sheet', path: 'review-sheet.png', width: 1600, height: 1600 },
+      ],
+    })
+    expect((await readdir(outputDir)).sort()).toEqual([
+      'label-front.png', 'model-back.png', 'model-front.png', 'review-manifest.json',
+      'review-sheet.png', 'surface-front.png',
+    ])
+    for (const artifact of manifest.artifacts) {
+      const bytes = await readFile(path.join(outputDir, artifact.path))
+      expect(bytes.subarray(0, 8), artifact.path).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+      expect(bytes.readUInt32BE(16), artifact.path).toBe(artifact.width)
+      expect(bytes.readUInt32BE(20), artifact.path).toBe(artifact.height)
+      expect(hash(bytes), artifact.path).toBe(artifact.sha256)
+    }
+
+    const conflictStdout: string[] = []
+    const conflictCode = await runCli([
+      'review', inputPath, '--glb', modelPath, '--output', outputDir, '--json',
+    ], {
+      runtimeOptions,
+      stdout: (value: string) => conflictStdout.push(value),
+      stderr: () => undefined,
+    })
+    expect(conflictCode).toBe(9)
+    expect(JSON.parse(conflictStdout[0])).toMatchObject({ ok: false, error: { code: 'OUTPUT_CONFLICT' } })
   }, 180_000)
 
   it.runIf(runRealE2E)('applies a front/back design and atomically publishes verified artifacts', async () => {

@@ -198,6 +198,7 @@ function productionManifest(input: {
     },
     blueprint: { revision: 'design-rev-001', sha256: input.blueprintSha256 },
     designReviewManifest: { sha256: input.designManifestSha256 }, model: { fingerprint: input.modelFingerprint },
+    areaTargetsSha256: areaTargetsSha256(input.document),
     areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
     artifacts: [{
       id: 'label-front', path: 'label-front.png', sha256: '5'.repeat(64), mimeType: 'image/png',
@@ -686,6 +687,17 @@ describe('production approval gate', () => {
   ])('fails closed for a stale %s', async (_label, mutate, field) => {
     const state = workflowFixture(); mutate(state)
     await expectWorkflowCode(verifyProductionGate(productionGateInput(state)), 'STALE_APPROVAL', field)
+  })
+
+  it('fails closed when the production manifest target digest is stale', async () => {
+    const state = workflowFixture()
+    state.productionManifest.areaTargetsSha256 = '0'.repeat(64)
+    state.productionApproval.review_manifest_sha256 = sha256(JSON.stringify(state.productionManifest))
+    await expectWorkflowCode(
+      verifyProductionGate(productionGateInput(state)),
+      'STALE_APPROVAL',
+      'reviewManifest.areaTargetsSha256',
+    )
   })
 
   it('recomputes mutable current input between QC and apply/export without caching', async () => {

@@ -243,7 +243,7 @@ async function claimAndRecoverPublication(fileSystem, lockPath, outputDir, token
   }
 }
 
-async function acquirePublicationLock(fileSystem, lockPath, outputDir, token) {
+async function acquirePublicationLock(fileSystem, lockPath, outputDir, token, { rejectConcurrent = false } = {}) {
   const started = Date.now()
   const lockTemporary = `${lockPath}.${process.pid}.${token}.tmp`
   const ownerPath = path.join(lockTemporary, 'owner.json')
@@ -280,6 +280,11 @@ async function acquirePublicationLock(fileSystem, lockPath, outputDir, token) {
       if (stale) {
         if (await claimAndRecoverPublication(fileSystem, lockPath, outputDir, token)) continue
       }
+      if (rejectConcurrent) {
+        const error = new Error(`Output publication is already in progress: ${outputDir}`)
+        error.code = 'OUTPUT_CONFLICT'
+        throw error
+      }
       if (Date.now() - started >= PUBLICATION_LOCK_WAIT_MS) {
         const error = new Error(`Output publication is already in progress: ${outputDir}`)
         error.code = 'OUTPUT_CONFLICT'
@@ -299,6 +304,10 @@ export async function publishAtomically(outputDir, artifacts, {
   force = false,
   sessionId = randomBytes(8).toString('hex'),
   fileSystem: fileSystemOverrides,
+  rejectConcurrent = false,
+  validateStaged,
+  beforeCommit,
+  validatePublished,
 } = {}) {
   const parent = path.dirname(outputDir)
   const base = path.basename(outputDir)
@@ -310,7 +319,7 @@ export async function publishAtomically(outputDir, artifacts, {
   const journalTemporary = path.join(lockPath, `transaction.${token}.tmp`)
   const markerPath = path.join(lockPath, 'staged.complete')
   const fileSystem = { ...DEFAULT_PUBLICATION_FILE_SYSTEM, ...fileSystemOverrides }
-  await acquirePublicationLock(fileSystem, lockPath, outputDir, token)
+  await acquirePublicationLock(fileSystem, lockPath, outputDir, token, { rejectConcurrent })
   let primaryError
   let journalInstalled = false
   try {
@@ -342,9 +351,28 @@ export async function publishAtomically(outputDir, artifacts, {
       await fileSystem.mkdir(path.dirname(artifactPath), { recursive: true })
       await writeDurableExclusive(fileSystem, artifactPath, artifact.bytes)
     }
+    if (validateStaged) await validateStaged(temporary)
     await writeDurableExclusive(fileSystem, markerPath, new Uint8Array())
+    if (beforeCommit) await beforeCommit(temporary)
     if (exists) await renameAndSync(fileSystem, outputDir, backup)
     await renameAndSync(fileSystem, temporary, outputDir)
+    if (validatePublished) {
+      try {
+        await validatePublished(outputDir)
+      } catch (error) {
+        if (exists) {
+          await renameAndSync(fileSystem, outputDir, temporary)
+          await renameAndSync(fileSystem, backup, outputDir)
+          await removeAndSync(fileSystem, temporary, { recursive: true, force: true })
+        } else {
+          await removeAndSync(fileSystem, outputDir, { recursive: true, force: true })
+        }
+        await removeAndSync(fileSystem, markerPath, { force: true })
+        await removeAndSync(fileSystem, journalPath, { force: true })
+        journalInstalled = false
+        throw error
+      }
+    }
     if (exists) await removeAndSync(fileSystem, backup, { recursive: true, force: true })
     await removeAndSync(fileSystem, markerPath, { force: true })
     await removeAndSync(fileSystem, journalPath, { force: true })

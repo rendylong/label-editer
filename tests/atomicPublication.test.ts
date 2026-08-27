@@ -229,6 +229,46 @@ describe('atomic directory publication recovery', () => {
     expect(await readdir(root)).toEqual(['round-0'])
   })
 
+  it('rejects a concurrent review publisher immediately instead of queueing behind the active transaction', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    let release!: () => void
+    let entered!: () => void
+    const blocked = new Promise<void>((resolve) => { release = resolve })
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const first = publishAtomically(output, artifacts('first'), {
+      sessionId: 'first',
+      rejectConcurrent: true,
+      beforeCommit: async () => { entered(); await blocked },
+    })
+    await started
+    await expect(publishAtomically(output, artifacts('second'), {
+      sessionId: 'second', rejectConcurrent: true,
+    })).rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
+    release()
+    await first
+    expect(await readRound(output)).toBe('first')
+    expect(await readdir(root)).toEqual(['review'])
+  })
+
+  it('restores the prior complete output when post-publication readback fails under force', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    await publishAtomically(output, artifacts('old'), { sessionId: 'old' })
+
+    await expect(publishAtomically(output, artifacts('new'), {
+      force: true,
+      sessionId: 'new',
+      validateStaged: async (directory: string) => {
+        expect(await readRound(directory)).toBe('new')
+      },
+      validatePublished: async () => { throw new Error('injected published readback failure') },
+    })).rejects.toThrow(/injected published readback failure/)
+
+    expect(await readRound(output)).toBe('old')
+    expect(await readdir(root)).toEqual(['review'])
+  })
+
   it('exposes exactly one complete design review under concurrent non-forced publication', async () => {
     const root = await temporaryDirectory()
     const outputDir = path.join(root, 'review')

@@ -213,6 +213,73 @@ afterEach(async () => {
 })
 
 describe('label-cli protocol', () => {
+  it('routes the additive review command with exact defaults and bounded dimensions', async () => {
+    const calls: unknown[] = []
+    const code = await runCli([
+      'review', 'working.json', '--glb', 'bottle.glb', '--output', 'review/rev-001',
+      '--width', '1600', '--height', '1200', '--force', '--json',
+    ], {
+      operations: {
+        review: async (input: unknown) => {
+          calls.push(input)
+          return { ok: true, operation: 'render_label_review', data: {}, warnings: [] }
+        },
+      },
+      stdout: () => undefined,
+      stderr: () => undefined,
+    })
+
+    expect(code).toBe(0)
+    expect(calls).toEqual([{
+      inputPath: 'working.json', glbPath: 'bottle.glb', outputDir: 'review/rev-001',
+      width: 1600, height: 1200, force: true,
+    }])
+  })
+
+  it('uses 1600 square review defaults and writes exactly one JSON envelope', async () => {
+    const stdout: string[] = []
+    let received: any
+    const code = await runCli(['review', 'working.json', '--glb', 'bottle.glb', '--output', 'review', '--json'], {
+      operations: {
+        review: async (input: unknown) => {
+          received = input
+          return { ok: true, operation: 'render_label_review', data: {}, warnings: [] }
+        },
+      },
+      stdout: (value: string) => stdout.push(value),
+      stderr: () => undefined,
+    })
+    expect(code).toBe(0)
+    expect(received).toMatchObject({ width: 1600, height: 1600, force: false })
+    expect(stdout).toHaveLength(1)
+    expect(JSON.parse(stdout[0])).toMatchObject({ ok: true, operation: 'render_label_review' })
+  })
+
+  it.each(['0', '4097', '2.5', 'nan', 'Infinity'])('rejects unsafe review width %s', async (width) => {
+    const stdout: string[] = []
+    expect(await runCli([
+      'review', 'working.json', '--glb', 'bottle.glb', '--output', 'review', '--width', width, '--json',
+    ], { operations: {}, stdout: (value: string) => stdout.push(value), stderr: () => undefined })).toBe(2)
+    expect(JSON.parse(stdout[0])).toMatchObject({ ok: false, error: { code: 'INVALID_USAGE' } })
+  })
+
+  it.each([
+    ['missing input', ['review', '--glb', 'bottle.glb', '--output', 'review']],
+    ['missing GLB', ['review', 'working.json', '--output', 'review']],
+    ['missing output', ['review', 'working.json', '--glb', 'bottle.glb']],
+    ['QC preset', ['review', 'working.json', '--glb', 'bottle.glb', '--output', 'review', '--preset', 'qc-standard']],
+    ['QC camera config', ['review', 'working.json', '--glb', 'bottle.glb', '--output', 'review', '--camera-config', 'cameras.json']],
+    ['preview view', ['review', 'working.json', '--glb', 'bottle.glb', '--output', 'review', '--view', '3d']],
+    ['duplicate width', ['review', 'working.json', '--glb', 'bottle.glb', '--output', 'review', '--width', '100', '--width', '200']],
+    ['unknown flag', ['review', 'working.json', '--glb', 'bottle.glb', '--output', 'review', '--wat']],
+  ] as const)('rejects invalid review grammar: %s', async (_label, argv) => {
+    const stdout: string[] = []
+    expect(await runCli([...argv, '--json'], {
+      operations: {}, stdout: (value: string) => stdout.push(value), stderr: () => undefined,
+    })).toBe(2)
+    expect(JSON.parse(stdout[0])).toMatchObject({ ok: false, error: { code: 'INVALID_USAGE' } })
+  })
+
   it('routes qc dimensions, preset, camera config, force, and output', async () => {
     const calls: unknown[] = []
     const code = await runCli([

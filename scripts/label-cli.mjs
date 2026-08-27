@@ -17,6 +17,7 @@ function parseArgv(argv) {
   if (!command) throw usageError('A command is required')
   const positional = []
   const options = {}
+  const seenOptions = new Set()
   for (let index = 1; index < argv.length; index++) {
     const value = argv[index]
     if (!value.startsWith('--')) {
@@ -24,6 +25,8 @@ function parseArgv(argv) {
       continue
     }
     const name = value.slice(2)
+    if (seenOptions.has(name) && command === 'review') throw usageError(`Duplicate option: --${name}`)
+    seenOptions.add(name)
     if (booleanOptions.has(name)) {
       options[name] = true
       continue
@@ -36,8 +39,8 @@ function parseArgv(argv) {
   return { command, positional, options }
 }
 
-function parseDimension(value, name) {
-  if (value === undefined) return 1440
+function parseDimension(value, name, defaultValue = 1440) {
+  if (value === undefined) return defaultValue
   if (!/^\d+$/.test(value)) throw usageError(`--${name} must be an integer from 1 to 4096`)
   const number = Number(value)
   if (number < 1 || number > 4096) throw usageError(`--${name} must be an integer from 1 to 4096`)
@@ -50,10 +53,20 @@ function assertShape(parsed) {
     if (positional.length !== 0) throw usageError('schema accepts no positional arguments')
     return
   }
-  if (!['inspect', 'project', 'patch', 'validate', 'apply', 'preview', 'qc', 'live', 'export', 'open'].includes(command)) {
+  if (!['inspect', 'project', 'patch', 'validate', 'apply', 'preview', 'qc', 'review', 'live', 'export', 'open'].includes(command)) {
     throw usageError(`Unknown command: ${command}`)
   }
   if (positional.length !== 1) throw usageError(`${command} requires exactly one input path`)
+  if (command === 'review') {
+    const allowed = new Set(['glb', 'output', 'width', 'height', 'force', 'json'])
+    const unsupported = Object.keys(options).find((name) => !allowed.has(name))
+    if (unsupported) throw usageError(`--${unsupported} is not supported by review`)
+    if (!options.glb) throw usageError('review requires --glb <model.glb>')
+    if (!options.output) throw usageError('review requires --output <directory>')
+    options.width = parseDimension(options.width, 'width', 1600)
+    options.height = parseDimension(options.height, 'height', 1600)
+    return
+  }
   if (command !== 'qc' && options['camera-config']) {
     throw usageError('--camera-config is only supported by qc')
   }
@@ -106,6 +119,14 @@ async function invoke(parsed, operations) {
     outputDir: options.output,
     preset: options.preset ?? 'qc-standard',
     cameraConfigPath: options['camera-config'],
+    width: options.width,
+    height: options.height,
+    force: options.force === true,
+  })
+  if (parsed.command === 'review') return operations.review({
+    inputPath: input,
+    glbPath: options.glb,
+    outputDir: options.output,
     width: options.width,
     height: options.height,
     force: options.force === true,

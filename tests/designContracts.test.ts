@@ -134,6 +134,7 @@ function productionReviewManifest(): ReviewManifestV1 {
     blueprint: { revision: 'rev-001', sha256: SHA_B },
     designReviewManifest: { sha256: SHA_A },
     model: { fingerprint: 'model-fingerprint-001' },
+    areaTargetsSha256: SHA_B,
     areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
     artifacts: [{
       id: 'label-front', path: 'label-front.png', sha256: SHA_B,
