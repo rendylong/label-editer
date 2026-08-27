@@ -70,6 +70,19 @@ describe('project font stack contract', () => {
     const project = projectWithLayers([{ ...makeTextLayer(), fontStack }])
     expect(() => parseLabelProject(project)).toThrow(/fontStack/i)
   })
+
+  it.each([
+    ['normalized uploaded id', 'Brand Font', 'brand-font'],
+    ['path-derived uploaded id and CSS family', 'assets/brand font.woff2', 'assets/brand-font.woff2'],
+  ])('rejects a duplicate %s before runtime font lookup becomes order-dependent', (_label, first, second) => {
+    const project = projectWithLayers([makeTextLayer()])
+    ;(project.areas as Array<Record<string, unknown>>)[0].fonts = [
+      { name: first, dataUrl: 'data:font/woff2;base64,RklSU1Q=' },
+      { name: second, dataUrl: 'data:font/woff2;base64,U0VDT05E' },
+    ]
+
+    expect(() => parseLabelProject(project)).toThrow(/fonts\[1\]\.name.*runtime identity/i)
+  })
 })
 
 function makeImageLayer(): Record<string, unknown> {

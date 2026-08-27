@@ -8,6 +8,7 @@ import { parseLabelProject } from '../app/projectSchema'
 import { canonicalFontStack } from '../label/fontStack'
 import { uploadedFontRecord } from '../label/fontRuntime'
 import { normalizeShapeLayer } from '../label/shapeGeometry'
+import { compareLayerZOrder } from '../label/layerOrder'
 import type { CraftEffect, LabelAreaConfig, LabelLayer } from '../label/types'
 
 type UnknownRecord = Record<string, unknown>
@@ -105,6 +106,45 @@ function commonLayerProjection(layer: LabelLayer, area: LabelAreaConfig): Unknow
   }
 }
 
+/**
+ * Physical metadata is approval authority, but Project v3 stores and renders
+ * the raw editable layer on first load. Keep the resolver result as a second,
+ * explicit projection instead of replacing those actual runtime inputs.
+ */
+function resolvedPhysicalProjection(rawLayer: LabelLayer, area: LabelAreaConfig): UnknownRecord {
+  const layer = resolvePhysicalLayer(area, structuredClone(rawLayer))
+  const common = {
+    x: layer.x / area.canvas.width,
+    y: layer.y / area.canvas.height,
+    anchor: layer.designMetrics?.anchor ?? 'top_left',
+  }
+  if (layer.kind === 'text') {
+    return {
+      ...common,
+      width: (layer.width ?? 0) / area.canvas.width,
+      fontSize: layer.fontSize / area.canvas.height,
+      letterSpacing: layer.letterSpacing / area.canvas.height,
+      lineHeight: layer.lineHeight,
+    }
+  }
+  if (layer.kind === 'image') {
+    return {
+      ...common,
+      width: layer.width / area.canvas.width,
+      height: layer.height / area.canvas.height,
+    }
+  }
+  const shape = normalizeShapeLayer(layer)
+  const scalar = Math.sqrt(area.canvas.width * area.canvas.height)
+  return {
+    ...common,
+    width: shape.width / area.canvas.width,
+    height: shape.height / area.canvas.height,
+    strokeWidth: shape.strokeWidth / scalar,
+    cornerRadius: shape.cornerRadius / scalar,
+  }
+}
+
 function normalizedGeometry(layer: Extract<LabelLayer, { kind: 'shape' }>, area: LabelAreaConfig): UnknownRecord {
   const normalized = normalizeShapeLayer(layer).geometry!
   const scalar = Math.sqrt(area.canvas.width * area.canvas.height)
@@ -126,8 +166,9 @@ function normalizedGeometry(layer: Extract<LabelLayer, { kind: 'shape' }>, area:
 }
 
 function layerProjection(rawLayer: LabelLayer, area: LabelAreaConfig, blueprint?: LayoutBlueprintV1): UnknownRecord {
-  const layer = resolvePhysicalLayer(area, structuredClone(rawLayer))
+  const layer = structuredClone(rawLayer)
   const common = commonLayerProjection(layer, area)
+  const resolvedPhysical = resolvedPhysicalProjection(rawLayer, area)
   if (layer.kind === 'text') {
     return {
       ...common,
@@ -146,6 +187,7 @@ function layerProjection(rawLayer: LabelLayer, area: LabelAreaConfig, blueprint?
       language: layer.language ?? null,
       wrapPolicy: layer.designMetrics?.wrapPolicy ?? 'word',
       maxLines: layer.designMetrics?.maxLines ?? null,
+      resolvedPhysical,
     }
   }
   if (layer.kind === 'image') {
@@ -159,6 +201,7 @@ function layerProjection(rawLayer: LabelLayer, area: LabelAreaConfig, blueprint?
       sourceAspect: fit === 'stretch' ? null : sourceWidth / sourceHeight,
       width: layer.width / area.canvas.width,
       height: layer.height / area.canvas.height,
+      resolvedPhysical,
     }
   }
   const shape = normalizeShapeLayer(layer)
@@ -176,6 +219,7 @@ function layerProjection(rawLayer: LabelLayer, area: LabelAreaConfig, blueprint?
     pathData: shape.pathData ?? null,
     pathViewBox: cloneOrNull(shape.pathViewBox),
     fillRule: shape.fillRule ?? 'nonzero',
+    resolvedPhysical,
   }
 }
 
@@ -194,9 +238,8 @@ function assertUniqueRenderIdentity(area: LabelAreaConfig): void {
 
 function areaProjection(area: LabelAreaConfig, blueprint?: LayoutBlueprintV1): UnknownRecord {
   assertUniqueRenderIdentity(area)
-  const ordered = area.layers.map((layer, index) => ({ layer, index }))
-    .sort((left, right) => left.layer.zIndex - right.layer.zIndex || left.index - right.index)
-  const layers = ordered.map(({ layer }) => layerProjection(layer, area, blueprint))
+  const ordered = area.layers.slice().sort(compareLayerZOrder)
+  const layers = ordered.map((layer) => layerProjection(layer, area, blueprint))
   const fontAssets = layers.flatMap((layer) => layer.kind === 'text' ? [layer.font] : [])
     .filter((value, index, values) => values.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(value)) === index)
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))

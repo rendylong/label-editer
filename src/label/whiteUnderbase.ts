@@ -2,6 +2,7 @@ import { uploadedFontRecord } from './fontRuntime'
 import { resolveCarrierSurface } from './paper'
 import type { LabelAreaConfig, LabelLayer } from './types'
 import { canonicalFontStack } from './fontStack'
+import { compareLayerZOrder } from './layerOrder'
 
 const MAX_SCAN_PIXELS_PER_CHUNK = 256 * 1024
 
@@ -132,11 +133,10 @@ export function whiteUnderbaseIntentKey(area: WhiteUnderbaseIntentArea): string 
     : area.layers
         .filter(isRenderableWhiteUnderbaseLayer)
         .map(contributorProjection)
-        .sort((left, right) => {
-          const leftLayer = left as { zIndex: number; id: string }
-          const rightLayer = right as { zIndex: number; id: string }
-          return leftLayer.zIndex - rightLayer.zIndex || compareText(leftLayer.id, rightLayer.id)
-        })
+        .sort((left, right) => compareLayerZOrder(
+          left as { zIndex: number; id: string },
+          right as { zIndex: number; id: string },
+        ))
   const usedFonts = new Map<string, { name: string; dataUrl: string }>()
   for (const layer of area.layers) {
     if (layer.kind !== 'text' || !isRenderableWhiteUnderbaseLayer(layer)) continue

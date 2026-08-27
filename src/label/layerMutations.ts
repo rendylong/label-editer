@@ -1,4 +1,5 @@
 import type { LabelLayer } from './types'
+import { compareLayerZOrder, compareLayerZOrderDescending } from './layerOrder'
 
 export function patchUnlockedLayer(layers: LabelLayer[], id: string, patch: Partial<LabelLayer>): LabelLayer[] {
   const target = layers.find((layer) => layer.id === id)
@@ -26,7 +27,7 @@ export function duplicateUnlockedLayer(layers: LabelLayer[], id: string, copyId:
 }
 
 export function moveUnlockedLayer(layers: LabelLayer[], id: string, direction: -1 | 1): LabelLayer[] {
-  const sorted = [...layers].sort((a, b) => a.zIndex - b.zIndex)
+  const sorted = [...layers].sort(compareLayerZOrder)
   const index = sorted.findIndex((layer) => layer.id === id)
   const nextIndex = index + direction
   if (index < 0 || nextIndex < 0 || nextIndex >= sorted.length) return layers
@@ -48,7 +49,7 @@ export function reorderUnlockedLayer(
   placement: LayerDropPlacement,
 ): LabelLayer[] {
   if (draggedId === targetId) return layers
-  const visual = [...layers].sort((a, b) => b.zIndex - a.zIndex)
+  const visual = [...layers].sort(compareLayerZOrderDescending)
   const sourceIndex = visual.findIndex((layer) => layer.id === draggedId)
   const targetIndex = visual.findIndex((layer) => layer.id === targetId)
   if (sourceIndex < 0 || targetIndex < 0 || visual[sourceIndex].locked || visual[targetIndex].locked) return layers

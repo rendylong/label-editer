@@ -8,6 +8,7 @@ import { Stage, Layer, Group, Text as KText, Image as KImage, Rect as KRect, Ell
 import type Konva from 'konva'
 import { useLabelStore, useUiStore } from '../state/stores'
 import type { LabelLayer, TextLayer, ImageLayer } from './types'
+import { compareLayerZOrder } from './layerOrder'
 import { fontCssFor } from './fonts'
 import { resolvedTextDirection } from './textDirection'
 import { useDesignFontReadiness } from './designFontReadiness'
@@ -442,7 +443,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     )
   }
 
-  const sorted = [...layers].sort((a, b) => a.zIndex - b.zIndex)
+  const sorted = [...layers].sort(compareLayerZOrder)
   const carrierSurface = resolveCarrierSurface(config)
   const substrateBoundary = carrierSurface.boundary
   const filmDiagnostic = clearFilmDiagnosticSpec(config)

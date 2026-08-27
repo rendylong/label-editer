@@ -72,7 +72,7 @@ describe('blueprint compiler', () => {
 
     expect(front.carrier).toBe('direct_surface_print')
     expect(front.layers.map((layer) => layer.id)).toEqual([
-      'brand', 'product-cn', 'product-en', 'tagline', 'category',
+      'brand', 'category', 'product-cn', 'product-en', 'tagline',
       'volume', 'copper-frame', 'contour-left', 'contour-right',
     ])
     expect(front.layers.find((layer) => layer.id === 'product-cn')).toMatchObject({
@@ -88,6 +88,26 @@ describe('blueprint compiler', () => {
       processes: [{ process: 'hot_stamp_foil', spotName: 'COPPER' }],
       craft: [{ type: 'foil', params: { foilColor: 'custom', foilCustomColor: '#A5663B', foilSpotName: 'COPPER' } }],
     })
+  })
+
+  it('compiles reversed blueprint arrays by the design-review zIndex order', () => {
+    const blueprint = laviraBlueprint()
+    const [brand, product] = blueprint.areas[0].layers
+    brand.zIndex = 7
+    product.zIndex = -3
+    blueprint.areas[0].layers = [brand, product]
+
+    expect(compileBlueprintToSpecAreas(blueprint)[0].layers.map((layer) => layer.id)).toEqual(['product-cn', 'brand'])
+  })
+
+  it('compiles equal-z blueprint layers by the design-review id tie-breaker', () => {
+    const blueprint = laviraBlueprint()
+    const [brand, product] = blueprint.areas[0].layers
+    brand.zIndex = 4
+    product.zIndex = 4
+    blueprint.areas[0].layers = [product, brand]
+
+    expect(compileBlueprintToSpecAreas(blueprint)[0].layers.map((layer) => layer.id)).toEqual(['brand', 'product-cn'])
   })
 
   it('resolves blueprint asset ids into an applicable image spec', () => {

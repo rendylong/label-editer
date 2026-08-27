@@ -10,6 +10,7 @@ import { WorkflowGateError } from './workflowGateError'
 import type { LabelSpecAreaV2, LabelSpecLayerV2 } from './labelSpecSchema'
 import type { CraftEffect, ShapeKind } from '../label/types'
 import { canonicalFontStack } from '../label/fontStack'
+import { compareLayerZOrder } from '../label/layerOrder'
 
 export interface ResolvedModelAreaShell {
   blueprintAreaId?: string
@@ -266,7 +267,7 @@ export function compileBlueprintArea(
     ...(area.substrate ? { substrate: structuredClone(area.substrate) } : {}),
     ...(area.placementPolicy ? { placementPolicy: area.placementPolicy } : {}),
     blueprintAreaId: area.id,
-    layers: area.layers.map((layer) => compileLayer(blueprint, area, layer)),
+    layers: area.layers.slice().sort(compareLayerZOrder).map((layer) => compileLayer(blueprint, area, layer)),
   }
 }
 

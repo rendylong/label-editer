@@ -3,6 +3,7 @@ import type { ImageLayer, LabelAreaConfig, LabelLayer, ShapeLayer } from '../lab
 import { CRAFT_LABELS } from '../label/types'
 import { bytesToDataUrl } from '../label/imageSource'
 import { moveUnlockedLayer, removeUnlockedLayer, reorderUnlockedLayer, type LayerDropPlacement } from '../label/layerMutations'
+import { compareLayerZOrderDescending } from '../label/layerOrder'
 import { nextLayerSelection } from '../label/selection'
 import { flashToast, useLabelStore, useUiStore } from '../state/stores'
 import { ElementLibrary } from './ElementLibrary'
@@ -233,7 +234,7 @@ export function LabelWorkspace(): React.JSX.Element {
   }, [pendingDeleteAreaId, restoreDeleteFocus])
 
   const pendingDeleteArea = pendingDeleteAreaId ? areas.find((candidate) => candidate.id === pendingDeleteAreaId) ?? null : null
-  const sortedLayers = area ? [...area.layers].sort((a, b) => b.zIndex - a.zIndex) : []
+  const sortedLayers = area ? [...area.layers].sort(compareLayerZOrderDescending) : []
   const selectedLayers = area?.layers.filter((layer) => selectedLayerIds.includes(layer.id)) ?? []
   const editableSelectionCount = selectedLayers.filter((layer) => !layer.locked).length
   const primaryLayer = selectedLayers[0] ?? null

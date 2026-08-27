@@ -352,6 +352,27 @@ describe('design approval gate', () => {
     await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
   })
 
+  it('matches design-review id ordering for equal-z Project layers regardless of stored array order', async () => {
+    const state = workflowFixture()
+    const project = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    project.areas[0].layers.forEach((layer: any) => { layer.zIndex = 0 })
+    project.areas[0].layers.reverse()
+    state.document = project
+
+    await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true, status: 'approved' })
+  })
+
+  it('rejects a Project z-order change defined by the design-review comparator', async () => {
+    const state = workflowFixture()
+    const project = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    const firstZ = project.areas[0].layers[0].zIndex
+    project.areas[0].layers[0].zIndex = project.areas[0].layers[1].zIndex
+    project.areas[0].layers[1].zIndex = firstZ
+    state.document = project
+
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
   it('binds every runtime shape input not superseded by physical metrics', async () => {
     const sourceBlueprint = blueprint()
     sourceBlueprint.areas[0].layers.push({
@@ -381,7 +402,7 @@ describe('design approval gate', () => {
     await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
   })
 
-  it('compares resolved render inputs and ignores stale proxy pixels when physical metrics override them', async () => {
+  it('rejects forged raw Project text proxies even when physical metrics resolve to approved values', async () => {
     const state = workflowFixture()
     const project = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
     project.areas[0].layers[0].x = 999
@@ -391,7 +412,22 @@ describe('design approval gate', () => {
     project.areas[0].layers[0].lineHeight = 4
     state.document = project
 
-    await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true, status: 'approved' })
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it.each([
+    ['x', (layer: any) => { layer.x += 11 }],
+    ['y', (layer: any) => { layer.y += 13 }],
+    ['width', (layer: any) => { layer.width += 17 }],
+    ['fontSize', (layer: any) => { layer.fontSize += 19 }],
+    ['letterSpacing', (layer: any) => { layer.letterSpacing += 23 }],
+    ['lineHeight', (layer: any) => { layer.lineHeight += 0.25 }],
+  ])('binds the raw Project text %s input even when physical metadata also resolves it', async (_field, mutate) => {
+    const state = workflowFixture()
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    mutate(state.document.areas[0].layers[0])
+
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
   })
 
   it.each([
@@ -421,6 +457,49 @@ describe('design approval gate', () => {
     const state = workflowFixture(sourceBlueprint)
     state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
     state.document.areas[0].layers[2].strokeWidth = 3
+
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it.each([
+    ['x', (layer: any) => { layer.x += 11 }],
+    ['y', (layer: any) => { layer.y += 13 }],
+    ['width', (layer: any) => { layer.width += 17 }],
+    ['height', (layer: any) => { layer.height += 19 }],
+    ['strokeWidth', (layer: any) => { layer.strokeWidth += 23 }],
+    ['cornerRadius', (layer: any) => { layer.cornerRadius += 29 }],
+  ])('binds the raw Project shape %s input even when physical metadata also resolves it', async (_field, mutate) => {
+    const sourceBlueprint = blueprint()
+    sourceBlueprint.areas[0].layers.push({
+      id: 'frame', kind: 'shape', boundsMm: { x: 2, y: 2, width: 36, height: 56 },
+      anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 2, processes: [],
+      shape: 'rounded_rectangle', fill: 'transparent', stroke: '#111111', strokeWidthMm: 0.2, cornerRadiusMm: 1,
+    })
+    const state = workflowFixture(sourceBlueprint)
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    mutate(state.document.areas[0].layers[2])
+
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
+  })
+
+  it.each([
+    ['x', (layer: any) => { layer.x += 11 }],
+    ['y', (layer: any) => { layer.y += 13 }],
+    ['width', (layer: any) => { layer.width += 17 }],
+    ['height', (layer: any) => { layer.height += 19 }],
+  ])('binds the raw Project image %s input even when physical metadata also resolves it', async (_field, mutate) => {
+    const sourceBlueprint = blueprint()
+    sourceBlueprint.assets.push({
+      id: 'mark', path: 'assets/mark.png', sha256: '9'.repeat(64), mimeType: 'image/png', width: 160, height: 40,
+    })
+    sourceBlueprint.areas[0].layers = [{
+      id: 'mark', kind: 'image', boundsMm: { x: 4, y: 8, width: 32, height: 12 },
+      anchor: 'center', rotation: 0, opacity: 1, visible: true, zIndex: 0, processes: [],
+      assetId: 'mark', fit: 'contain',
+    }]
+    const state = workflowFixture(sourceBlueprint)
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    mutate(state.document.areas[0].layers[0])
 
     await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'STALE_APPROVAL', 'currentDocument.design')
   })
@@ -675,7 +754,11 @@ function classification(current: WorkflowRevisionSnapshot, approved = snapshot()
 describe('revision classification', () => {
   it.each([
     ['copy', (value: WorkflowRevisionSnapshot) => { value.blueprint.areas[0].layers[0].text = 'CHANGED' }, 'design:copy'],
-    ['hierarchy/order', (value: WorkflowRevisionSnapshot) => { value.blueprint.areas[0].layers.reverse() }, 'design:hierarchy'],
+    ['hierarchy/order', (value: WorkflowRevisionSnapshot) => {
+      const firstZ = value.blueprint.areas[0].layers[0].zIndex
+      value.blueprint.areas[0].layers[0].zIndex = value.blueprint.areas[0].layers[1].zIndex
+      value.blueprint.areas[0].layers[1].zIndex = firstZ
+    }, 'design:hierarchy'],
     ['visibility', (value: WorkflowRevisionSnapshot) => { value.blueprint.areas[0].layers[0].visible = false }, 'design:hierarchy'],
     ['physical layout', (value: WorkflowRevisionSnapshot) => { value.blueprint.areas[0].layers[0].boundsMm!.x = 5 }, 'design:layout'],
     ['color', (value: WorkflowRevisionSnapshot) => { value.blueprint.areas[0].layers[0].color = '#ffffff' }, 'design:color'],
@@ -692,6 +775,17 @@ describe('revision classification', () => {
   ])('classifies %s changes as design invalidation', (_label, mutate, reason) => {
     const current = snapshot(); mutate(current)
     expect(classification(current)).toMatchObject({ valid: false, invalidates: 'design', reasons: expect.arrayContaining([reason]) })
+  })
+
+  it('does not classify equal-z array storage order when runtime and review both tie-break by id', () => {
+    const state = workflowFixture()
+    const approved = snapshot()
+    approved.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    ;(approved.document as any).areas[0].layers.forEach((layer: any) => { layer.zIndex = 0 })
+    const current = structuredClone(approved)
+    ;(current.document as any).areas[0].layers.reverse()
+
+    expect(classification(current, approved)).toEqual({ valid: true, invalidates: 'none' })
   })
 
   it.each([
@@ -724,6 +818,20 @@ describe('revision classification', () => {
     expect(classification(current)).toEqual({ valid: false, invalidates: 'design', reasons: ['design:document'] })
   })
 
+  it('classifies forged raw Project proxies even when physical metadata resolves to approved values', () => {
+    const state = workflowFixture()
+    const approved = snapshot()
+    approved.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    const current = structuredClone(approved)
+    Object.assign((current.document as any).areas[0].layers[0], {
+      x: 999, y: 888, width: 666, fontSize: 777, letterSpacing: 555, lineHeight: 4,
+    })
+
+    expect(classification(current, approved)).toEqual({
+      valid: false, invalidates: 'design', reasons: ['design:document'],
+    })
+  })
+
   it.each([
     ['target selector', (value: WorkflowRevisionSnapshot) => { (value.document as any).areas[0].target.stableSelector = 'mesh:1/node:2' }, 'production:area-targets'],
     ['UV range', (value: WorkflowRevisionSnapshot) => { (value.document as any).areas[0].range.uStart = 0.2 }, 'production:area-targets'],
@@ -743,7 +851,6 @@ describe('revision classification', () => {
     ['translation', (area: any) => { area.remap.origin[0] = 0.5 }],
     ['orientation', (area: any) => { area.remap.axis = [1, 0, 0] }],
     ['scale', (area: any) => { area.remap.radius = 1.25 }],
-    ['canvas', (area: any) => { area.canvas.width += 1 }],
     ['axis minimum', (area: any) => { area.axisMin = -2 }],
     ['axis maximum', (area: any) => { area.axisMax = 2 }],
   ])('classifies Project v3 %s changes as production mapping invalidation', (_label, mutate) => {
@@ -753,6 +860,18 @@ describe('revision classification', () => {
     const current = structuredClone(approved); mutate((current.document as any).areas[0])
     expect(classification(current, approved)).toEqual({
       valid: false, invalidates: 'production', reasons: ['production:area-targets'],
+    })
+  })
+
+  it('gives stale raw Project pixels design precedence when canvas mapping changes without rescaling them', () => {
+    const approved = snapshot()
+    const state = workflowFixture()
+    approved.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    const current = structuredClone(approved)
+    ;(current.document as any).areas[0].canvas.width += 1
+
+    expect(classification(current, approved)).toEqual({
+      valid: false, invalidates: 'design', reasons: ['design:document', 'production:area-targets'],
     })
   })
 

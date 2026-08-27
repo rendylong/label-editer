@@ -1,6 +1,9 @@
 import { FONT_STACKS, type LabelLayer, type UploadedFontRecord } from './types'
 import { fontEntry, legacyFontId, type FontCatalogEntry } from './fontCatalog'
 import { fontStackCss } from './fontStack'
+import { uploadedFontIdentity } from './uploadedFontIdentity'
+
+export { uploadedFontIdentity } from './uploadedFontIdentity'
 
 export interface FontLoadResult {
   id: string
@@ -66,23 +69,12 @@ function catalogFamily(id: string): string {
   return `__catalog_${id.replace(/[^a-zA-Z0-9_-]/g, '_')}`
 }
 
-function sanitizeUploadedName(name: string): string {
-  const sanitized = name
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLocaleLowerCase()
-    .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-  return sanitized || 'font'
-}
-
 export function uploadedFontId(name: string): string {
-  return `upload:${sanitizeUploadedName(name)}`
+  return uploadedFontIdentity(name).id
 }
 
 export function uploadFamily(name: string): string {
-  return `__upload_${sanitizeUploadedName(name).replace(/-/g, '_')}`
+  return uploadedFontIdentity(name).cssFamily
 }
 
 export function uploadedFontRecord(ref: string, uploaded: UploadedFontRecord[]): UploadedFontRecord | undefined {

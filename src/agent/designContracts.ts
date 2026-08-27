@@ -11,6 +11,7 @@ import { canonicalApprovedBlueprintDesignProjection, canonicalDocumentDesignProj
 import { WorkflowGateError, type WorkflowGateErrorCode } from './workflowGateError'
 import { isStrictRfc3339DateTime, validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
 import { validateFontStack } from '../label/fontStack'
+import { compareLayerZOrder } from '../label/layerOrder'
 
 export { WorkflowGateError } from './workflowGateError'
 export type { WorkflowGateErrorCode } from './workflowGateError'
@@ -1172,7 +1173,8 @@ function designProjections(blueprint: LayoutBlueprintV1): Record<string, unknown
     'design:copy': sortedLayerProjection(blueprint, (_area, layer) => layer.kind === 'text' ? layer.text : null),
     'design:hierarchy': stableSortById(blueprint.areas).map((area) => ({
       areaId: area.id,
-      layers: area.layers.map((layer) => ({ id: layer.id, kind: layer.kind, zIndex: layer.zIndex, visible: layer.visible })),
+      layers: area.layers.slice().sort(compareLayerZOrder)
+        .map((layer) => ({ id: layer.id, kind: layer.kind, zIndex: layer.zIndex, visible: layer.visible })),
     })),
     'design:layout': {
       areas: stableSortById(blueprint.areas).map((area) => ({

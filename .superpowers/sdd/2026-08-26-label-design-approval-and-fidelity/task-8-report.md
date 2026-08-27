@@ -146,3 +146,46 @@
 - Full side identity is lossless, but non-front/back physical orientation is deliberately not inferred. Its UV/remap/canvas placement remains a separately bound production fact.
 - Path-referenced Spec assets are matched to the SHA-bound blueprint asset declaration; embedded Project image/font bytes are hashed directly. Re-reading arbitrary external asset paths remains the asset loader/design-review publisher responsibility.
 - The earlier Task 8 residuals for caller-supplied model inspection and Task 10 published PNG-byte validation remain unchanged.
+
+## Fix round 3 — first-load runtime authority and exact layer identity
+
+### RED reproductions
+
+1. Raw Project render inputs hidden by physical resolution:
+   - `pnpm vitest run tests/approvalWorkflow.test.ts --reporter=dot`
+   - Before implementation: 18 tests failed and 95 passed. Forged Project text `x=999`, `y=888`, `fontSize=777`, `letterSpacing=666`, and `lineHeight=4` remained approved; individual text, image, and shape proxy changes under physical metadata also remained approved, and the classifier returned `invalidates: none`.
+2. Uploaded-font runtime identity collisions:
+   - `pnpm vitest run tests/projectSchema.test.ts --reporter=dot`
+   - Before implementation: 2 tests failed and 78 passed. `Brand Font` versus `brand-font`, and `assets/brand font.woff2` versus `assets/brand-font.woff2`, both parsed despite resolving to the same uploaded id and CSS family.
+3. Compiler/runtime order drift from design review:
+   - `pnpm vitest run tests/blueprintCompiler.test.ts tests/approvalWorkflow.test.ts --reporter=dot`
+   - Before implementation: 5 tests failed and 136 passed. Compilation followed source-array order instead of `(zIndex,id)`; equal-z Project arrays were order-sensitive in the gate/classifier; and the existing multi-layer compiler fixture disagreed with review's id tie-break.
+
+### Semantic decisions and implementation
+
+- The canonical document projection now retains every original parsed/applied runtime layer input and adds a separate `resolvedPhysical` projection for the fields physical metadata can authoritatively derive. Project v3 and `.lbl` first-load values therefore cannot hide behind a later `resolvePhysicalLayer()` result. Text position/box/font size/spacing/line height, image position/frame, and shape position/frame/stroke/radius are covered individually; all previously projected render inputs remain bound.
+- Raw pixel coordinates are normalized against the current canvas because that is what the scaled runtime displays. Consequently, changing a Project canvas without rescaling stored pixels is both a design-document and production-target change, with design invalidation taking precedence. A consistently rescaled document retains the same normalized design.
+- Added one lightweight `uploadedFontIdentity()` helper that owns NFKD normalization, uploaded ids, and CSS-family names. Project import/serialization validation and runtime lookup/registration now consume that same identity. Each area rejects a collision in either id or CSS family before any order-dependent font lookup or `FontFace` registration.
+- Added one exact `compareLayerZOrder()` implementation matching design review's `(zIndex,id)` comparator. Blueprint compilation sorts before emitting a Label Spec; LabelCanvas, canonical approval projection, fidelity comparison, white-underbase intent, layer mutations, and both layer-list UIs reuse it. The classifier canonicalizes hierarchy order with the same comparator while still detecting actual z-order changes.
+
+### Scope expansion
+
+- Added `src/label/uploadedFontIdentity.ts` and `src/label/layerOrder.ts` as shared, browser-safe identity primitives.
+- Updated the design projection, blueprint compiler, Project parser, font runtime, canvas renderer, fidelity/white-underbase paths, layer mutations, and layer-list presentation.
+- Replaced the former stale-proxy-is-valid regression and added exact gate/classifier tests for raw text, image, and shape inputs; font collision tests; and reversed-z/equal-z compiler, gate, and classifier tests.
+
+### GREEN verification
+
+- Focused Task 8 TDD suite: 5 files, 290 tests passed.
+- Affected approval/compiler/project/font/fidelity/rendering/design-review/browser suite: 12 files, 567 tests passed, including the complete 75-test real-Chromium design-review suite and browser Agent runtime coverage.
+- TypeScript: `pnpm exec tsc -b --pretty false` exited 0 with no diagnostics.
+- Full suite: `pnpm test -- --reporter=dot --testTimeout=10000` passed all 76 files; 1,263 tests passed and 1 environment-gated test skipped.
+- Production build: `pnpm build` exited 0; Vite transformed 224 modules. Existing browser-externalization, mixed GLTFLoader import, and large-chunk warnings remain non-failing.
+- Explicit packaged plugin E2E: the installed-like front/back apply/export flow passed in 88.4 seconds; 1 passed and 1 environment-gated headful test skipped.
+- `git diff --check` and tracked-clean status are rerun immediately before and after the fix commit.
+
+### Residual risks
+
+- The stricter gate deliberately rejects raw editable proxy drift even when physical metadata would later resolve to the same value; this is required because Project/embedded `.lbl` first load renders those stored values directly.
+- The full-suite command retains the 10-second Chromium allowance documented in Fix round 2; all browser assertions are unchanged and the dedicated affected/browser and packaged-plugin runs passed.
+- The optional headful live-preview E2E, caller-supplied model inspection, and Task 10 published PNG-byte validation remain outside this fix round.

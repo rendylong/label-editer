@@ -4,6 +4,7 @@ import { legacyFontId } from '../label/fontCatalog'
 import { hasValidLegacyPaperCarrierProvenance, resolveLabelPaper } from '../label/paper'
 import { validateVectorPath } from '../label/vectorPathValidation'
 import { canonicalFontStack, validateFontStack } from '../label/fontStack'
+import { uploadedFontIdentity } from '../label/uploadedFontIdentity'
 import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
@@ -457,10 +458,17 @@ function normalizeGlobalCraft(value: unknown): { craft: CraftEffect[] } {
 
 function normalizeFonts(value: unknown): UploadedFontRecord[] {
   if (!Array.isArray(value)) areaError('fonts', '必须是数组')
+  const ids = new Map<string, number>()
+  const cssFamilies = new Map<string, number>()
   return value.map((font, index) => {
     if (!isRecord(font)) areaError(`fonts[${index}]`, '必须是对象')
     if (typeof font.name !== 'string' || font.name.length === 0) areaError(`fonts[${index}].name`, '必须是非空字符串')
     if (typeof font.dataUrl !== 'string' || font.dataUrl.length === 0) areaError(`fonts[${index}].dataUrl`, '必须是非空字符串')
+    const identity = uploadedFontIdentity(font.name)
+    const previous = ids.get(identity.id) ?? cssFamilies.get(identity.cssFamily)
+    if (previous !== undefined) areaError(`fonts[${index}].name`, `与 fonts[${previous}].name 的 runtime identity 冲突`)
+    ids.set(identity.id, index)
+    cssFamilies.set(identity.cssFamily, index)
     return { name: font.name, dataUrl: font.dataUrl }
   })
 }

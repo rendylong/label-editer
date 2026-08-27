@@ -2,6 +2,7 @@ import type { LayoutBlueprintArea, LayoutBlueprintLayer, LayoutBlueprintV1, Phys
 import { craftEffectsForProcessIntents } from './blueprintCompiler'
 import type { CraftEffect, LabelAreaConfig, LabelLayer, LayerDesignMetrics } from '../label/types'
 import { canonicalFontStack } from '../label/fontStack'
+import { compareLayerZOrder } from '../label/layerOrder'
 
 export type FidelityIssueCode =
   | 'LAYER_SET_MISMATCH' | 'LAYER_ORDER_MISMATCH' | 'VISIBILITY_MISMATCH'
@@ -243,10 +244,10 @@ export function compareBlueprintFidelity(input: {
     if (projected.artboard?.background !== expectedArea.artboard.background) {
       issue(issues, 'COLOR_MISMATCH', expectedArea.id, 'Artboard background changed.', undefined, expectedArea.artboard.background, projected.artboard?.background)
     }
-    const expectedIds = expectedArea.layers.map((layer) => layer.id)
+    const expectedIds = expectedArea.layers.slice().sort(compareLayerZOrder).map((layer) => layer.id)
     const actualIds = projected.layers.map((layer) => layer.id)
     if (!same([...expectedIds].sort(), [...actualIds].sort())) issue(issues, 'LAYER_SET_MISMATCH', expectedArea.id, 'Layer ids changed.', undefined, expectedIds, actualIds)
-    const actualOrder = [...projected.layers].sort((left, right) => left.zIndex - right.zIndex).map((layer) => layer.id)
+    const actualOrder = [...projected.layers].sort(compareLayerZOrder).map((layer) => layer.id)
     if (!same(actualOrder, expectedIds)) issue(issues, 'LAYER_ORDER_MISMATCH', expectedArea.id, 'Layer z-order changed.', actualOrder.find((id, index) => id !== expectedIds[index]), expectedIds, actualOrder)
     const expectedAspect = expectedArea.artboard.widthMm / expectedArea.artboard.heightMm
     const actualAspect = projected.artboard ? projected.artboard.widthMm / projected.artboard.heightMm : undefined
