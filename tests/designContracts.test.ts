@@ -3,6 +3,7 @@ import {
   assertDigestBinding,
   canonicalCarrier,
   migrateLegacyApplication,
+  WorkflowGateError,
   validateApprovalRecord,
   validateDesignReviewManifest,
   validateEditorHandoff,
@@ -147,6 +148,15 @@ function productionReviewManifest(): ReviewManifestV1 {
 }
 
 describe('shared design contracts', () => {
+  it('bounds structured workflow error details at the exported error boundary', () => {
+    const error = new WorkflowGateError('STALE_APPROVAL', 'Approval is stale', {
+      payload: 'x'.repeat(5000),
+      blockers: Array.from({ length: 100 }, (_, index) => `blocker-${index}`),
+    })
+    expect(String(error.details?.payload)).toHaveLength(256)
+    expect(error.details?.blockers).toHaveLength(32)
+  })
+
   it.each([
     ['paper_label', 'applied_label'],
     ['direct_print', 'direct_surface_print'],

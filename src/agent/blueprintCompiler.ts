@@ -6,6 +6,7 @@ import type {
   PhysicalBounds,
   ProcessIntent,
 } from './designContracts'
+import { WorkflowGateError } from './designContracts'
 import type { LabelSpecAreaV2, LabelSpecLayerV2 } from './labelSpecSchema'
 import type { CraftEffect, ShapeKind } from '../label/types'
 import { canonicalFontStack } from '../label/fontStack'
@@ -19,21 +20,23 @@ export interface ResolvedModelAreaShell {
   remap?: unknown
 }
 
-export interface UnrepresentableLayerDetails {
+export interface UnrepresentableLayerDetails extends Record<string, unknown> {
   areaId: string
   layerId: string
   reason: string
   flattenedFallback: FlattenedFallback
 }
 
-export class BlueprintCompilerError extends Error {
-  readonly code = 'UNREPRESENTABLE_LAYER' as const
-  readonly details: UnrepresentableLayerDetails
+export class BlueprintCompilerError extends WorkflowGateError {
+  declare readonly details: UnrepresentableLayerDetails
 
   constructor(details: UnrepresentableLayerDetails) {
-    super(`Layer ${details.areaId}/${details.layerId} is not representable as editable artwork: ${details.reason}`)
+    super(
+      'UNREPRESENTABLE_LAYER',
+      `Layer ${details.areaId}/${details.layerId} is not representable as editable artwork: ${details.reason}`,
+      details,
+    )
     this.name = 'BlueprintCompilerError'
-    this.details = details
   }
 }
 
