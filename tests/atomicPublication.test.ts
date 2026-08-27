@@ -157,6 +157,143 @@ afterEach(async () => {
 })
 
 describe('atomic directory publication recovery', () => {
+  it('preserves the exact .publish.lock.notes.tmp sibling and its sentinel during normal publication', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const notes = path.join(root, '.review.publish.lock.notes.tmp')
+    const sentinel = path.join(notes, 'sentinel')
+    await mkdir(notes)
+    await writeFile(sentinel, 'user-owned')
+
+    await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+
+    expect(await readRound(output)).toBe('new')
+    expect(await readFile(sentinel, 'utf8')).toBe('user-owned')
+  })
+
+  it('ignores malformed, confusable, wrong-type, symlink, and unowned lock-residue siblings', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const prefix = path.join(root, '.review.publish.lock')
+    const preservedDirectories = [
+      `${prefix}.0.review-0123456789ab.tmp`,
+      `${prefix}.01.review-0123456789ab.tmp`,
+      `${prefix}.999991.review-0123456789ab.notes.tmp`,
+      `${prefix}.999992.review-0123456789AB.tmp`,
+      `${prefix}.１２３.review-0123456789ab.tmp`,
+      `${prefix}.999993.review-0123456789ab`,
+    ]
+    for (const directory of preservedDirectories) {
+      await mkdir(directory)
+      await writeFile(path.join(directory, 'sentinel'), path.basename(directory))
+    }
+
+    const malformedMetadata = `${prefix}.999994.review-0123456789ab.tmp`
+    await mkdir(malformedMetadata)
+    await writeFile(path.join(malformedMetadata, 'owner.json'), JSON.stringify({
+      version: 1,
+      pid: 999994,
+      token: 'different-0123456789ab',
+    }))
+    await writeFile(path.join(malformedMetadata, 'sentinel'), 'malformed-metadata')
+
+    const unownedResidue = `${prefix}.999998.unowned-0123456789ab.tmp`
+    await mkdir(unownedResidue)
+    await writeFile(path.join(unownedResidue, 'sentinel'), 'unowned-nonempty')
+
+    const ownedWithUnexpectedEntry = `${prefix}.999990.owned-0123456789ab.tmp`
+    await mkdir(ownedWithUnexpectedEntry)
+    await writeFile(path.join(ownedWithUnexpectedEntry, 'owner.json'), JSON.stringify({
+      version: 1,
+      pid: 999990,
+      token: 'owned-0123456789ab',
+    }))
+    await writeFile(path.join(ownedWithUnexpectedEntry, 'sentinel'), 'unexpected-user-entry')
+
+    const externalOwner = path.join(root, 'external-owner.json')
+    await writeFile(externalOwner, JSON.stringify({ version: 1, pid: 999995, token: 'review-0123456789ab' }))
+    const symlinkedMetadata = `${prefix}.999995.review-0123456789ab.tmp`
+    await mkdir(symlinkedMetadata)
+    await symlink(externalOwner, path.join(symlinkedMetadata, 'owner.json'))
+    await writeFile(path.join(symlinkedMetadata, 'sentinel'), 'symlinked-metadata')
+
+    const fileResidue = `${prefix}.999996.review-0123456789ab.tmp`
+    await writeFile(fileResidue, 'ordinary-file')
+    const externalDirectory = path.join(root, 'external-directory')
+    await mkdir(externalDirectory)
+    await writeFile(path.join(externalDirectory, 'sentinel'), 'external')
+    const symlinkResidue = `${prefix}.999997.review-0123456789ab.tmp`
+    await symlink(externalDirectory, symlinkResidue)
+
+    const activeToken = 'active-0123456789ab'
+    const activeResidue = `${prefix}.${process.ppid}.${activeToken}.tmp`
+    await mkdir(activeResidue)
+    await writeFile(path.join(activeResidue, 'owner.json'), JSON.stringify({
+      version: 1,
+      pid: process.ppid,
+      token: activeToken,
+    }))
+    await writeFile(path.join(activeResidue, 'sentinel'), 'active-owner')
+    const activePreOwnerResidue = `${prefix}.${process.ppid}.active-pre-owner-0123456789ab.tmp`
+    await mkdir(activePreOwnerResidue)
+
+    await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+
+    expect(await readRound(output)).toBe('new')
+    for (const directory of preservedDirectories) {
+      expect(await readFile(path.join(directory, 'sentinel'), 'utf8')).toBe(path.basename(directory))
+    }
+    expect(await readFile(path.join(malformedMetadata, 'sentinel'), 'utf8')).toBe('malformed-metadata')
+    expect(await readFile(path.join(unownedResidue, 'sentinel'), 'utf8')).toBe('unowned-nonempty')
+    expect(await readFile(path.join(ownedWithUnexpectedEntry, 'sentinel'), 'utf8')).toBe('unexpected-user-entry')
+    expect(await readFile(path.join(symlinkedMetadata, 'sentinel'), 'utf8')).toBe('symlinked-metadata')
+    expect(await readlink(path.join(symlinkedMetadata, 'owner.json'))).toBe(externalOwner)
+    expect(await readFile(fileResidue, 'utf8')).toBe('ordinary-file')
+    expect(await readlink(symlinkResidue)).toBe(externalDirectory)
+    expect(await readFile(path.join(externalDirectory, 'sentinel'), 'utf8')).toBe('external')
+    expect(await readFile(path.join(activeResidue, 'sentinel'), 'utf8')).toBe('active-owner')
+    expect((await stat(activePreOwnerResidue)).isDirectory()).toBe(true)
+  })
+
+  it('cleans a genuine dead recovery release using its exact long generated token and recovery owner', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const originalPid = 2_147_483_646
+    const recoveryPid = 2_147_483_647
+    const sanitizedSession = 'x'.repeat(160)
+    const originalToken = `${sanitizedSession}-0123456789ab`
+    const recoveryToken = `recovery-${originalToken}`
+    const residue = path.join(root, `.review.publish.lock.${recoveryPid}.${recoveryToken}.released`)
+    await mkdir(residue)
+    await writeFile(path.join(residue, 'owner.json'), JSON.stringify({
+      version: 1,
+      pid: originalPid,
+      token: originalToken,
+    }))
+    await writeFile(path.join(residue, 'recovery.json'), JSON.stringify({
+      version: 1,
+      pid: recoveryPid,
+      token: recoveryToken,
+    }))
+
+    await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+
+    expect(await readRound(output)).toBe('new')
+    await expect(stat(residue)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('finishes non-recursive cleanup of an empty exact release left after its identity file was removed', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const residue = path.join(root, '.review.publish.lock.999989.cleanup-0123456789ab.released')
+    await mkdir(residue)
+
+    await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+
+    expect(await readRound(output)).toBe('new')
+    await expect(stat(residue)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
   it.each([
     ['initialize-owner', 'old'],
     ['rename-journal', 'old'],

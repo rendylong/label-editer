@@ -1,12 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 const ACTIVE_PUBLICATIONS = new Set()
 const PUBLICATION_LOCK_WAIT_MS = 30_000
 const PUBLICATION_LOCK_RETRY_MS = 20
 const EMPTY_LOCK_GRACE_MS = 200
-const DEFAULT_PUBLICATION_FILE_SYSTEM = { lstat, mkdir, open, readFile, readdir, rename, rm, stat }
+const DEFAULT_PUBLICATION_FILE_SYSTEM = { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, stat }
 
 export class PathPolicyError extends Error {
   constructor(message) {
@@ -220,21 +221,222 @@ async function releasePublicationLock(fileSystem, lockPath, token) {
   await removeAndSync(fileSystem, releasedLockPath, { recursive: true, force: true })
 }
 
-async function cleanupAbandonedLockResidue(fileSystem, lockPath) {
-  const parent = path.dirname(lockPath)
+function parseLockResidueName(lockPath, name) {
   const prefix = `${path.basename(lockPath)}.`
+  if (typeof name !== 'string' || !name.startsWith(prefix)) return undefined
+  const suffix = name.endsWith('.tmp') ? '.tmp' : name.endsWith('.released') ? '.released' : undefined
+  if (!suffix) return undefined
+  const identity = name.slice(prefix.length, -suffix.length)
+  const delimiter = identity.indexOf('.')
+  if (delimiter <= 0) return undefined
+  const pidText = identity.slice(0, delimiter)
+  if (!/^[1-9][0-9]*$/.test(pidText)) return undefined
+  const pid = Number(pidText)
+  if (!Number.isSafeInteger(pid) || pid <= 0 || String(pid) !== pidText) return undefined
+  const token = identity.slice(delimiter + 1)
+  if (!validPublicationToken(token)) return undefined
+  return { name, pid, token, suffix }
+}
+
+function validSanitizedTokenPrefix(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 160
+    && sanitizeArtifactName(value) === value
+}
+
+function validPublicationToken(token) {
+  if (typeof token !== 'string') return false
+  const randomDelimiter = token.length - 13
+  if (randomDelimiter <= 0 || token[randomDelimiter] !== '-') return false
+  const sanitized = token.slice(0, randomDelimiter)
+  const random = token.slice(randomDelimiter + 1)
+  if (!/^[0-9a-f]{12}$/.test(random)) return false
+  return validSanitizedTokenPrefix(sanitized)
+    || (sanitized.startsWith('recovery-') && validSanitizedTokenPrefix(sanitized.slice('recovery-'.length)))
+}
+
+async function inspectResidueJson(fileSystem, filePath) {
+  let info
+  try {
+    info = await fileSystem.lstat(filePath)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { state: 'missing' }
+    throw error
+  }
+  if (info.isSymbolicLink() || !info.isFile()) return { state: 'invalid' }
+  let handle
+  try {
+    handle = await fileSystem.open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
+    const openedInfo = await handle.stat()
+    if (!openedInfo.isFile()
+      || (info.dev !== undefined && openedInfo.dev !== info.dev)
+      || (info.ino !== undefined && openedInfo.ino !== info.ino)) return { state: 'invalid' }
+    return { state: 'valid', value: JSON.parse(await handle.readFile('utf8')), info: openedInfo }
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ELOOP' || error instanceof SyntaxError) {
+      return { state: 'invalid' }
+    }
+    throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+async function inspectResidueMarker(fileSystem, filePath) {
+  let info
+  try {
+    info = await fileSystem.lstat(filePath)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { state: 'missing' }
+    throw error
+  }
+  if (info.isSymbolicLink() || !info.isFile() || info.size !== 0) return { state: 'invalid' }
+  let handle
+  try {
+    handle = await fileSystem.open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
+    const openedInfo = await handle.stat()
+    if (!openedInfo.isFile() || openedInfo.size !== 0
+      || (info.dev !== undefined && openedInfo.dev !== info.dev)
+      || (info.ino !== undefined && openedInfo.ino !== info.ino)) return { state: 'invalid' }
+    return { state: 'valid', info: openedInfo }
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ELOOP') return { state: 'invalid' }
+    throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+function exactKeys(value, expected) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const keys = Object.keys(value)
+  return keys.length === expected.length
+    && expected.every((key) => Object.prototype.hasOwnProperty.call(value, key))
+}
+
+function validGeneratedOwner(owner) {
+  return exactKeys(owner, ['version', 'pid', 'token'])
+    && owner.version === 1 && Number.isSafeInteger(owner.pid) && owner.pid > 0
+    && validPublicationToken(owner.token)
+}
+
+function validGeneratedJournal(journal, outputDir) {
+  if (!exactKeys(journal, [
+    'version', 'pid', 'token', 'outputName', 'temporaryName', 'backupName', 'hadExisting',
+  ]) || !Number.isSafeInteger(journal.pid) || journal.pid <= 0
+    || !validPublicationToken(journal.token)) return false
+  try {
+    assertTransaction(journal, outputDir)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function sameResidueDirectory(fileSystem, residuePath, original) {
+  try {
+    const current = await fileSystem.lstat(residuePath)
+    return !current.isSymbolicLink() && current.isDirectory()
+      && (original.dev === undefined || current.dev === original.dev)
+      && (original.ino === undefined || current.ino === original.ino)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function sameResidueFile(fileSystem, filePath, original) {
+  try {
+    const current = await fileSystem.lstat(filePath)
+    return !current.isSymbolicLink() && current.isFile()
+      && (original.dev === undefined || current.dev === original.dev)
+      && (original.ino === undefined || current.ino === original.ino)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  }
+}
+
+async function removeEmptyResidueDirectory(fileSystem, residuePath, parent) {
+  try {
+    await fileSystem.rmdir(residuePath)
+    await syncDirectory(fileSystem, parent)
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error
+  }
+}
+
+async function cleanupAbandonedLockResidue(fileSystem, lockPath, outputDir) {
+  const parent = path.dirname(lockPath)
   for (const name of await fileSystem.readdir(parent)) {
-    if (!name.startsWith(prefix)) continue
-    const suffix = name.endsWith('.tmp') ? '.tmp' : name.endsWith('.released') ? '.released' : undefined
-    if (!suffix) continue
-    const identity = name.slice(prefix.length, -suffix.length)
-    const delimiter = identity.indexOf('.')
-    const initializer = delimiter > 0 ? {
-      pid: Number(identity.slice(0, delimiter)),
-      token: identity.slice(delimiter + 1),
-    } : undefined
-    if (!ownerIsActive(initializer)) {
-      await removeAndSync(fileSystem, path.join(parent, name), { recursive: true, force: true })
+    const identity = parseLockResidueName(lockPath, name)
+    if (!identity) continue
+    const residuePath = path.join(parent, name)
+    let residueInfo
+    try {
+      residueInfo = await fileSystem.lstat(residuePath)
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue
+      throw error
+    }
+    if (residueInfo.isSymbolicLink() || !residueInfo.isDirectory()) continue
+
+    const owner = await inspectResidueJson(fileSystem, path.join(residuePath, 'owner.json'))
+    const journal = await inspectResidueJson(fileSystem, path.join(residuePath, 'transaction.json'))
+    const recovery = await inspectResidueJson(fileSystem, path.join(residuePath, 'recovery.json'))
+    const staged = await inspectResidueMarker(fileSystem, path.join(residuePath, 'staged.complete'))
+    const verified = await inspectResidueMarker(fileSystem, path.join(residuePath, 'published.verified'))
+    if ([owner, journal, recovery, staged, verified].some((entry) => entry.state === 'invalid')) continue
+    if (owner.state === 'valid' && !validGeneratedOwner(owner.value)) continue
+    if (journal.state === 'valid' && !validGeneratedJournal(journal.value, outputDir)) continue
+    if (recovery.state === 'valid' && !validGeneratedOwner(recovery.value)) continue
+    if (owner.state === 'valid' && journal.state === 'valid'
+      && (owner.value.pid !== journal.value.pid || owner.value.token !== journal.value.token)) continue
+
+    let initializer
+    if (recovery.state === 'valid') {
+      const prior = owner.state === 'valid' ? owner.value : journal.state === 'valid' ? journal.value : undefined
+      if (recovery.value.pid !== identity.pid || recovery.value.token !== identity.token
+        || (prior && recovery.value.token !== `recovery-${prior.token}`)) continue
+      initializer = recovery.value
+    } else {
+      if (owner.state === 'valid'
+        && (owner.value.pid !== identity.pid || owner.value.token !== identity.token)) continue
+      if (journal.state === 'valid'
+        && (journal.value.pid !== identity.pid || journal.value.token !== identity.token)) continue
+      initializer = owner.state === 'valid' ? owner.value
+        : journal.state === 'valid' ? journal.value : undefined
+    }
+    if (!initializer) {
+      if (ownerIsActive(identity) || (await fileSystem.readdir(residuePath)).length !== 0
+        || !(await sameResidueDirectory(fileSystem, residuePath, residueInfo))) continue
+      await removeEmptyResidueDirectory(fileSystem, residuePath, parent)
+      continue
+    }
+    if (ownerIsActive(initializer)) continue
+
+    const identityFileName = recovery.state === 'valid' ? 'recovery.json'
+      : owner.state === 'valid' ? 'owner.json' : 'transaction.json'
+    const metadata = [
+      ['owner.json', owner], ['transaction.json', journal], ['recovery.json', recovery],
+      ['staged.complete', staged], ['published.verified', verified],
+    ].filter(([, inspection]) => inspection.state === 'valid')
+      .sort(([left], [right]) => Number(left === identityFileName) - Number(right === identityFileName))
+    const expectedEntries = new Set(metadata.map(([fileName]) => fileName))
+    if ((await fileSystem.readdir(residuePath)).some((entry) => !expectedEntries.has(entry))
+      || !(await sameResidueDirectory(fileSystem, residuePath, residueInfo))) continue
+    let metadataStable = true
+    for (const [fileName, inspection] of metadata) {
+      if (!(await sameResidueFile(fileSystem, path.join(residuePath, fileName), inspection.info))) {
+        metadataStable = false
+        break
+      }
+    }
+    if (!metadataStable) continue
+    for (const [fileName] of metadata) {
+      await removeAndSync(fileSystem, path.join(residuePath, fileName), { force: true })
+    }
+    if (await sameResidueDirectory(fileSystem, residuePath, residueInfo)) {
+      await removeEmptyResidueDirectory(fileSystem, residuePath, parent)
     }
   }
 }
@@ -274,7 +476,7 @@ async function acquirePublicationLock(fileSystem, lockPath, outputDir, token, { 
   let acquired = false
   ACTIVE_PUBLICATIONS.add(token)
   try {
-    await cleanupAbandonedLockResidue(fileSystem, lockPath)
+    await cleanupAbandonedLockResidue(fileSystem, lockPath, outputDir)
     await fileSystem.mkdir(lockTemporary, { recursive: false })
     await writeDurableExclusive(fileSystem, ownerPath, new TextEncoder().encode(JSON.stringify({
       version: 1,
