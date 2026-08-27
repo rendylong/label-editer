@@ -2,8 +2,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { bootstrapAgentBridgeFromPage, createAgentBridge, installAgentBridge } from '../src/agent/bridge'
-import { captureAgentPreview, captureAgentQcView, registerAgentPreviewCapture } from '../src/agent/previewCapture'
-import type { QcCameraMetadata, QcViewRequest } from '../src/agent/contracts'
+import { captureAgentPreview, captureAgentQcView, captureAgentReviewView, registerAgentPreviewCapture } from '../src/agent/previewCapture'
+import type { QcCameraMetadata, QcViewRequest, ReviewEvidenceRequest, ReviewViewRequest } from '../src/agent/contracts'
 
 const token = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
@@ -74,6 +74,30 @@ describe('browser Agent Bridge guard', () => {
     })
   })
 
+  it('exposes production review evidence as a distinct guarded bridge operation', async () => {
+    const received: ReviewEvidenceRequest[] = []
+    const bridge = createAgentBridge({
+      renderReviewEvidence: async (request) => {
+        received.push(request ?? { designGate: { handoff: {}, blueprintJson: '', designReviewManifestJson: '' } })
+        return {
+          inputKind: 'label-project-v3' as const, inputRevision: `sha256:${'1'.repeat(64)}`, inputSha256: '2'.repeat(64),
+          blueprintRevision: 'design-v1', blueprintSha256: '3'.repeat(64), designReviewManifestSha256: '4'.repeat(64),
+          modelFingerprint: '5'.repeat(64), areaTargetsSha256: '6'.repeat(64), views: [],
+          validation: { ready: true, issues: [] }, fidelity: { pass: true, issues: [] },
+        }
+      },
+    })
+    const request: ReviewEvidenceRequest = {
+      width: 1600, height: 1600,
+      designGate: { handoff: {}, blueprintJson: '{}', designReviewManifestJson: '{}' },
+    }
+
+    await expect(bridge.renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: true, operation: 'render_review_evidence', data: { blueprintRevision: 'design-v1' },
+    })
+    expect(received).toEqual([request])
+  })
+
   it('exposes a UI-only live preview status operation', async () => {
     const received: unknown[] = []
     const bridge = createAgentBridge({
@@ -115,10 +139,12 @@ describe('browser Agent Bridge guard', () => {
     const oldDispose = registerAgentPreviewCapture({
       preview: async () => new Blob(['old']),
       qc: async () => { throw new Error('unused') },
+      review: async () => { throw new Error('unused') },
     })
     const newDispose = registerAgentPreviewCapture({
       preview: async () => new Blob(['newest']),
       qc: async () => { throw new Error('unused') },
+      review: async () => { throw new Error('unused') },
     })
     oldDispose()
     expect((await captureAgentPreview({ width: 800, height: 800 })).size).toBe(6)
@@ -143,6 +169,7 @@ describe('browser Agent Bridge guard', () => {
         received.push(request)
         return { blob: new Blob(['png']), camera: cameraMetadata }
       },
+      review: async () => { throw new Error('unused') },
     })
 
     const result = await captureAgentQcView(qcViewRequest)
@@ -153,5 +180,33 @@ describe('browser Agent Bridge guard', () => {
     await expect(captureAgentQcView(qcViewRequest)).rejects.toMatchObject({
       code: 'BROWSER_NOT_READY', message: expect.stringMatching(/not ready/i),
     })
+  })
+
+  it('forwards exact review requests and previously captured sources to the newest viewport owner', async () => {
+    const request: ReviewViewRequest = {
+      id: 'surface-front', kind: 'surface-face', width: 1600, height: 1600,
+      areaId: 'opaque.front', areaToken: 'opaque.front', side: 'front', carrier: 'direct_surface_print',
+    }
+    const received: unknown[] = []
+    const dispose = registerAgentPreviewCapture({
+      preview: async () => new Blob(['preview']),
+      qc: async () => { throw new Error('unused') },
+      review: async (view, context) => {
+        received.push(view, context)
+        return {
+          id: view.id, kind: view.kind, blob: new Blob(['png'], { type: 'image/png' }),
+          width: view.width, height: view.height,
+          camera: { position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
+        }
+      },
+    })
+    const context = { blueprintRevision: 'design-v1', inputRevision: `sha256:${'1'.repeat(64)}`, sources: [] }
+
+    const result = await captureAgentReviewView(request, context)
+
+    expect(received).toEqual([request, context])
+    expect(result).toMatchObject({ id: 'surface-front', kind: 'surface-face', width: 1600, height: 1600 })
+    dispose()
+    await expect(captureAgentReviewView(request, context)).rejects.toMatchObject({ code: 'BROWSER_NOT_READY' })
   })
 })

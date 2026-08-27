@@ -2,6 +2,12 @@
 
 export type AgentErrorCode =
   | 'INVALID_USAGE'
+  | 'AWAITING_USER_APPROVAL'
+  | 'APPROVAL_REQUIRED'
+  | 'HANDOFF_BLOCKED'
+  | 'DIGEST_MISMATCH'
+  | 'STALE_APPROVAL'
+  | 'UNREPRESENTABLE_LAYER'
   | 'PATH_NOT_ALLOWED'
   | 'OUTPUT_CONFLICT'
   | 'REVISION_CONFLICT'
@@ -122,6 +128,56 @@ export interface QcEvidenceResult {
   validation: DesignValidationReport
 }
 
+export type ReviewViewKind = 'flat-artwork' | 'surface-face' | 'model-front' | 'model-back' | 'review-sheet'
+
+export interface ReviewDesignGateEvidence {
+  handoff: unknown
+  blueprintJson: string
+  designReviewManifestJson: string
+  approvalRecord?: unknown
+}
+
+export interface ReviewEvidenceRequest {
+  width?: number
+  height?: number
+  designGate: ReviewDesignGateEvidence
+}
+
+export interface ReviewViewRequest {
+  id: string
+  kind: ReviewViewKind
+  width: number
+  height: number
+  areaId?: string
+  areaToken?: string
+  side?: 'front' | 'back' | 'left' | 'right' | 'wrap' | 'top' | 'bottom' | 'neck' | 'custom'
+  carrier?: import('./designContracts').CarrierMode
+  sourceViewIds?: string[]
+}
+
+export interface ReviewViewResult {
+  id: string
+  kind: ReviewViewKind
+  areaId?: string
+  carrier?: import('./designContracts').CarrierMode
+  artifact: ArtifactDescriptor
+  camera?: QcCameraMetadata
+}
+
+export interface ReviewEvidenceResult {
+  inputKind: 'label-spec-v2' | 'label-project-v3'
+  inputRevision: string
+  inputSha256: string
+  blueprintRevision: string
+  blueprintSha256: string
+  designReviewManifestSha256: string
+  modelFingerprint: string
+  areaTargetsSha256: string
+  views: ReviewViewResult[]
+  validation: DesignValidationReport
+  fidelity: import('./fidelityCheck').FidelityReport
+}
+
 export interface ModelLoadRequest {
   name: string
   url: string
@@ -237,6 +293,7 @@ export interface LabelEditorAgentBridgeV1 {
   waitForReady(input?: ReadinessRequest): Promise<BridgeResult<ReadinessReport>>
   renderPreview(input?: PreviewRequest): Promise<BridgeResult<ArtifactDescriptor>>
   renderQcEvidence(input?: QcEvidenceRequest): Promise<BridgeResult<QcEvidenceResult>>
+  renderReviewEvidence(input: ReviewEvidenceRequest): Promise<BridgeResult<ReviewEvidenceResult>>
   exportArtifacts(input: ExportRequest): Promise<BridgeResult<ExportManifest>>
 }
 

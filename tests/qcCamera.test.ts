@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
-import type { QcViewRequest } from '../src/agent/contracts'
-import { SceneController } from '../src/scene/SceneController'
+import type { QcViewRequest, ReviewViewRequest } from '../src/agent/contracts'
+import { LIGHT_STUDIO, LIGHT_STUDIO_RENDERING, SceneController } from '../src/scene/SceneController'
 import { cameraForFrame, surfaceFrameForGeometry } from '../src/scene/qcCamera'
 
 type QcCapture = (request: QcViewRequest) => Promise<{
@@ -15,24 +15,32 @@ type QcCapture = (request: QcViewRequest) => Promise<{
   }
 }>
 
+type ReviewCapture = (request: ReviewViewRequest) => ReturnType<QcCapture>
+
 interface QcControllerInternals {
   camera: THREE.PerspectiveCamera
-  controls: { target: THREE.Vector3 }
+  controls: { target: THREE.Vector3; enabled: boolean; autoRotate: boolean }
   renderer: {
     getSize(target: THREE.Vector2): THREE.Vector2
     setSize(width: number, height: number, updateStyle?: boolean): void
     getPixelRatio(): number
     setPixelRatio(value: number): void
     domElement: HTMLCanvasElement
+    outputColorSpace: THREE.ColorSpace
+    toneMapping: THREE.ToneMapping
+    toneMappingExposure: number
   }
+  scene: THREE.Scene
   composer: { setSize(width: number, height: number): void; render(): void }
-  outline: { selectedObjects: THREE.Object3D[]; setSize(width: number, height: number): void }
+  outline: { selectedObjects: THREE.Object3D[]; setSize(width: number, height: number): void; enabled: boolean }
+  grid: THREE.GridHelper
   model: THREE.Group
   labelMeshes: Map<string, THREE.Mesh>
   labelTextures: Map<string, never>
   channelView: 'color' | 'metalness' | 'roughness' | 'bump' | null
   frontMarker: THREE.Object3D
   areaControlGroup: THREE.Group
+  autoRotate: boolean
   encodePng(canvas: HTMLCanvasElement): Promise<Blob>
 }
 
@@ -43,6 +51,17 @@ function qcControllerHarness(areaRotationY = Math.PI / 2): { controller: SceneCo
   area.position.set(2, 0, 0)
   area.rotation.y = areaRotationY
   model.add(area)
+  const scene = new THREE.Scene()
+  const environment = new THREE.Texture()
+  scene.background = new THREE.Color(0x123456)
+  scene.environment = environment
+  scene.environmentIntensity = 0.91
+  scene.overrideMaterial = new THREE.MeshBasicMaterial({ color: 0xff00ff })
+  const sentinelLight = new THREE.DirectionalLight(0x123456, 3.25)
+  sentinelLight.position.set(9, 8, 7)
+  scene.add(model, sentinelLight)
+  const grid = new THREE.GridHelper(4, 4)
+  scene.add(grid)
   const camera = new THREE.PerspectiveCamera(52, 1.5, 0.01, 5000)
   camera.position.set(4, 3, 5)
   camera.up.set(0, 0.9, 0.1).normalize()
@@ -53,22 +72,28 @@ function qcControllerHarness(areaRotationY = Math.PI / 2): { controller: SceneCo
   const outlineSelection = [new THREE.Object3D(), new THREE.Object3D()]
   const internals: QcControllerInternals = {
     camera,
-    controls: { target: new THREE.Vector3(1, 2, 3) },
+    controls: { target: new THREE.Vector3(1, 2, 3), enabled: true, autoRotate: true },
     renderer: {
       getSize: (target) => target.set(width, height),
       setSize: (nextWidth, nextHeight) => { width = nextWidth; height = nextHeight },
       getPixelRatio: () => pixelRatio,
       setPixelRatio: (value) => { pixelRatio = value },
       domElement: {} as HTMLCanvasElement,
+      outputColorSpace: THREE.LinearSRGBColorSpace,
+      toneMapping: THREE.ReinhardToneMapping,
+      toneMappingExposure: 1.37,
     },
+    scene,
     composer: { setSize: vi.fn(), render: vi.fn() },
-    outline: { selectedObjects: outlineSelection, setSize: vi.fn() },
+    outline: { selectedObjects: outlineSelection, setSize: vi.fn(), enabled: true },
+    grid,
     model,
     labelMeshes: new Map([['front.area', area]]),
     labelTextures: new Map<string, never>(),
     channelView: 'roughness',
     frontMarker: new THREE.Object3D(),
     areaControlGroup: new THREE.Group(),
+    autoRotate: true,
     encodePng: async () => new Blob(['png'], { type: 'image/png' }),
   }
   Object.assign(controller as object, {
@@ -86,6 +111,12 @@ function captureQc(controller: SceneController, request: QcViewRequest) {
   return capture!.call(controller, request)
 }
 
+function captureReview(controller: SceneController, request: ReviewViewRequest) {
+  const capture = (controller as unknown as { captureReviewPng?: ReviewCapture }).captureReviewPng
+  expect(capture).toBeTypeOf('function')
+  return capture!.call(controller, request)
+}
+
 function captureState(internals: QcControllerInternals) {
   return {
     cameraPosition: internals.camera.position.toArray(),
@@ -95,10 +126,25 @@ function captureState(internals: QcControllerInternals) {
     cameraAspect: internals.camera.aspect,
     cameraWorldDirection: internals.camera.getWorldDirection(new THREE.Vector3()).toArray(),
     controlsTarget: internals.controls.target.toArray(),
+    controlsEnabled: internals.controls.enabled,
+    controlsAutoRotate: internals.controls.autoRotate,
+    autoRotate: internals.autoRotate,
     channel: internals.channelView,
     rendererSize: internals.renderer.getSize(new THREE.Vector2()).toArray(),
     pixelRatio: internals.renderer.getPixelRatio(),
     outlineSelection: [...internals.outline.selectedObjects],
+    outlineEnabled: internals.outline.enabled,
+    gridVisible: internals.grid.visible,
+    background: internals.scene.background instanceof THREE.Color ? internals.scene.background.getHex() : internals.scene.background,
+    environment: internals.scene.environment,
+    environmentIntensity: internals.scene.environmentIntensity,
+    overrideMaterial: internals.scene.overrideMaterial,
+    outputColorSpace: internals.renderer.outputColorSpace,
+    toneMapping: internals.renderer.toneMapping,
+    exposure: internals.renderer.toneMappingExposure,
+    lights: internals.scene.children.filter((child): child is THREE.Light => child instanceof THREE.Light).map((light) => ({
+      object: light, visible: light.visible, color: light.color.getHex(), intensity: light.intensity, position: light.position.toArray(),
+    })),
     frontMarkerVisible: internals.frontMarker.visible,
     areaControlVisible: internals.areaControlGroup.visible,
   }
@@ -114,6 +160,11 @@ const AREA_FACE_REQUEST: QcViewRequest = {
   height: 320,
   areaId: 'front.area',
   reason: 'Area face color close-up',
+}
+
+const REVIEW_SURFACE_REQUEST: ReviewViewRequest = {
+  id: 'surface-front', kind: 'surface-face', width: 640, height: 320,
+  areaId: 'front.area', areaToken: 'front.area', side: 'front', carrier: 'direct_surface_print',
 }
 
 function expectAllCornersInsideFrustum(
@@ -233,6 +284,49 @@ describe('QC camera math', () => {
       frontMarkerVisible: false,
       areaControlVisible: false,
     })
+    expect(captureState(internals)).toEqual(before)
+  })
+
+  it('applies the deterministic clean scene profile and restores every sentinel after review success', async () => {
+    const { controller, internals } = qcControllerHarness()
+    const before = captureState(internals)
+    let during: ReturnType<typeof captureState> | undefined
+    internals.encodePng = async () => {
+      during = captureState(internals)
+      return new Blob(['png'], { type: 'image/png' })
+    }
+
+    const result = await captureReview(controller, REVIEW_SURFACE_REQUEST)
+
+    expect(result.camera.target).toEqual([2, 0, 0])
+    expect(during).toMatchObject({
+      channel: 'color', rendererSize: [640, 320], pixelRatio: 1,
+      controlsEnabled: false, controlsAutoRotate: false, autoRotate: false,
+      outlineSelection: [], outlineEnabled: false, gridVisible: false,
+      background: LIGHT_STUDIO.background,
+      environment: before.environment,
+      environmentIntensity: LIGHT_STUDIO_RENDERING.environmentIntensity,
+      overrideMaterial: null,
+      outputColorSpace: THREE.SRGBColorSpace,
+      toneMapping: THREE.ACESFilmicToneMapping,
+      exposure: LIGHT_STUDIO_RENDERING.exposure,
+      frontMarkerVisible: false,
+      areaControlVisible: false,
+    })
+    expect(during?.lights.filter((light) => light.object === before.lights[0].object)).toEqual([
+      expect.objectContaining({ visible: false }),
+    ])
+    expect(during?.lights.filter((light) => light.object !== before.lights[0].object)).toHaveLength(4)
+    expect(captureState(internals)).toEqual(before)
+  })
+
+  it('restores the complete clean review profile when PNG encoding rejects', async () => {
+    const { controller, internals } = qcControllerHarness()
+    const before = captureState(internals)
+    internals.encodePng = async () => { throw new Error('review encoder rejected') }
+
+    await expect(captureReview(controller, { ...REVIEW_SURFACE_REQUEST, kind: 'model-back', areaId: undefined }))
+      .rejects.toMatchObject({ code: 'REBUILD_FAILED', message: expect.stringContaining('review encoder rejected') })
     expect(captureState(internals)).toEqual(before)
   })
 

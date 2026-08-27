@@ -1,15 +1,21 @@
 import type { ErrorObject, ValidateFunction } from 'ajv'
-import Ajv2020 from 'ajv/dist/2020.js'
 import approvalRecordV1Schema from './approval-record-v1.schema.json'
 import designReviewManifestV1Schema from './design-review-manifest-v1.schema.json'
 import editorHandoffV2Schema from './editor-handoff-v2.schema.json'
 import layoutBlueprintV1Schema from './layout-blueprint-v1.schema.json'
-import labelProjectV3Schema from './label-project-v3.schema.json'
-import labelSpecV2Schema from './label-spec-v2.schema.json'
 import reviewManifestV1Schema from './review-manifest-v1.schema.json'
+import generatedValidateWorkflowLabelSpecSchema from './generated/labelSpecV2Validator'
+import {
+  validateApprovalSchema as generatedValidateApprovalSchema,
+  validateBlueprintSchema as generatedValidateBlueprintSchema,
+  validateDesignManifestSchema as generatedValidateDesignManifestSchema,
+  validateHandoffSchema as generatedValidateHandoffSchema,
+  validateProductionManifestSchema as generatedValidateProductionManifestSchema,
+  validateWorkflowProjectSchema as generatedValidateWorkflowProjectSchema,
+} from './generated/designContractValidators'
 import { canonicalApprovedBlueprintDesignProjection, canonicalDocumentDesignProjection } from './designProjection'
 import { WorkflowGateError, type WorkflowGateErrorCode } from './workflowGateError'
-import { isStrictRfc3339DateTime, validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
+import { validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
 import { validateFontStack } from '../label/fontStack'
 import { canonicalLayerOrder, compareOrdinalText } from '../label/layerOrder'
 
@@ -334,19 +340,13 @@ const LEGACY_CARRIERS: Record<string, CarrierMode> = {
   bare_no_label: 'bare',
 }
 
-const ajv = new Ajv2020({ allErrors: true, strict: true })
-ajv.addFormat('date-time', {
-  type: 'string',
-  validate: isStrictRfc3339DateTime,
-})
-
-const validateBlueprintSchema = ajv.compile(layoutBlueprintV1Schema) as ValidateFunction<LayoutBlueprintV1>
-const validateHandoffSchema = ajv.compile(editorHandoffV2Schema) as ValidateFunction<EditorHandoffV2>
-const validateApprovalSchema = ajv.compile(approvalRecordV1Schema) as ValidateFunction<ApprovalRecordV1>
-const validateDesignManifestSchema = ajv.compile(designReviewManifestV1Schema) as ValidateFunction<DesignReviewManifestV1>
-const validateProductionManifestSchema = ajv.compile(reviewManifestV1Schema) as ValidateFunction<ReviewManifestV1>
-const validateWorkflowLabelSpecSchema = ajv.compile(labelSpecV2Schema)
-const validateWorkflowProjectSchema = ajv.compile(labelProjectV3Schema)
+const validateBlueprintSchema = generatedValidateBlueprintSchema as unknown as ValidateFunction<LayoutBlueprintV1>
+const validateHandoffSchema = generatedValidateHandoffSchema as unknown as ValidateFunction<EditorHandoffV2>
+const validateApprovalSchema = generatedValidateApprovalSchema as unknown as ValidateFunction<ApprovalRecordV1>
+const validateDesignManifestSchema = generatedValidateDesignManifestSchema as unknown as ValidateFunction<DesignReviewManifestV1>
+const validateProductionManifestSchema = generatedValidateProductionManifestSchema as unknown as ValidateFunction<ReviewManifestV1>
+const validateWorkflowLabelSpecSchema = generatedValidateWorkflowLabelSpecSchema as unknown as ValidateFunction
+const validateWorkflowProjectSchema = generatedValidateWorkflowProjectSchema as unknown as ValidateFunction
 
 function schemaIssues(validate: ValidateFunction): Array<{ path: string; message: string; keyword: string }> {
   return (validate.errors ?? []).map((error: ErrorObject) => ({

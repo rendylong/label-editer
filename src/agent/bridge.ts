@@ -16,6 +16,8 @@ import {
   type PreviewRequest,
   type QcEvidenceRequest,
   type QcEvidenceResult,
+  type ReviewEvidenceRequest,
+  type ReviewEvidenceResult,
   type ReadinessReport,
   type ReadinessRequest,
   type SerializedProject,
@@ -69,6 +71,7 @@ export interface AgentBridgeHandlers {
   waitForReady: (input?: ReadinessRequest) => Promise<ReadinessReport>
   renderPreview: (input?: PreviewRequest) => Promise<ArtifactDescriptor>
   renderQcEvidence: (input?: QcEvidenceRequest) => Promise<QcEvidenceResult>
+  renderReviewEvidence: (input: ReviewEvidenceRequest) => Promise<ReviewEvidenceResult>
   exportArtifacts: (input: ExportRequest) => Promise<ExportManifest>
 }
 
@@ -80,7 +83,9 @@ function errorCode(value: unknown): AgentErrorCode {
   if (!value || typeof value !== 'object' || !('code' in value)) return 'INTERNAL_ERROR'
   const code = String((value as { code: unknown }).code)
   const supported: AgentErrorCode[] = [
-    'INVALID_USAGE', 'PATH_NOT_ALLOWED', 'OUTPUT_CONFLICT', 'INVALID_LABEL_SPEC',
+    'INVALID_USAGE', 'AWAITING_USER_APPROVAL', 'APPROVAL_REQUIRED', 'HANDOFF_BLOCKED',
+    'DIGEST_MISMATCH', 'STALE_APPROVAL', 'UNREPRESENTABLE_LAYER',
+    'PATH_NOT_ALLOWED', 'OUTPUT_CONFLICT', 'INVALID_LABEL_SPEC',
     'AMBIGUOUS_MODEL_TARGET', 'MODEL_TARGET_NOT_FOUND', 'BROWSER_NOT_READY',
     'REBUILD_FAILED', 'UNSUPPORTED_CODEC', 'REVISION_CONFLICT', 'INVALID_PATCH_OPERATION', 'INTERNAL_ERROR',
   ]
@@ -117,6 +122,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     waitForReady: overrides.waitForReady ?? (() => Promise.resolve(missingHandler('waitForReady'))),
     renderPreview: overrides.renderPreview ?? (() => Promise.resolve(missingHandler('renderPreview'))),
     renderQcEvidence: overrides.renderQcEvidence ?? (() => Promise.resolve(missingHandler('renderQcEvidence'))),
+    renderReviewEvidence: overrides.renderReviewEvidence ?? (() => Promise.resolve(missingHandler('renderReviewEvidence'))),
     exportArtifacts: overrides.exportArtifacts ?? (() => Promise.resolve(missingHandler('exportArtifacts'))),
   }
   return {
@@ -130,6 +136,7 @@ export function createAgentBridge(overrides: Partial<AgentBridgeHandlers> = {}):
     waitForReady: (input) => invoke('wait_for_ready', () => handlers.waitForReady(input)),
     renderPreview: (input) => invoke('render_label_preview', () => handlers.renderPreview(input)),
     renderQcEvidence: (input) => invoke('render_qc_evidence', () => handlers.renderQcEvidence(input)),
+    renderReviewEvidence: (input) => invoke('render_review_evidence', () => handlers.renderReviewEvidence(input)),
     exportArtifacts: (input) => invoke('export_label_assets', () => handlers.exportArtifacts(input)),
   }
 }

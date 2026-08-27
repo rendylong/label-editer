@@ -17,7 +17,7 @@ import type { RemapParams, LabelAreaRange } from '../label/types'
 import { surfaceToUV, uvToSurface, areaBoxPoints, areaControlPoints, type UV } from '../glb/areaMath'
 import { offsetOverlayPositions } from '../glb/overlayGeometry'
 import { LatestAsyncResourceOwner } from './LatestAsyncResourceOwner'
-import type { AgentErrorCode, QcCameraMetadata, QcViewRequest } from '../agent/contracts'
+import type { AgentErrorCode, QcCameraMetadata, QcViewRequest, ReviewViewRequest } from '../agent/contracts'
 import { cameraForFrame, surfaceFrameForGeometry, type QcTargetFrame } from './qcCamera'
 
 type PngEncoder = (canvas: HTMLCanvasElement) => Promise<Blob>
@@ -615,6 +615,90 @@ export class SceneController {
       if (this.areaControlGroup && this.areaControlGroup === previous.areaControl?.object) {
         this.areaControlGroup.visible = previous.areaControl.visible
       }
+      this.requestRender()
+    }
+  }
+
+  /**
+   * Capture a clean human-review view through the same target framing and
+   * camera geometry as QC, but with a deterministic neutral scene and no
+   * diagnostic state. Every temporary scene mutation is restored in finally.
+   */
+  async captureReviewPng(request: ReviewViewRequest): Promise<{ blob: Blob; camera: QcCameraMetadata }> {
+    if (request.kind === 'flat-artwork' || request.kind === 'review-sheet') {
+      throw qcCaptureError('INVALID_USAGE', `Review view ${request.kind} is not a 3D scene capture`)
+    }
+    if (request.kind === 'surface-face' && !request.areaId) {
+      throw qcCaptureError('INVALID_USAGE', 'Surface review requires an exact area id')
+    }
+    const qcRequest: QcViewRequest = request.kind === 'surface-face'
+      ? {
+          id: request.id,
+          target: { kind: 'area', areaId: request.areaId! },
+          framing: 'fit-area', pose: { kind: 'area-face' }, channel: 'color',
+          width: request.width, height: request.height, areaId: request.areaId,
+          reason: 'Clean production surface review',
+        }
+      : {
+          id: request.id,
+          target: { kind: 'model' }, framing: 'fit-model',
+          pose: { kind: 'direction', direction: request.kind === 'model-front' ? [0, 0, 1] : [0, 0, -1] },
+          channel: 'color', width: request.width, height: request.height,
+          reason: `Clean production ${request.kind} review`,
+        }
+
+    const existingLights = this.scene.children
+      .filter((object): object is THREE.Light => object instanceof THREE.Light)
+      .map((light) => ({ light, visible: light.visible }))
+    const temporaryLights = createLightStudioLights()
+    const temporaryLightObjects = [
+      temporaryLights.hemisphere, temporaryLights.key, temporaryLights.fill, temporaryLights.rim,
+    ]
+    const previous = {
+      background: this.scene.background,
+      environment: this.scene.environment,
+      environmentIntensity: this.scene.environmentIntensity,
+      overrideMaterial: this.scene.overrideMaterial,
+      outputColorSpace: this.renderer.outputColorSpace,
+      toneMapping: this.renderer.toneMapping,
+      exposure: this.renderer.toneMappingExposure,
+      gridVisible: this.grid.visible,
+      outlineEnabled: this.outline.enabled,
+      controlsEnabled: this.controls.enabled,
+      controlsAutoRotate: this.controls.autoRotate,
+      autoRotate: this.autoRotate,
+    }
+
+    try {
+      for (const { light } of existingLights) light.visible = false
+      this.scene.add(...temporaryLightObjects)
+      this.scene.background = new THREE.Color(LIGHT_STUDIO.background)
+      this.scene.environmentIntensity = LIGHT_STUDIO_RENDERING.environmentIntensity
+      this.scene.overrideMaterial = null
+      this.renderer.outputColorSpace = THREE.SRGBColorSpace
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+      this.renderer.toneMappingExposure = LIGHT_STUDIO_RENDERING.exposure
+      this.grid.visible = false
+      this.outline.enabled = false
+      this.controls.enabled = false
+      this.controls.autoRotate = false
+      this.autoRotate = false
+      return await this.captureQcPng(qcRequest)
+    } finally {
+      this.scene.remove(...temporaryLightObjects)
+      for (const { light, visible } of existingLights) light.visible = visible
+      this.scene.background = previous.background
+      this.scene.environment = previous.environment
+      this.scene.environmentIntensity = previous.environmentIntensity
+      this.scene.overrideMaterial = previous.overrideMaterial
+      this.renderer.outputColorSpace = previous.outputColorSpace
+      this.renderer.toneMapping = previous.toneMapping
+      this.renderer.toneMappingExposure = previous.exposure
+      this.grid.visible = previous.gridVisible
+      this.outline.enabled = previous.outlineEnabled
+      this.controls.enabled = previous.controlsEnabled
+      this.controls.autoRotate = previous.controlsAutoRotate
+      this.autoRotate = previous.autoRotate
       this.requestRender()
     }
   }

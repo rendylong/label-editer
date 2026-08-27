@@ -4,6 +4,9 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'no
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
+import type { ReviewEvidenceRequest } from '../src/agent/contracts'
+import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
 // @ts-expect-error CLI is directly executable ESM.
 import { runCli } from '../scripts/label-cli.mjs'
 // @ts-expect-error Plugin runtime is directly executable ESM.
@@ -28,7 +31,138 @@ function glbJson(bytes: Uint8Array): Record<string, any> {
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength)).trim())
 }
 
+function reviewEvidenceFixture(): { spec: Record<string, unknown>; request: ReviewEvidenceRequest } {
+  const widthMm = 58.76605666054
+  const heightMm = 30
+  const blueprint: LayoutBlueprintV1 = {
+    version: 1,
+    revision: 'task9-browser-review-v1',
+    carrierDefaults: { carrier: 'direct_surface_print' },
+    assets: [],
+    areas: [{
+      id: 'front', side: 'front', carrier: 'direct_surface_print',
+      artboard: { widthMm, heightMm, background: 'transparent' },
+      placementIntent: 'Centered direct print on the front face.', placementPolicy: 'block',
+      layers: [{
+        id: 'browser-mark', kind: 'shape', boundsMm: { x: 16, y: 4, width: 26, height: 22 },
+        anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 0,
+        processes: [{ process: 'screen_print' }], shape: 'ellipse',
+        fill: '#b88a44', stroke: '#3b2411', strokeWidthMm: 0.5, cornerRadiusMm: 0,
+      }],
+    }],
+  }
+  const blueprintJson = JSON.stringify(blueprint)
+  const blueprintSha = hash(new TextEncoder().encode(blueprintJson))
+  const manifest: DesignReviewManifestV1 = {
+    version: 1, createdAt: '2026-08-27T10:00:00.000Z',
+    blueprint: { revision: blueprint.revision, sha256: blueprintSha },
+    html: { sha256: '1'.repeat(64) }, references: [],
+    areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
+    artifacts: [{
+      id: 'mockup-front', path: 'mockup-front.png', sha256: '2'.repeat(64),
+      mimeType: 'image/png', width: 1600, height: 1200, viewKind: 'mockup-front',
+    }, {
+      id: 'mockup-back', path: 'mockup-back.png', sha256: '3'.repeat(64),
+      mimeType: 'image/png', width: 1600, height: 1200, viewKind: 'mockup-back',
+    }, {
+      id: 'mockup-area-front', path: 'areas/front.png', sha256: '4'.repeat(64),
+      mimeType: 'image/png', width: 1200, height: 1200, viewKind: 'mockup-area',
+      areaId: 'front', carrier: 'direct_surface_print',
+    }],
+  }
+  const designReviewManifestJson = JSON.stringify(manifest)
+  const manifestSha = hash(new TextEncoder().encode(designReviewManifestJson))
+  const handoff: EditorHandoffV2 = {
+    handoff_version: 2, status: 'approved',
+    source: {
+      design_spec: 'design.md', mockup_html: 'mockup.html', blueprint: 'layout-blueprint.json',
+      design_review_manifest: 'design-review-manifest.json', blueprint_revision: blueprint.revision,
+      blueprint_sha256: blueprintSha, review_manifest_sha256: manifestSha,
+    },
+    approval: {
+      mode: 'explicit_approval', scope: 'current_task', blueprint_revision: blueprint.revision,
+      blueprint_sha256: blueprintSha, review_manifest_sha256: manifestSha,
+    },
+    model: { package_type: 'bottle' },
+    areas: [{
+      id: 'front', side: 'front', carrier: 'direct_surface_print',
+      placement: 'Centered direct print on the front face.',
+      physical_size_mm: { width: widthMm, height: heightMm }, blueprint_area_id: 'front',
+    }],
+    assets: [], production_constraints: {}, assumptions: [], blockers: [],
+  }
+  const areas = compileBlueprintToSpecAreas(blueprint, [{
+    blueprintAreaId: 'front', name: 'Front',
+    target: { nodeName: 'Cube.001_Material.001_0' }, surfaceMode: 'overlay',
+    range: { uStart: 0.35, uWidth: 0.3, vStart: 0.2, vHeight: 0.6 },
+  }])
+  areas[0].designBinding = {
+    blueprintRevision: blueprint.revision,
+    blueprintSha256: blueprintSha,
+    reviewManifestSha256: manifestSha,
+  }
+  return {
+    spec: { version: 2, areas },
+    request: {
+      width: 640, height: 640,
+      designGate: { handoff, blueprintJson, designReviewManifestJson },
+    },
+  }
+}
+
 describe('GLB label plugin E2E', () => {
+  it.runIf(runRealE2E)('captures a gate-bound clean review through the packaged browser bridge', async () => {
+    const requestedEvidenceDir = process.env.GLB_LABEL_TASK9_EVIDENCE_DIR
+    const evidenceDir = requestedEvidenceDir
+      ? path.resolve(requestedEvidenceDir)
+      : await mkdtemp(path.join(tmpdir(), 'glb-label-task9-review-'))
+    await mkdir(evidenceDir, { recursive: true })
+    const runtime = await createPluginRuntime({
+      allowedRoots: [process.cwd(), path.dirname(modelPath), evidenceDir],
+    })
+    try {
+      const session = await runtime.createSession({ glbPath: modelPath })
+      const loaded = await runtime.callBridge(session, 'loadModel', {
+        name: session.modelName, url: session.inputUrl,
+      })
+      expect(loaded).toMatchObject({ ok: true, operation: 'load_model' })
+      const fixture = reviewEvidenceFixture()
+      const applied = await runtime.callBridge(session, 'applySpec', { spec: fixture.spec, assetUrls: {} })
+      expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, operation: 'apply_label_spec' })
+      expect(await runtime.callBridge(session, 'waitForReady', { timeoutMs: 60_000 }))
+        .toMatchObject({ ok: true, operation: 'wait_for_ready' })
+
+      const rendered = await runtime.callBridge(session, 'renderReviewEvidence', fixture.request)
+      expect(rendered, JSON.stringify(rendered)).toMatchObject({
+        ok: true, operation: 'render_review_evidence',
+        data: {
+          inputKind: 'label-project-v3', blueprintRevision: 'task9-browser-review-v1',
+          validation: { ready: true }, fidelity: { pass: true },
+          views: [
+            { id: 'label-front' }, { id: 'surface-front' },
+            { id: 'model-front' }, { id: 'model-back' }, { id: 'review-sheet' },
+          ],
+        },
+      })
+      if (!rendered.ok) throw new Error(rendered.error.message)
+      const stored = runtime.getArtifacts(session.id)
+      expect(stored.map((artifact: { id: string }) => artifact.id)).toEqual(
+        rendered.data.views.map((entry: { artifact: { id: string } }) => entry.artifact.id),
+      )
+      for (const artifact of stored) {
+        const bytes = Buffer.from(artifact.bytes)
+        expect(bytes.subarray(0, 8), artifact.id)
+          .toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        expect(hash(bytes), artifact.id).toBe(artifact.sha256)
+        await writeFile(path.join(evidenceDir, `${artifact.id}.png`), bytes)
+      }
+      await writeFile(path.join(evidenceDir, 'review-evidence.json'), `${JSON.stringify(rendered.data, null, 2)}\n`)
+      expect(runtime.browserErrors(session.id)).toEqual([])
+    } finally {
+      await runtime.close()
+    }
+  }, 180_000)
+
   it.runIf(runRealE2E)('applies a front/back design and atomically publishes verified artifacts', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'glb-label-e2e-'))
     const output = path.join(root, 'result')

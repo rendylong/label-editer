@@ -1,7 +1,31 @@
 import { describe, expect, it } from 'vitest'
 import { agentFailure, agentSuccess, exitCodeForError } from '../src/agent/contracts'
+import type { ReviewEvidenceRequest, ReviewEvidenceResult } from '../src/agent/contracts'
 
 describe('Agent protocol contracts', () => {
+  it('keeps review gate requests and results structured-clone-safe', () => {
+    const request: ReviewEvidenceRequest = {
+      width: 1600,
+      height: 1600,
+      designGate: {
+        handoff: { handoff_version: 2, status: 'approved' },
+        blueprintJson: '{"version":1}',
+        designReviewManifestJson: '{"version":1}',
+        approvalRecord: { version: 1, gate: 'design' },
+      },
+    }
+    const result: ReviewEvidenceResult = {
+      inputKind: 'label-project-v3', inputRevision: `sha256:${'1'.repeat(64)}`, inputSha256: '2'.repeat(64),
+      blueprintRevision: 'design-v1', blueprintSha256: '3'.repeat(64),
+      designReviewManifestSha256: '4'.repeat(64), modelFingerprint: '5'.repeat(64),
+      areaTargetsSha256: '6'.repeat(64), views: [],
+      validation: { ready: true, issues: [] }, fidelity: { pass: true, issues: [] },
+    }
+
+    expect(structuredClone(request)).toEqual(request)
+    expect(structuredClone(result)).toEqual(result)
+  })
+
   it('returns one stable success envelope', () => {
     expect(agentSuccess('inspect_model', { meshes: 2 })).toEqual({
       ok: true,

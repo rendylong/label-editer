@@ -7,7 +7,11 @@ import { SceneController } from './SceneController'
 import { useModelStore, useLabelStore, useUiStore } from '../state/stores'
 import { findPart } from '../glb/analyze'
 import type { PartNode } from '../label/types'
-import { registerAgentPreviewCapture } from '../agent/previewCapture'
+import {
+  captureFlatArtworkReview,
+  composeReviewSheet,
+  registerAgentPreviewCapture,
+} from '../agent/previewCapture'
 
 /** modelStore 保存部件树 id；three 场景显隐以节点 name 定位，必须先做映射。 */
 export function resolveHiddenNodeNames(parts: PartNode[], hiddenIds: Set<string>): Set<string> {
@@ -57,6 +61,22 @@ export function Viewport({ showFrontMarker = false, readOnly = false }: { showFr
     const unregisterPreview = registerAgentPreviewCapture({
       preview: ({ width, height }) => ctrl.capturePng(width, height),
       qc: (request) => ctrl.captureQcPng(request),
+      review: (request, context) => {
+        if (request.kind === 'review-sheet') return composeReviewSheet(request, context)
+        if (request.kind !== 'flat-artwork') return ctrl.captureReviewPng(request).then((captured) => ({
+          id: request.id, kind: request.kind, blob: captured.blob,
+          width: request.width, height: request.height, camera: captured.camera,
+        }))
+        const labels = useLabelStore.getState()
+        const area = labels.areas.find((candidate) => candidate.id === request.areaId)
+        const bake = request.areaId ? labels.bakeMap[request.areaId] : undefined
+        if (!area || !bake || bake.areaOwner !== area) {
+          const error = new Error(`Flat review bake is not current: ${request.areaId ?? 'missing area'}`) as Error & { code: string }
+          error.code = 'BROWSER_NOT_READY'
+          return Promise.reject(error)
+        }
+        return captureFlatArtworkReview(request, bake.color)
+      },
     })
     return () => {
       unregisterPreview()

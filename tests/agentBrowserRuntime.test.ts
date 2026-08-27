@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 
 import { Blob as NodeBlob } from 'node:buffer'
+import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createBrowserAgentBridge } from '../src/agent/browserBridgeRuntime'
+import { compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
+import { createBrowserAgentBridge, isBakeSettleWindowReady } from '../src/agent/browserBridgeRuntime'
 import { registerAgentPreviewCapture } from '../src/agent/previewCapture'
-import type { QcCameraMetadata } from '../src/agent/contracts'
+import type { QcCameraMetadata, ReviewEvidenceRequest, ReviewViewRequest } from '../src/agent/contracts'
+import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
+import { applyStructuredLabelSpec } from '../src/app/labelSpec'
 import { designFontReadinessKey } from '../src/label/exportReadiness'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
@@ -18,6 +22,12 @@ vi.mock('../src/app/projectImportRuntime', () => ({
 }))
 
 const token = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+it('requires elapsed settle time and multiple unchanged frames before capture readiness', () => {
+  expect(isBakeSettleWindowReady(400, 1)).toBe(false)
+  expect(isBakeSettleWindowReady(349, 3)).toBe(false)
+  expect(isBakeSettleWindowReady(350, 3)).toBe(true)
+})
 
 function pngBlob(value: string): Blob {
   return new NodeBlob([value], { type: 'image/png' }) as unknown as Blob
@@ -117,6 +127,94 @@ function uploadedDescriptor(id: string): Record<string, unknown> {
     mimeType: 'image/png',
     url: `/artifact/${id}`,
     byteLength: 1,
+  }
+}
+
+function sha256(value: string | Uint8Array): string {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function reviewFixture(): { request: ReviewEvidenceRequest; owner: LabelAreaConfig } {
+  const blueprint: LayoutBlueprintV1 = {
+    version: 1,
+    revision: 'review-design-v1',
+    carrierDefaults: { carrier: 'direct_surface_print' },
+    assets: [],
+    areas: [{
+      id: 'front', side: 'front', carrier: 'direct_surface_print',
+      artboard: { widthMm: 40, heightMm: 40, background: 'transparent' },
+      placementIntent: 'Centered front.', placementPolicy: 'block',
+      layers: [{
+        id: 'mark', kind: 'shape', boundsMm: { x: 4, y: 4, width: 32, height: 32 },
+        anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 0,
+        processes: [{ process: 'screen_print' }], shape: 'ellipse',
+        fill: '#111111', stroke: '#111111', strokeWidthMm: 0, cornerRadiusMm: 0,
+      }],
+    }],
+  }
+  const blueprintJson = JSON.stringify(blueprint)
+  const blueprintSha = sha256(blueprintJson)
+  const designManifest: DesignReviewManifestV1 = {
+    version: 1, createdAt: '2026-08-27T10:00:00.000Z',
+    blueprint: { revision: blueprint.revision, sha256: blueprintSha },
+    html: { sha256: '1'.repeat(64) }, references: [],
+    areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
+    artifacts: [{
+      id: 'mockup-front', path: 'mockup-front.png', sha256: '2'.repeat(64), mimeType: 'image/png',
+      width: 1600, height: 1200, viewKind: 'mockup-front',
+    }, {
+      id: 'mockup-back', path: 'mockup-back.png', sha256: '3'.repeat(64), mimeType: 'image/png',
+      width: 1600, height: 1200, viewKind: 'mockup-back',
+    }, {
+      id: 'mockup-area-front', path: 'areas/front.png', sha256: '4'.repeat(64), mimeType: 'image/png',
+      width: 1200, height: 1200, viewKind: 'mockup-area', areaId: 'front', carrier: 'direct_surface_print',
+    }],
+  }
+  const designReviewManifestJson = JSON.stringify(designManifest)
+  const manifestSha = sha256(designReviewManifestJson)
+  const handoff: EditorHandoffV2 = {
+    handoff_version: 2, status: 'approved',
+    source: {
+      design_spec: 'design.md', mockup_html: 'mockup.html', blueprint: 'layout-blueprint.json',
+      design_review_manifest: 'design-review-manifest.json', blueprint_revision: blueprint.revision,
+      blueprint_sha256: blueprintSha, review_manifest_sha256: manifestSha,
+    },
+    approval: {
+      mode: 'explicit_approval', scope: 'current_task', blueprint_revision: blueprint.revision,
+      blueprint_sha256: blueprintSha, review_manifest_sha256: manifestSha,
+    },
+    model: { package_type: 'bottle' },
+    areas: [{
+      id: 'front', side: 'front', carrier: 'direct_surface_print', placement: 'Centered front.',
+      physical_size_mm: { width: 40, height: 40 }, blueprint_area_id: 'front',
+    }],
+    assets: [], production_constraints: {}, assumptions: [], blockers: [],
+  }
+  const shell = { ...area(), id: 'front', name: 'Front', side: 'front' as const, surfaceMode: 'overlay' as const }
+  shell.canvas = { width: 1024, height: 1024, aspect: 1 }
+  shell.layers = []
+  shell.globalCraft = { craft: [] }
+  delete shell.printSpec
+  const compiled = compileBlueprintToSpecAreas(blueprint, [{
+    blueprintAreaId: 'front', name: 'Front', target: { stableSelector: 'mesh:7/node:7' },
+    surfaceMode: 'overlay', range: structuredClone(shell.range),
+    remap: { mode: shell.remap.mode, wrap: shell.remap.wrap, offset: shell.remap.offset, mirrorU: shell.remap.mirrorU },
+  }])[0]
+  compiled.designBinding = {
+    blueprintRevision: blueprint.revision, blueprintSha256: blueprintSha, reviewManifestSha256: manifestSha,
+  }
+  const owner = applyStructuredLabelSpec(shell, { version: 2, areas: [compiled] }).areas[0]
+  useLabelStore.setState({
+    ...useLabelStore.getInitialState(), areas: [owner], activeAreaId: owner.id, activeArea: owner,
+    meshIndex: owner.meshIndex, nodeName: owner.nodeName, selectedLayerIds: ['sentinel-selection'],
+    bakeMap: { [owner.id]: bake(owner) },
+  }, true)
+  return {
+    request: {
+      width: 640, height: 640,
+      designGate: { handoff, blueprintJson, designReviewManifestJson },
+    },
+    owner,
   }
 }
 
@@ -570,5 +668,174 @@ describe('browser Agent QC runtime', () => {
     expect(result).toMatchObject({ ok: true, operation: 'render_qc_evidence' })
     if (!result.ok) throw new Error('Expected valid same-origin locator')
     expect(result.data.views[0].artifact.url).toBe(new URL('/artifact/qc-model-front', window.location.origin).href)
+  })
+})
+
+describe('browser Agent clean production review runtime', () => {
+  let disposeCapture: (() => void) | undefined
+
+  beforeEach(() => {
+    external.restoreImportedAreaRuntime.mockClear()
+    useUiStore.setState(useUiStore.getInitialState(), true)
+    useLabelStore.setState(useLabelStore.getInitialState(), true)
+    useModelStore.setState({
+      ...useModelStore.getInitialState(), status: 'ready', modelName: 'bottle.glb',
+      glbBytes: new Uint8Array([1, 2, 3]), selectedPartId: 'sentinel-part',
+    }, true)
+  })
+
+  afterEach(() => {
+    disposeCapture?.()
+    disposeCapture = undefined
+    vi.unstubAllGlobals()
+  })
+
+  function registerReviewCapture(
+    callback: (request: ReviewViewRequest, captureIndex: number) => Promise<Record<string, unknown>> = async () => ({}),
+  ) {
+    let captureIndex = 0
+    const camera: QcCameraMetadata = {
+      position: [1, 2, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45,
+    }
+    disposeCapture = registerAgentPreviewCapture({
+      preview: async () => pngBlob('preview'),
+      qc: async () => { throw new Error('QC capture must remain separate') },
+      review: async (request) => ({
+        id: request.id, kind: request.kind, blob: pngBlob(request.id),
+        width: request.width, height: request.height,
+        ...(request.kind === 'surface-face' || request.kind === 'model-front' || request.kind === 'model-back' ? { camera } : {}),
+        ...await callback(request, captureIndex++),
+      }),
+    })
+  }
+
+  function acceptUploads(events: string[] = []) {
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+      const id = decodeURIComponent(new URL(String(input), window.location.origin).pathname.split('/').at(-1) ?? '')
+      events.push(`upload:${id}`)
+      return { ok: true, json: async () => ({ ...uploadedDescriptor(id), bytes: { serverOnly: true } }) } as Response
+    }))
+  }
+
+  it('verifies the design gate and returns exactly the deterministic all-captured-before-upload plan', async () => {
+    const { request } = reviewFixture()
+    const events: string[] = []
+    registerReviewCapture(async (view) => { events.push(`capture:${view.id}`); return {} })
+    acceptUploads(events)
+    const before = {
+      activeAreaId: useLabelStore.getState().activeAreaId,
+      selectedLayerIds: useLabelStore.getState().selectedLayerIds,
+      selectedPartId: useModelStore.getState().selectedPartId,
+    }
+
+    const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)
+
+    const ids = ['label-front', 'surface-front', 'model-front', 'model-back', 'review-sheet']
+    expect(events).toEqual([...ids.map((id) => `capture:${id}`), ...ids.map((id) => `upload:${id}`)])
+    expect(result).toMatchObject({
+      ok: true, operation: 'render_review_evidence',
+      data: {
+        inputKind: 'label-project-v3', blueprintRevision: 'review-design-v1',
+        modelFingerprint: sha256(new Uint8Array([1, 2, 3])),
+        views: ids.map((id) => ({ id, artifact: { id } })),
+        validation: { ready: true }, fidelity: { pass: true },
+      },
+    })
+    if (!result.ok) throw new Error('Expected review evidence')
+    expect(result.data.views.every((entry) => !('bytes' in entry.artifact))).toBe(true)
+    expect({
+      activeAreaId: useLabelStore.getState().activeAreaId,
+      selectedLayerIds: useLabelStore.getState().selectedLayerIds,
+      selectedPartId: useModelStore.getState().selectedPartId,
+    }).toEqual(before)
+  })
+
+  it.each(['awaiting_user_approval', 'continuous_authorized'] as const)(
+    'rejects non-current %s gate evidence before capture',
+    async (status) => {
+      const { request } = reviewFixture()
+      const handoff = request.designGate.handoff as EditorHandoffV2
+      handoff.status = status
+      if (status === 'continuous_authorized') handoff.approval.mode = 'explicit_approval'
+      registerReviewCapture(async () => { throw new Error('capture must not start') })
+      vi.stubGlobal('fetch', vi.fn())
+
+      await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+        .renderReviewEvidence(request)).resolves.toMatchObject({
+        ok: false, operation: 'render_review_evidence',
+        error: { code: status === 'awaiting_user_approval' ? 'AWAITING_USER_APPROVAL' : 'APPROVAL_REQUIRED' },
+      })
+      expect(fetch).not.toHaveBeenCalled()
+    },
+  )
+
+  it.each([0, 1, 2, 3, 4])('fails closed with no upload when state changes after capture boundary %i', async (boundary) => {
+    const { request, owner } = reviewFixture()
+    registerReviewCapture(async (_view, captureIndex) => {
+      if (captureIndex === boundary) {
+        useLabelStore.getState().applyAreaOp(owner.id, (current) => ({ ...current, name: `mutated-${boundary}` }))
+      }
+      return {}
+    })
+    vi.stubGlobal('fetch', vi.fn())
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['wrong id', { id: 'wrong-id' }],
+    ['wrong kind', { kind: 'model-front' }],
+    ['wrong width', { width: 1 }],
+    ['wrong height', { height: 1 }],
+    ['wrong mime', { blob: new NodeBlob(['x'], { type: 'text/plain' }) as unknown as Blob }],
+  ])('rejects a %s capture result without exposing a partial result', async (_label, mutation) => {
+    const { request } = reviewFixture()
+    registerReviewCapture(async (_view, index) => index === 0 ? mutation : {})
+    vi.stubGlobal('fetch', vi.fn())
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('returns no review result when a deferred upload fails', async () => {
+    const { request } = reviewFixture()
+    useUiStore.setState({ channelView: 'bump' })
+    const before = {
+      activeAreaId: useLabelStore.getState().activeAreaId,
+      activeArea: useLabelStore.getState().activeArea,
+      meshIndex: useLabelStore.getState().meshIndex,
+      nodeName: useLabelStore.getState().nodeName,
+      remapOutput: useLabelStore.getState().remapOutput,
+      meshAccessors: useLabelStore.getState().meshAccessors,
+      selectedLayerIds: useLabelStore.getState().selectedLayerIds,
+      selectedPartId: useModelStore.getState().selectedPartId,
+      channelView: useUiStore.getState().channelView,
+    }
+    registerReviewCapture()
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 }) as Response))
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect({
+      activeAreaId: useLabelStore.getState().activeAreaId,
+      activeArea: useLabelStore.getState().activeArea,
+      meshIndex: useLabelStore.getState().meshIndex,
+      nodeName: useLabelStore.getState().nodeName,
+      remapOutput: useLabelStore.getState().remapOutput,
+      meshAccessors: useLabelStore.getState().meshAccessors,
+      selectedLayerIds: useLabelStore.getState().selectedLayerIds,
+      selectedPartId: useModelStore.getState().selectedPartId,
+      channelView: useUiStore.getState().channelView,
+    }).toEqual(before)
   })
 })

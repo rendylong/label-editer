@@ -1,4 +1,5 @@
 import { applyStructuredLabelSpec } from '../app/labelSpec'
+import { assertPhysicalAreaPlacement } from '../app/physicalLayout'
 import { computeLabelSetup, loadModelFromBytes } from '../app/modelLoader'
 import { parseLabelProject, serializeLabelProject } from '../app/projectSchema'
 import { restoreImportedAreaRuntime } from '../app/projectImportRuntime'
@@ -10,10 +11,19 @@ import { validatePrintReadiness } from '../label/printReadiness'
 import { useLabelStore, useModelStore, useUiStore } from '../state/stores'
 import { createExportBundle, type BrowserArtifact } from './artifactExport'
 import { createAgentBridge, type AgentBridgeBootstrap } from './bridge'
-import { captureAgentPreview, captureAgentQcView } from './previewCapture'
+import { captureAgentPreview, captureAgentQcView, captureAgentReviewView, type AgentReviewCaptureSource } from './previewCapture'
 import { inspectModel } from './modelInspection'
 import { validateLabelSpec, type LabelSpecAreaV2, type LabelSpecV2 } from './labelSpecSchema'
 import { buildQcCapturePlan, craftChannelsForArea } from './qcCapturePlan'
+import { buildReviewCapturePlan } from './reviewCapturePlan'
+import {
+  computeAreaTargetsSha256,
+  validateLayoutBlueprint,
+  verifyDesignGate,
+  type LayoutBlueprintV1,
+} from './designContracts'
+import { compareBlueprintFidelity, type FidelityReport } from './fidelityCheck'
+import { sha256HexSync } from './syncSha256'
 import { resolveTarget } from './targetResolver'
 import { applyPreparedAreaTransaction } from './transactionalApply'
 import type {
@@ -26,6 +36,9 @@ import type {
   QcChannel,
   QcViewRequest,
   QcViewResult,
+  ReviewEvidenceRequest,
+  ReviewViewRequest,
+  ReviewViewResult,
 } from './contracts'
 import type { BakeResult } from '../state/stores'
 
@@ -279,9 +292,12 @@ function designValidation(): { ready: boolean; issues: DesignValidationIssue[] }
   return { ready: !issues.some((issue) => issue.severity === 'error'), issues }
 }
 
-async function waitForBakes(timeoutMs = 30_000): Promise<void> {
+async function waitForBakes(
+  timeoutMs = 30_000,
+  includeArea: (area: LabelAreaConfig) => boolean = () => true,
+): Promise<void> {
   const started = performance.now()
-  const areas = useLabelStore.getState().areas
+  const areas = useLabelStore.getState().areas.filter(includeArea)
   const glbBytes = useModelStore.getState().glbBytes
   if (!glbBytes) throw new Error('No model is loaded')
   if (areas.length === 0) return
@@ -308,9 +324,9 @@ async function waitForBakes(timeoutMs = 30_000): Promise<void> {
     }
   }
 
-  const settleMs = 350
   const settledBakes = new Map<string, BakeResult>()
   let stableSince = performance.now()
+  let stableFrames = 0
   while (true) {
     const state = useLabelStore.getState()
     let ready = true
@@ -329,16 +345,203 @@ async function waitForBakes(timeoutMs = 30_000): Promise<void> {
     if (!ready) {
       settledBakes.clear()
       stableSince = now
+      stableFrames = 0
     } else if (changed) {
       settledBakes.clear()
       for (const original of areas) settledBakes.set(original.id, state.bakeMap[original.id])
       stableSince = now
-    } else if (now - stableSince >= settleMs) {
+      stableFrames = 0
+    } else if (isBakeSettleWindowReady(now - stableSince, ++stableFrames)) {
       return
     }
     if (now - started > timeoutMs) throw new Error('Timed out waiting for label bakes to settle')
     await sleepFrame()
   }
+}
+
+/** A long blocked frame is not evidence that debounced browser work has drained. */
+export function isBakeSettleWindowReady(stableElapsedMs: number, stableFrames: number): boolean {
+  return stableElapsedMs >= 350 && stableFrames >= 3
+}
+
+function reviewNotReady(stage: string, message: string, details: Record<string, unknown> = {}): Error {
+  const error = new Error(message) as Error & { code: 'BROWSER_NOT_READY'; details: Record<string, unknown> }
+  error.code = 'BROWSER_NOT_READY'
+  error.details = { stage, ...details }
+  return error
+}
+
+function currentReviewDocument(): { value: Record<string, unknown>; json: string } {
+  const value = serializeLabelProject(
+    useModelStore.getState().modelName,
+    useLabelStore.getState().areas,
+  ) as unknown as Record<string, unknown>
+  return { value, json: JSON.stringify(value) }
+}
+
+function reviewEvidenceBytes(value: string): Uint8Array {
+  return Uint8Array.from(new TextEncoder().encode(value))
+}
+
+interface ReviewStateSnapshot {
+  documentJson: string
+  modelName: string
+  modelFingerprint: string
+  bakes: Map<string, {
+    value: BakeResult
+    color: HTMLCanvasElement
+    width: number
+    height: number
+    version: number
+    areaOwner: LabelAreaConfig
+    fontReadinessKey: string
+  }>
+}
+
+function snapshotReviewState(): ReviewStateSnapshot {
+  const labels = useLabelStore.getState()
+  const model = useModelStore.getState()
+  if (!model.glbBytes) throw reviewNotReady('snapshot', 'Review model is not loaded')
+  const bakes: ReviewStateSnapshot['bakes'] = new Map()
+  for (const area of labels.areas) {
+    if (area.carrier === 'bare') continue
+    const value = labels.bakeMap[area.id]
+    if (!value || value.areaOwner !== area || value.color.width < 1 || value.color.height < 1
+      || (value.fontReadinessKey ?? '') !== designFontReadinessKey(area)) {
+      throw reviewNotReady('snapshot', `Review bake is not current: ${area.id}`, { areaId: area.id })
+    }
+    bakes.set(area.id, {
+      value, color: value.color, width: value.color.width, height: value.color.height,
+      version: value.version, areaOwner: area, fontReadinessKey: value.fontReadinessKey ?? '',
+    })
+  }
+  return {
+    documentJson: currentReviewDocument().json,
+    modelName: model.modelName,
+    modelFingerprint: sha256HexSync(model.glbBytes),
+    bakes,
+  }
+}
+
+function assertReviewStateUnchanged(snapshot: ReviewStateSnapshot, stage: string): void {
+  const model = useModelStore.getState()
+  if (!model.glbBytes || model.modelName !== snapshot.modelName
+    || sha256HexSync(model.glbBytes) !== snapshot.modelFingerprint
+    || currentReviewDocument().json !== snapshot.documentJson) {
+    throw reviewNotReady(stage, `Review input changed during capture (${stage})`)
+  }
+  const labels = useLabelStore.getState()
+  for (const [areaId, expected] of snapshot.bakes) {
+    const value = labels.bakeMap[areaId]
+    if (value !== expected.value || value.color !== expected.color
+      || value.color.width !== expected.width || value.color.height !== expected.height
+      || value.version !== expected.version || value.areaOwner !== expected.areaOwner
+      || (value.fontReadinessKey ?? '') !== expected.fontReadinessKey) {
+      throw reviewNotReady(stage, `Review bake changed during capture (${stage})`, { areaId })
+    }
+  }
+}
+
+function reviewValidation(): DesignValidationReport {
+  const validation = designValidation()
+  const issues = [...validation.issues]
+  for (const area of useLabelStore.getState().areas) {
+    if (area.carrier === 'bare' || !area.artboard) continue
+    try {
+      assertPhysicalAreaPlacement({
+        ...area,
+        placementPolicy: area.designBinding?.approvedCrop ? 'crop-approved' : 'block',
+      })
+    } catch (error) {
+      issues.push({
+        severity: 'error', code: 'target-aspect-mismatch', areaId: area.id,
+        message: error instanceof Error ? error.message : String(error), field: 'placementPolicy',
+      })
+    }
+  }
+  return { ready: !issues.some((issue) => issue.severity === 'error'), issues }
+}
+
+function assertFidelityReady(fidelity: FidelityReport): void {
+  if (!fidelity.pass) {
+    throw reviewNotReady('fidelity', 'Current editable design does not match the approved blueprint', {
+      issueCount: fidelity.issues.length,
+      issues: fidelity.issues.slice(0, 32),
+    })
+  }
+}
+
+function isFiniteCamera(camera: unknown): boolean {
+  if (!camera || typeof camera !== 'object') return false
+  const value = camera as { position?: unknown; direction?: unknown; target?: unknown; up?: unknown; fov?: unknown }
+  return [value.position, value.direction, value.target, value.up].every((vector) => (
+    Array.isArray(vector) && vector.length === 3 && vector.every((entry) => typeof entry === 'number' && Number.isFinite(entry))
+  )) && typeof value.fov === 'number' && Number.isFinite(value.fov) && value.fov > 0 && value.fov < 180
+}
+
+function assertReviewCaptureResult(
+  request: ReviewViewRequest,
+  result: Awaited<ReturnType<typeof captureAgentReviewView>>,
+  resultIds: Set<string>,
+): void {
+  const key = typeof result?.id === 'string' ? result.id.normalize('NFKC').toLowerCase() : ''
+  const requiresCamera = request.kind === 'surface-face' || request.kind === 'model-front' || request.kind === 'model-back'
+  if (!result || result.id !== request.id || result.kind !== request.kind || resultIds.has(key)
+    || result.width !== request.width || result.height !== request.height
+    || !result.blob || result.blob.type !== 'image/png' || result.blob.size < 1
+    || result.blob.size > 32 * 1024 * 1024
+    || (requiresCamera ? !isFiniteCamera(result.camera) : result.camera !== undefined)) {
+    throw reviewNotReady(`capture:${request.id}`, `Review capture result is missing, duplicate, stale, or malformed: ${request.id}`)
+  }
+  resultIds.add(key)
+}
+
+interface ReviewUiSnapshot {
+  activeAreaId: string | null
+  activeArea: LabelAreaConfig | null
+  meshIndex: number | null
+  nodeName: string
+  remapOutput: ReturnType<typeof useLabelStore.getState>['remapOutput']
+  meshAccessors: ReturnType<typeof useLabelStore.getState>['meshAccessors']
+  selectedLayerIds: string[]
+  selectedPartId: string | null
+  channelView: ReturnType<typeof useUiStore.getState>['channelView']
+}
+
+function snapshotReviewUi(): ReviewUiSnapshot {
+  const labels = useLabelStore.getState()
+  return {
+    activeAreaId: labels.activeAreaId, activeArea: labels.activeArea,
+    meshIndex: labels.meshIndex, nodeName: labels.nodeName,
+    remapOutput: labels.remapOutput, meshAccessors: labels.meshAccessors,
+    selectedLayerIds: [...labels.selectedLayerIds],
+    selectedPartId: useModelStore.getState().selectedPartId,
+    channelView: useUiStore.getState().channelView,
+  }
+}
+
+function restoreReviewUi(snapshot: ReviewUiSnapshot): void {
+  useLabelStore.setState({
+    activeAreaId: snapshot.activeAreaId, activeArea: snapshot.activeArea,
+    meshIndex: snapshot.meshIndex, nodeName: snapshot.nodeName,
+    remapOutput: snapshot.remapOutput, meshAccessors: snapshot.meshAccessors,
+    selectedLayerIds: [...snapshot.selectedLayerIds],
+  })
+  useModelStore.setState({ selectedPartId: snapshot.selectedPartId })
+  useUiStore.setState({ channelView: snapshot.channelView })
+}
+
+function reviewPlanAreas(areas: readonly LabelAreaConfig[]): Array<{
+  id: string
+  side: NonNullable<LabelAreaConfig['side']>
+  carrier: NonNullable<LabelAreaConfig['carrier']>
+}> {
+  return areas.map((area) => {
+    if (!area.side || !area.carrier) {
+      throw reviewNotReady('plan', `Review requires normalized side and carrier: ${area.id}`, { areaId: area.id })
+    }
+    return { id: area.id, side: area.side, carrier: area.carrier }
+  })
 }
 
 async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: BrowserArtifact): Promise<ArtifactDescriptor> {
@@ -385,12 +588,12 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
     throw new Error(`Invalid artifact upload response: ${artifact.fileName}`)
   }
   return {
-    ...descriptor,
     url: locator.href,
     id: artifact.id,
     fileName: artifact.fileName,
     mimeType: artifact.mimeType,
     byteLength: artifact.bytes.byteLength,
+    sha256: sha256HexSync(artifact.bytes),
     width: artifact.width,
     height: artifact.height,
     areaId: artifact.areaId,
@@ -400,10 +603,10 @@ async function uploadArtifact(bootstrap: AgentBridgeBootstrap, artifact: Browser
 
 export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): LabelEditorAgentBridgeV1 {
   let normalizedSpec: LabelSpecV2 | undefined
-  let qcOperationTail: Promise<void> = Promise.resolve()
-  const runQcExclusive = <T>(action: () => Promise<T>): Promise<T> => {
-    const running = qcOperationTail.then(action)
-    qcOperationTail = running.then(() => undefined, () => undefined)
+  let captureOperationTail: Promise<void> = Promise.resolve()
+  const runCaptureExclusive = <T>(action: () => Promise<T>): Promise<T> => {
+    const running = captureOperationTail.then(action)
+    captureOperationTail = running.then(() => undefined, () => undefined)
     return running
   }
   return createAgentBridge({
@@ -500,7 +703,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
       }
       return uploadArtifact(bootstrap, artifact)
     },
-    renderQcEvidence: (input) => runQcExclusive(async () => {
+    renderQcEvidence: (input) => runCaptureExclusive(async () => {
       await waitForBakes()
       const width = boundedDimension(input?.width ?? 1440)
       const height = boundedDimension(input?.height ?? 1440)
@@ -544,6 +747,123 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
       const finalValidation = designValidation()
       assertValidationReady(finalValidation)
       return { preset: 'qc-standard', views, areas: qcAreaEvidence(areas, views), validation: finalValidation }
+    }),
+    renderReviewEvidence: (input: ReviewEvidenceRequest) => runCaptureExclusive(async () => {
+      const uiSnapshot = snapshotReviewUi()
+      try {
+        const width = boundedDimension(input?.width ?? 1600)
+        const height = boundedDimension(input?.height ?? 1600)
+        await waitForBakes(30_000, (area) => area.carrier !== 'bare')
+        const snapshot = snapshotReviewState()
+        const document = currentReviewDocument()
+        const gateInput = input?.designGate
+        if (!gateInput || typeof gateInput.blueprintJson !== 'string'
+          || typeof gateInput.designReviewManifestJson !== 'string') {
+          throw reviewNotReady('design-gate', 'Exact design-gate evidence is required for production review')
+        }
+        const gate = await verifyDesignGate({
+          handoff: gateInput.handoff,
+          blueprint: { read: () => reviewEvidenceBytes(gateInput.blueprintJson) },
+          designReviewManifest: { read: () => reviewEvidenceBytes(gateInput.designReviewManifestJson) },
+          currentDocument: { read: () => reviewEvidenceBytes(document.json) },
+          ...(gateInput.approvalRecord === undefined ? {} : { approvalRecord: gateInput.approvalRecord }),
+        })
+        assertReviewStateUnchanged(snapshot, 'after-design-gate')
+        let blueprint: LayoutBlueprintV1
+        try {
+          blueprint = validateLayoutBlueprint(JSON.parse(gateInput.blueprintJson))
+        } catch {
+          throw reviewNotReady('blueprint', 'Approved review blueprint is unavailable or invalid')
+        }
+        const validation = reviewValidation()
+        assertValidationReady(validation)
+        const fidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
+        assertFidelityReady(fidelity)
+        const plan = buildReviewCapturePlan({
+          areas: reviewPlanAreas(useLabelStore.getState().areas), width, height,
+        })
+        assertReviewStateUnchanged(snapshot, 'after-plan')
+        const captures: AgentReviewCaptureSource[] = []
+        const resultIds = new Set<string>()
+        for (const request of plan) {
+          assertReviewStateUnchanged(snapshot, `before-capture:${request.id}`)
+          let result: Awaited<ReturnType<typeof captureAgentReviewView>>
+          try {
+            result = await captureAgentReviewView(request, {
+              blueprintRevision: gate.blueprintRevision,
+              inputRevision: gate.documentRevision,
+              sources: [...captures],
+            })
+          } catch (error) {
+            if (error && typeof error === 'object' && 'code' in error) throw error
+            throw reviewNotReady(`capture:${request.id}`, `Review capture failed: ${request.id}`)
+          }
+          assertReviewCaptureResult(request, result, resultIds)
+          captures.push({ request, result })
+          assertReviewStateUnchanged(snapshot, `after-capture:${request.id}`)
+        }
+        if (captures.length !== plan.length) {
+          throw reviewNotReady('capture-complete', `Review captured ${captures.length} of ${plan.length} planned views`)
+        }
+        const finalDocument = currentReviewDocument()
+        const finalGate = await verifyDesignGate({
+          handoff: gateInput.handoff,
+          blueprint: { read: () => reviewEvidenceBytes(gateInput.blueprintJson) },
+          designReviewManifest: { read: () => reviewEvidenceBytes(gateInput.designReviewManifestJson) },
+          currentDocument: { read: () => reviewEvidenceBytes(finalDocument.json) },
+          ...(gateInput.approvalRecord === undefined ? {} : { approvalRecord: gateInput.approvalRecord }),
+        })
+        if (JSON.stringify(finalGate) !== JSON.stringify(gate)) {
+          throw reviewNotReady('final-design-gate', 'Review design gate changed during capture')
+        }
+        assertReviewStateUnchanged(snapshot, 'before-upload')
+        const finalValidation = reviewValidation()
+        assertValidationReady(finalValidation)
+        const finalFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
+        assertFidelityReady(finalFidelity)
+        const views: ReviewViewResult[] = []
+        for (const source of captures) {
+          assertReviewStateUnchanged(snapshot, `before-upload:${source.request.id}`)
+          const bytes = await blobBytes(source.result.blob)
+          assertReviewStateUnchanged(snapshot, `after-encoding:${source.request.id}`)
+          let artifact: ArtifactDescriptor
+          try {
+            artifact = await uploadArtifact(bootstrap, {
+              id: source.request.id, fileName: `${source.request.id}.png`, mimeType: 'image/png',
+              bytes, width: source.request.width, height: source.request.height,
+              areaId: source.request.areaId,
+            })
+          } catch (error) {
+            throw reviewNotReady(`upload:${source.request.id}`, `Review artifact upload failed: ${source.request.id}`, {
+              cause: error instanceof Error ? error.message : String(error),
+            })
+          }
+          assertReviewStateUnchanged(snapshot, `after-upload:${source.request.id}`)
+          views.push({
+            id: source.request.id, kind: source.request.kind,
+            ...(source.request.areaId ? { areaId: source.request.areaId } : {}),
+            ...(source.request.carrier ? { carrier: source.request.carrier } : {}),
+            artifact,
+            ...(source.result.camera ? { camera: source.result.camera } : {}),
+          })
+        }
+        assertReviewStateUnchanged(snapshot, 'before-result')
+        return {
+          inputKind: 'label-project-v3',
+          inputRevision: gate.documentRevision,
+          inputSha256: gate.documentSha256,
+          blueprintRevision: gate.blueprintRevision,
+          blueprintSha256: gate.blueprintSha256,
+          designReviewManifestSha256: gate.designReviewManifestSha256,
+          modelFingerprint: snapshot.modelFingerprint,
+          areaTargetsSha256: await computeAreaTargetsSha256(document.value),
+          views,
+          validation: finalValidation,
+          fidelity: finalFidelity,
+        }
+      } finally {
+        restoreReviewUi(uiSnapshot)
+      }
     }),
     exportArtifacts: async () => {
       await waitForBakes()
