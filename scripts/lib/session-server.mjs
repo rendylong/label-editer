@@ -93,13 +93,14 @@ export async function createSessionServer({
     return `${batchId}\0${generation}`
   }
 
-  function rememberReviewSettlement(session, lease, action, payload) {
+  function rememberReviewSettlement(session, lease, action, payload, confirmationSha256) {
     const key = settlementKey(lease.batchId, lease.generation)
     session.reviewSettlements.delete(key)
     session.reviewSettlements.set(key, {
       leaseToken: lease.leaseToken,
       action,
       payload,
+      ...(confirmationSha256 ? { confirmationSha256 } : {}),
     })
     while (session.reviewSettlements.size > 32) {
       session.reviewSettlements.delete(session.reviewSettlements.keys().next().value)
@@ -122,12 +123,12 @@ export async function createSessionServer({
     return payload
   }
 
-  function sealReviewLease(session, lease, { remember = true } = {}) {
+  function sealReviewLease(session, lease, { remember = true, action = 'finalize', payload, confirmationSha256 } = {}) {
     clearReviewLeaseTimer(lease)
     if (session.reviewLease === lease) session.reviewLease = null
-    const payload = { ok: true, batchId: lease.batchId, generation: lease.generation, finalized: true }
-    if (remember) rememberReviewSettlement(session, lease, 'finalize', payload)
-    return payload
+    const settlement = payload ?? { ok: true, batchId: lease.batchId, generation: lease.generation, finalized: true }
+    if (remember) rememberReviewSettlement(session, lease, action, settlement, confirmationSha256)
+    return settlement
   }
 
   function finishExpiredReviewLease(session, lease) {
@@ -164,7 +165,7 @@ export async function createSessionServer({
     if (lease && now() >= lease.deadline) finishExpiredReviewLease(session, lease)
   }
 
-  function requestLease(session, batchId, request, body, phases) {
+  function requestLease(session, batchId, request, body, phases, { renew = true } = {}) {
     expireReviewLeaseAtBoundary(session)
     const lease = session.reviewLease
     const token = body?.leaseToken ?? request.headers['x-artifact-lease-token']
@@ -172,17 +173,98 @@ export async function createSessionServer({
     if (!lease || lease.batchId !== batchId || !validToken(lease.leaseToken, token)
       || generation !== lease.generation) return null
     if (phases && !phases.includes(lease.phase)) return null
-    renewReviewLease(session, lease)
+    if (renew) renewReviewLease(session, lease)
     return lease
   }
 
-  function replayReviewSettlement(session, batchId, request, body, action) {
+  function replayReviewSettlement(session, batchId, request, body, action, confirmationSha256) {
     const token = body?.leaseToken ?? request.headers['x-artifact-lease-token']
     const generation = body?.generation ?? Number(request.headers['x-artifact-generation'])
     if (!Number.isSafeInteger(generation) || generation < 1) return null
     const settled = session.reviewSettlements.get(settlementKey(batchId, generation))
-    if (!settled || settled.action !== action || !validToken(settled.leaseToken, token)) return null
+    if (!settled || settled.action !== action || !validToken(settled.leaseToken, token)
+      || (action === 'confirm' && settled.confirmationSha256 !== confirmationSha256)) return null
     return settled.payload
+  }
+
+  function receiptArtifact(artifact) {
+    return {
+      id: artifact.id,
+      resultId: artifact.resultId,
+      sha256: artifact.sha256,
+      byteLength: artifact.byteLength,
+      mimeType: artifact.mimeType,
+      ...(artifact.width === undefined ? {} : { width: artifact.width }),
+      ...(artifact.height === undefined ? {} : { height: artifact.height }),
+    }
+  }
+
+  function matchingReceipt(candidate, artifact) {
+    const expected = receiptArtifact(artifact)
+    return candidate && typeof candidate === 'object' && !Array.isArray(candidate)
+      && Object.keys(candidate).length === Object.keys(expected).length
+      && Object.keys(candidate).every((key) => Object.hasOwn(expected, key))
+      && Object.entries(expected).every(([key, value]) => candidate[key] === value)
+  }
+
+  function confirmationIdentity(body, expected) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).length !== 4
+      || !Object.hasOwn(body, 'leaseToken') || !Object.hasOwn(body, 'generation')
+      || !Object.hasOwn(body, 'expiresAt') || !Object.hasOwn(body, 'artifacts')
+      || !Array.isArray(body.artifacts)
+      || (expected && (body.artifacts.length !== expected.length
+        || body.artifacts.some((candidate, index) => !matchingReceipt(candidate, expected[index]))))) return null
+    return sha256Bytes(Buffer.from(JSON.stringify({
+      generation: body.generation,
+      expiresAt: body.expiresAt,
+      artifacts: body.artifacts,
+    })))
+  }
+
+  function namespaceIsolated(session) {
+    for (const [resultId, artifact] of session.currentArtifactsByResultId) {
+      if (artifact.resultId !== resultId || session.artifacts.get(artifact.id) !== artifact) return false
+      const alias = session.artifacts.get(resultId)
+      if (alias && alias !== artifact) return false
+    }
+    return true
+  }
+
+  function stagedNamespaceAvailable(session, batch, id, resultId) {
+    if (!namespaceIsolated(session)) return false
+    if (session.artifacts.has(id) || session.currentArtifactsByResultId.has(id)) return false
+    const resultAlias = session.artifacts.get(resultId)
+    if (resultAlias && session.currentArtifactsByResultId.get(resultId) !== resultAlias) return false
+    for (const artifact of batch.values()) {
+      if (artifact.id === id || artifact.resultId === resultId
+        || artifact.id === resultId || artifact.resultId === id) return false
+    }
+    return true
+  }
+
+  function stagedBatchNamespaceAvailable(session, committed) {
+    if (!namespaceIsolated(session)) return false
+    const staged = new Map()
+    for (const [id, artifact] of committed) {
+      if (!stagedNamespaceAvailable(session, staged, id, artifact.resultId)) return false
+      staged.set(id, artifact)
+    }
+    return true
+  }
+
+  function committedNamespaceIsolated(session, committed) {
+    if (!namespaceIsolated(session)) return false
+    const ids = new Set()
+    const resultIds = new Set()
+    for (const [id, artifact] of committed) {
+      if (ids.has(id) || resultIds.has(artifact.resultId) || ids.has(artifact.resultId) || resultIds.has(id)
+        || session.artifacts.get(id) !== artifact
+        || session.currentArtifactsByResultId.get(artifact.resultId) !== artifact) return false
+      ids.add(id)
+      resultIds.add(artifact.resultId)
+    }
+    return true
   }
 
   const server = createServer(async (request, response) => {
@@ -227,7 +309,7 @@ export async function createSessionServer({
             }
             const outcome = await serializeSessionMutation(session, () => {
               expireReviewLeaseAtBoundary(session)
-              if (session.reviewLease) {
+              if (session.reviewLease || !namespaceIsolated(session)) {
                 return { status: 409, payload: { ok: false, error: 'Review artifact lease is busy' } }
               }
               const lease = {
@@ -263,14 +345,12 @@ export async function createSessionServer({
             const outcome = await serializeSessionMutation(session, () => {
               const lease = requestLease(session, batchId, request, undefined, ['staging'])
               if (!lease) return { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact lease' } }
-              if (session.artifacts.has(id)) return { status: 409, payload: { ok: false, error: 'Artifact already exists' } }
               const batch = lease.staged
-              if (batch.has(id)) return { status: 409, payload: { ok: false, error: 'Artifact already staged' } }
+              if (!stagedNamespaceAvailable(session, batch, id, resultId)) {
+                return { status: 409, payload: { ok: false, error: 'Artifact id or result id conflicts with the session namespace' } }
+              }
               if (batch.size >= maxReviewBatchArtifacts) {
                 return { status: 413, payload: { ok: false, error: 'Review artifact count exceeds limit' } }
-              }
-              if ([...batch.values()].some((artifact) => artifact.resultId === resultId)) {
-                return { status: 400, payload: { ok: false, error: 'Invalid or duplicate artifact result id' } }
               }
               if (bytes.byteLength > maxReviewBatchBytes - lease.stagedBytes) {
                 return { status: 413, payload: { ok: false, error: 'Review artifact bytes exceed limit' } }
@@ -319,6 +399,9 @@ export async function createSessionServer({
                 return { status: 409, payload: { ok: false, error: 'Artifact already exists' } }
               }
               const committed = new Map(batch)
+              if (!stagedBatchNamespaceAvailable(session, committed)) {
+                return { status: 409, payload: { ok: false, error: 'Artifact namespace changed before commit' } }
+              }
               const prior = new Map(session.currentArtifactsByResultId)
               for (const previous of prior.values()) session.artifacts.delete(previous.id)
               session.currentArtifactsByResultId.clear()
@@ -347,9 +430,7 @@ export async function createSessionServer({
                 || artifacts.some((candidate, index) => {
                   const artifact = expected[index]
                   return !candidate || typeof candidate !== 'object' || Array.isArray(candidate)
-                    || Object.keys(candidate).some((key) => !['id', 'resultId', 'sha256'].includes(key))
-                    || candidate.id !== artifact.id || candidate.resultId !== artifact.resultId
-                    || candidate.sha256 !== artifact.sha256
+                    || !matchingReceipt(candidate, artifact)
                 })) {
                 return { status: 409, payload: { ok: false, error: 'Artifact readback receipt is incomplete or mismatched' } }
               }
@@ -360,7 +441,42 @@ export async function createSessionServer({
                 generation: lease.generation,
                 receipt: true,
                 artifactIds: expected.map((artifact) => artifact.id),
+                expiresAt: lease.expiresAt,
               } }
+            })
+            json(response, outcome.status, outcome.payload)
+            return
+          }
+          if (request.method === 'POST' && parts[5] === 'confirm') {
+            const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
+            const outcome = await serializeSessionMutation(session, () => {
+              const active = session.reviewLease
+              const expected = active?.batchId === batchId && active.committed ? [...active.committed.values()] : undefined
+              const identity = confirmationIdentity(body, expected)
+              const lease = requestLease(session, batchId, request, body, ['prepared'], { renew: false })
+              if (!lease) {
+                const replay = identity
+                  ? replayReviewSettlement(session, batchId, request, body, 'confirm', identity)
+                  : null
+                return replay
+                  ? { status: 200, payload: replay }
+                  : { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact confirmation' } }
+              }
+              if (!identity || body.expiresAt !== lease.expiresAt
+                || !committedNamespaceIsolated(session, lease.committed)) {
+                return { status: 409, payload: { ok: false, error: 'Review artifact confirmation is incomplete or mismatched' } }
+              }
+              const payload = {
+                ok: true,
+                batchId,
+                generation: lease.generation,
+                sealed: true,
+                artifactIds: [...lease.committed.values()].map((artifact) => artifact.id),
+                resultIds: [...lease.committed.values()].map((artifact) => artifact.resultId),
+              }
+              return { status: 200, payload: sealReviewLease(session, lease, {
+                action: 'confirm', payload, confirmationSha256: identity,
+              }) }
             })
             json(response, outcome.status, outcome.payload)
             return
@@ -374,6 +490,9 @@ export async function createSessionServer({
                 return replay
                   ? { status: 200, payload: replay }
                   : { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact lease' } }
+              }
+              if (!committedNamespaceIsolated(session, lease.committed)) {
+                return { status: 409, payload: { ok: false, error: 'Artifact namespace changed before finalize' } }
               }
               return { status: 200, payload: sealReviewLease(session, lease) }
             })

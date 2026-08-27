@@ -243,14 +243,26 @@ describe('plugin runtime security', () => {
           body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation }),
         })
       }
-      const receipt = async (batch: string, artifacts: Array<{ id: string; resultId: string; sha256: string }>) => {
+      const receipt = async (batch: string, artifacts: Array<{
+        id: string
+        resultId: string
+        sha256: string
+        byteLength: number
+        mimeType: string
+        width?: number
+        height?: number
+      }>) => {
         const lease = leases.get(batch)!
         return fetch(`${base}/stage/${batch}/receipt?${auth}`, {
           method: 'POST', headers: { ...leaseHeaders(batch), 'content-type': 'application/json' },
           body: JSON.stringify({
             leaseToken: lease.leaseToken,
             generation: lease.generation,
-            artifacts: artifacts.map(({ id, resultId, sha256 }) => ({ id, resultId, sha256 })),
+            artifacts: artifacts.map(({ id, resultId, sha256, byteLength, mimeType, width, height }) => ({
+              id, resultId, sha256, byteLength, mimeType,
+              ...(width === undefined ? {} : { width }),
+              ...(height === undefined ? {} : { height }),
+            })),
           }),
         })
       }

@@ -164,6 +164,25 @@ export interface ReviewViewResult {
   camera?: QcCameraMetadata
 }
 
+export interface ReviewEvidenceConfirmationArtifact {
+  id: string
+  resultId: string
+  sha256: string
+  byteLength: number
+  mimeType: 'image/png'
+  width: number
+  height: number
+}
+
+export interface ReviewEvidenceConfirmation {
+  sessionId: string
+  batchId: string
+  leaseToken: string
+  generation: number
+  expiresAt: number
+  artifacts: ReviewEvidenceConfirmationArtifact[]
+}
+
 export interface ReviewEvidenceResult {
   inputKind: 'label-spec-v2' | 'label-project-v3'
   inputRevision: string
@@ -174,6 +193,7 @@ export interface ReviewEvidenceResult {
   modelFingerprint: string
   areaTargetsSha256: string
   views: ReviewViewResult[]
+  confirmation: ReviewEvidenceConfirmation
   validation: DesignValidationReport
   fidelity: import('./fidelityCheck').FidelityReport
 }

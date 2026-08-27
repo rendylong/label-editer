@@ -19,6 +19,10 @@ describe('Agent protocol contracts', () => {
       blueprintRevision: 'design-v1', blueprintSha256: '3'.repeat(64),
       designReviewManifestSha256: '4'.repeat(64), modelFingerprint: '5'.repeat(64),
       areaTargetsSha256: '6'.repeat(64), views: [],
+      confirmation: {
+        sessionId: 's1', batchId: 'review-1', leaseToken: 'l'.repeat(32), generation: 1,
+        expiresAt: 1_800_000_000_000, artifacts: [],
+      },
       validation: { ready: true, issues: [] }, fidelity: { pass: true, issues: [] },
     }
 

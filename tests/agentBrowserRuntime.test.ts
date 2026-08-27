@@ -870,6 +870,7 @@ describe('browser Agent clean production review runtime', () => {
           generation: body.generation,
           receipt: true,
           artifactIds: body.artifacts.map((artifact) => artifact.id),
+          expiresAt: leases.get(batchId)!.expiresAt,
         })
       }
       if (init?.method === 'POST' && id === 'finalize') {
@@ -962,10 +963,9 @@ describe('browser Agent clean production review runtime', () => {
     expect(new Set(putPaths).size).toBe(10)
   })
 
-  it('posts exact readback receipts, then returns after the final live barrier without awaiting the success acknowledgement', async () => {
+  it('returns an exact provisional seal receipt after the final live barrier without signaling success', async () => {
     const { request } = reviewFixture()
     registerReviewCapture()
-    let releaseFinalize: (() => void) | undefined
     const readbacksComplete = deferred()
     let readbackCount = 0
     let finalizeCalls = 0
@@ -975,24 +975,36 @@ describe('browser Agent clean production review runtime', () => {
         if (readbackCount === 5) readbacksComplete.resolve()
       },
       onFinalize: () => { finalizeCalls += 1 },
-      finalizeResponse: (url, batchId, generation) => new Promise<Response>((resolve) => {
-        releaseFinalize = () => resolve(jsonAt(url, 200, { ok: true, batchId, generation, finalized: true }))
-      }),
     })
 
     const rendering = createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderReviewEvidence(request)
     await readbacksComplete.promise
-    const completion = await Promise.race([
-      rendering.then(() => 'returned' as const),
-      new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 30)),
-    ])
-    releaseFinalize?.()
     const result = await rendering
 
-    expect(completion).toBe('returned')
-    expect(finalizeCalls).toBe(1)
-    expect(result).toMatchObject({ ok: true, operation: 'render_review_evidence' })
+    expect(finalizeCalls).toBe(0)
+    expect(result).toMatchObject({
+      ok: true,
+      operation: 'render_review_evidence',
+      data: {
+        confirmation: {
+          sessionId: 's1',
+          batchId: expect.stringMatching(/^review-/),
+          leaseToken: 'l'.repeat(32),
+          generation: 1,
+          expiresAt: expect.any(Number),
+          artifacts: expect.arrayContaining([expect.objectContaining({
+            id: expect.stringMatching(/--label-front$/),
+            resultId: 'label-front',
+            byteLength: expect.any(Number),
+            mimeType: 'image/png',
+            width: 640,
+            height: 640,
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          })]),
+        },
+      },
+    })
   })
 
   it('aborts a receipt-confirmed candidate when the final synchronous freshness barrier fails', async () => {

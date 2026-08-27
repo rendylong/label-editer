@@ -721,7 +721,7 @@ async function acquireArtifactBatch(bootstrap: AgentBridgeBootstrap, batchId: st
     || body.ok !== true || body.batchId !== batchId
     || typeof body.leaseToken !== 'string' || !/^[A-Za-z0-9_-]{32,160}$/.test(body.leaseToken)
     || !Number.isSafeInteger(body.generation) || (body.generation ?? 0) < 1
-    || !Number.isSafeInteger(body.expiresAt) || (body.expiresAt ?? 0) < 1) {
+    || !Number.isSafeInteger(body.expiresAt) || Number(body.expiresAt ?? 0) < 1) {
     throw new Error('Invalid artifact batch lease response')
   }
   return {
@@ -766,13 +766,17 @@ interface ReviewArtifactReceipt {
   id: string
   resultId: string
   sha256: string
+  byteLength: number
+  mimeType: 'image/png'
+  width: number
+  height: number
 }
 
 async function acknowledgeArtifactBatchReadback(
   bootstrap: AgentBridgeBootstrap,
   lease: ReviewArtifactLease,
   artifacts: readonly ReviewArtifactReceipt[],
-): Promise<void> {
+): Promise<number> {
   const { batchId } = lease
   const url = artifactStageUrl(bootstrap, batchId, '/receipt')
   const response = await fetch(url, {
@@ -793,30 +797,27 @@ async function acknowledgeArtifactBatchReadback(
     generation?: unknown
     receipt?: unknown
     artifactIds?: unknown
+    expiresAt?: unknown
   }
   const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : undefined
-  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'generation', 'receipt', 'artifactIds'])
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'generation', 'receipt', 'artifactIds', 'expiresAt'])
     || body.ok !== true || body.batchId !== batchId || body.generation !== lease.generation
     || body.receipt !== true || !artifactIds || artifactIds.length !== artifacts.length
-    || artifactIds.some((id, index) => id !== artifacts[index].id)) {
+    || artifactIds.some((id, index) => id !== artifacts[index].id)
+    || !Number.isSafeInteger(body.expiresAt) || Number(body.expiresAt ?? 0) < 1) {
     throw new Error('Invalid artifact readback receipt response')
   }
+  return body.expiresAt as number
 }
 
-function signalArtifactBatchSuccess(bootstrap: AgentBridgeBootstrap, lease: ReviewArtifactLease): void {
-  const { batchId } = lease
-  const url = artifactStageUrl(bootstrap, batchId, '/finalize')
-  // This request is intentionally launched, not awaited. The caller has just run
-  // its final synchronous freshness barrier and must return without another await.
-  // If transport or acknowledgement is lost, the prepared candidate remains
-  // recoverable until its lease expires; a normal consumer read can also seal it.
-  void fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...leaseHeaders(lease) },
-    body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation }),
-    redirect: 'error',
-    keepalive: true,
-  }).catch(() => undefined)
+function reviewSessionId(bootstrap: AgentBridgeBootstrap): string {
+  const url = new URL(bootstrap.artifactUploadBase, window.location.origin)
+  const parts = url.pathname.split('/').filter(Boolean)
+  if (parts.length !== 3 || parts[0] !== 'session' || parts[2] !== 'artifact'
+    || !/^[A-Za-z0-9_-]{1,128}$/.test(parts[1])) {
+    throw new Error('Invalid review artifact session locator')
+  }
+  return parts[1]
 }
 
 async function abortArtifactBatch(bootstrap: AgentBridgeBootstrap, lease: ReviewArtifactLease): Promise<void> {
@@ -1180,24 +1181,29 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             }
           }
 
+          let receiptArtifacts: ReviewArtifactReceipt[] | undefined
+          let confirmationExpiresAt: number | undefined
           try {
-            await acknowledgeArtifactBatchReadback(bootstrap, lease, views.map((view, index) => ({
+            receiptArtifacts = views.map((view, index) => ({
               id: internalIds[index],
               resultId: view.id,
               sha256: sha256HexSync(prepared[index].bytes),
-            })))
+              byteLength: prepared[index].bytes.byteLength,
+              mimeType: 'image/png',
+              width: prepared[index].request.width,
+              height: prepared[index].request.height,
+            }))
+            confirmationExpiresAt = await acknowledgeArtifactBatchReadback(bootstrap, lease, receiptArtifacts)
           } catch (error) {
             throw reviewNotReady('readback-receipt', 'Review artifact readback receipt failed', {
               cause: error instanceof Error ? error.message : String(error),
             })
           }
 
-          // State machine: staging -> committed -> prepared (exact bytes were read,
-          // hashed, and acknowledged). Prepared is still recoverable: any failed final
-          // barrier aborts it and restores the prior set. After this final synchronous
-          // barrier we launch, but never await, the prepared -> sealed success signal.
-          // A lost signal leaves the candidate recoverable; its first normal consumer
-          // read seals synchronously, while expiry restores the prior set.
+          // State machine: staging -> committed -> prepared. Task 10 receives the
+          // exact authenticated receipt and is solely responsible for explicit seal,
+          // independent byte readback, and durable publication. Until then, expiry or
+          // abort restores the prior complete set.
           assertReviewStateUnchanged(snapshot, 'before-result')
           assertReviewPlanUnchanged(plan, width, height, 'before-result-plan')
           if (currentReviewDocument().json !== document.json) {
@@ -1210,7 +1216,6 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           assertValidationReady(returnValidation)
           const returnFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
           assertFidelityReady(returnFidelity)
-          signalArtifactBatchSuccess(bootstrap, lease)
           completed = true
           return {
             inputKind: 'label-project-v3',
@@ -1222,6 +1227,14 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             modelFingerprint: snapshot.modelFingerprint,
             areaTargetsSha256,
             views,
+            confirmation: {
+              sessionId: reviewSessionId(bootstrap),
+              batchId,
+              leaseToken: lease.leaseToken,
+              generation: lease.generation,
+              expiresAt: confirmationExpiresAt!,
+              artifacts: receiptArtifacts!,
+            },
             validation: returnValidation,
             fidelity: returnFidelity,
           }

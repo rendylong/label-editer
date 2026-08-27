@@ -81,7 +81,15 @@ async function acknowledgeReadback(
   base: string,
   auth: string,
   lease: Lease,
-  artifacts: Array<{ id: string; resultId: string; sha256: string }>,
+  artifacts: Array<{
+    id: string
+    resultId: string
+    sha256: string
+    byteLength?: number
+    mimeType?: string
+    width?: number
+    height?: number
+  }>,
 ): Promise<Response> {
   return fetch(`${base}/stage/${lease.batchId}/receipt?${auth}`, {
     method: 'POST',
@@ -89,7 +97,51 @@ async function acknowledgeReadback(
     body: JSON.stringify({
       leaseToken: lease.leaseToken,
       generation: lease.generation,
-      artifacts: artifacts.map(({ id, resultId, sha256 }) => ({ id, resultId, sha256 })),
+      artifacts: artifacts.map(({ id, resultId, sha256, byteLength, mimeType, width, height }) => ({
+        id,
+        resultId,
+        sha256,
+        byteLength: byteLength ?? 1,
+        mimeType: mimeType ?? 'image/png',
+        ...(width === undefined ? {} : { width }),
+        ...(height === undefined ? {} : { height }),
+      })),
+    }),
+    redirect: 'error',
+  })
+}
+
+async function confirmReadback(
+  base: string,
+  auth: string,
+  lease: Lease,
+  expiresAt: number,
+  artifacts: Array<{
+    id: string
+    resultId: string
+    sha256: string
+    byteLength?: number
+    mimeType?: string
+    width?: number
+    height?: number
+  }>,
+): Promise<Response> {
+  return fetch(`${base}/stage/${lease.batchId}/confirm?${auth}`, {
+    method: 'POST',
+    headers: { ...leaseHeaders(lease), 'content-type': 'application/json' },
+    body: JSON.stringify({
+      leaseToken: lease.leaseToken,
+      generation: lease.generation,
+      expiresAt,
+      artifacts: artifacts.map(({ id, resultId, sha256, byteLength, mimeType, width, height }) => ({
+        id,
+        resultId,
+        sha256,
+        byteLength: byteLength ?? 1,
+        mimeType: mimeType ?? 'image/png',
+        ...(width === undefined ? {} : { width }),
+        ...(height === undefined ? {} : { height }),
+      })),
     }),
     redirect: 'error',
   })
@@ -439,6 +491,79 @@ describe('review artifact lease transactions', () => {
     } finally { await server.close() }
   })
 
+  it('explicitly seals the exact receipt-bound batch and replays confirmation after response loss', async () => {
+    const { server, session, base, auth } = await fixture()
+    try {
+      const lease = await begin(base, auth, 'task10-explicit-seal')
+      const artifact = await stage(base, auth, lease, 'private-front', 'front', 7) as {
+        id: string
+        resultId: string
+        sha256: string
+        byteLength: number
+        mimeType: string
+        url: string
+      }
+      expect((await commit(base, auth, lease, [artifact])).status).toBe(201)
+      expect((await readCommitted(artifact.url, lease)).status).toBe(200)
+      const receipt = await acknowledgeReadback(base, auth, lease, [artifact])
+      expect(receipt.status).toBe(200)
+      const receiptBody = await receipt.json() as { expiresAt: number }
+
+      const confirmed = await confirmReadback(base, auth, lease, receiptBody.expiresAt, [artifact])
+      expect(confirmed.status).toBe(200)
+      await confirmed.body?.cancel()
+
+      const replay = await confirmReadback(base, auth, lease, receiptBody.expiresAt, [artifact])
+      expect(replay.status).toBe(200)
+      expect(await replay.json()).toEqual({
+        ok: true,
+        batchId: lease.batchId,
+        generation: lease.generation,
+        sealed: true,
+        artifactIds: ['private-front'],
+        resultIds: ['front'],
+      })
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'private-front' }])
+      expect((await fetch(artifact.url)).status).toBe(200)
+    } finally { await server.close() }
+  })
+
+  it('rejects a mismatched explicit seal without replacing the prior complete set', async () => {
+    const { server, session, base, auth } = await fixture()
+    try {
+      const originalLease = await begin(base, auth, 'seal-prior')
+      const original = await stage(base, auth, originalLease, 'prior-front', 'front', 1) as {
+        id: string
+        resultId: string
+        sha256: string
+        url: string
+      }
+      expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
+      expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
+
+      const candidateLease = await begin(base, auth, 'seal-candidate')
+      const candidate = await stage(base, auth, candidateLease, 'candidate-front', 'front', 2) as {
+        id: string
+        resultId: string
+        sha256: string
+        url: string
+      }
+      expect((await commit(base, auth, candidateLease, [candidate])).status).toBe(201)
+      expect((await readCommitted(candidate.url, candidateLease)).status).toBe(200)
+      const receipt = await acknowledgeReadback(base, auth, candidateLease, [candidate])
+      const receiptBody = await receipt.json() as { expiresAt: number }
+
+      expect((await confirmReadback(base, auth, candidateLease, receiptBody.expiresAt, [{
+        ...candidate,
+        sha256: '0'.repeat(64),
+      }])).status).toBe(409)
+      expect((await finish(base, auth, candidateLease, 'abort')).status).toBe(200)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'prior-front' }])
+      expect((await fetch(original.url)).status).toBe(200)
+      expect((await fetch(candidate.url)).status).toBe(404)
+    } finally { await server.close() }
+  })
+
   it('rejects legacy writes that collide with current review internal or result ids without corrupting the index', async () => {
     const { server, session, base, auth } = await fixture()
     try {
@@ -460,6 +585,32 @@ describe('review artifact lease transactions', () => {
       })
       expect(legacy.status).toBe(201)
       expect(server.getArtifacts(session.id).map((item: { id: string }) => item.id).sort()).toEqual(['front', 'legacy-preview'])
+    } finally { await server.close() }
+  })
+
+  it('rejects a review logical result id that aliases a legacy artifact without changing either set', async () => {
+    const { server, session, base, auth } = await fixture()
+    try {
+      const legacy = await fetch(`${base}/front?${auth}`, {
+        method: 'PUT', headers: { 'content-type': 'image/png' }, body: new Uint8Array([9]),
+      })
+      expect(legacy.status).toBe(201)
+
+      const lease = await begin(base, auth, 'review-result-aliases-legacy')
+      const collision = await fetch(`${base}/stage/${lease.batchId}/private-review-front?${auth}`, {
+        method: 'PUT',
+        headers: {
+          ...leaseHeaders(lease),
+          'content-type': 'image/png',
+          'x-artifact-file-name': 'front.png',
+          'x-artifact-result-id': 'front',
+        },
+        body: new Uint8Array([7]),
+      })
+      expect(collision.status).toBe(409)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'front' }])
+      expect((await finish(base, auth, lease, 'abort')).status).toBe(200)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'front' }])
     } finally { await server.close() }
   })
 
