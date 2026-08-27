@@ -10,6 +10,7 @@ import type { QcCameraMetadata, ReviewEvidenceRequest, ReviewViewRequest } from 
 import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
 import { designAssetReadinessKey, designFontReadinessKey } from '../src/label/exportReadiness'
+import { beginImageAssetLoad, bindImageAssetReceipt } from '../src/label/imageAssetReceipt'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
 import { pngBlob as structuralPngBlob } from './pngTestUtils'
@@ -86,7 +87,7 @@ function channelCanvas(neutral: number, changed?: number): HTMLCanvasElement {
   } as unknown as HTMLCanvasElement
 }
 
-function bake(owner: LabelAreaConfig, roughness = channelCanvas(255, 42)): BakeResult {
+function bake(owner: LabelAreaConfig, roughness = channelCanvas(255, 42), imageAssetReceipts: Record<string, string> = {}): BakeResult {
   return {
     color: channelCanvas(0),
     metalness: channelCanvas(0, 255),
@@ -95,7 +96,9 @@ function bake(owner: LabelAreaConfig, roughness = channelCanvas(255, 42)): BakeR
     spec: owner.canvas,
     version: 1,
     areaOwner: owner,
-    assetReadinessKey: designAssetReadinessKey(owner),
+    fontReadinessKey: designFontReadinessKey(owner),
+    imageAssetReceipts,
+    assetReadinessKey: designAssetReadinessKey(owner, imageAssetReceipts),
   }
 }
 
@@ -171,17 +174,24 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function reviewFixture(): { request: ReviewEvidenceRequest; owner: LabelAreaConfig } {
+function reviewFixture(options: { withImage?: boolean } = {}): { request: ReviewEvidenceRequest; owner: LabelAreaConfig } {
+  const imageAsset = {
+    id: 'mark', path: 'assets/mark.png', sha256: 'a'.repeat(64), mimeType: 'image/png', width: 2, height: 1,
+  }
   const blueprint: LayoutBlueprintV1 = {
     version: 1,
     revision: 'review-design-v1',
     carrierDefaults: { carrier: 'direct_surface_print' },
-    assets: [],
+    assets: options.withImage ? [imageAsset] : [],
     areas: [{
       id: 'front', side: 'front', carrier: 'direct_surface_print',
       artboard: { widthMm: 40, heightMm: 40, background: 'transparent' },
       placementIntent: 'Centered front.', placementPolicy: 'block',
-      layers: [{
+      layers: options.withImage ? [{
+        id: 'mark', kind: 'image', boundsMm: { x: 4, y: 4, width: 32, height: 16 },
+        anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 0,
+        processes: [{ process: 'screen_print' }], assetId: 'mark', fit: 'contain',
+      }] : [{
         id: 'mark', kind: 'shape', boundsMm: { x: 4, y: 4, width: 32, height: 32 },
         anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 0,
         processes: [{ process: 'screen_print' }], shape: 'ellipse',
@@ -241,10 +251,14 @@ function reviewFixture(): { request: ReviewEvidenceRequest; owner: LabelAreaConf
     blueprintRevision: blueprint.revision, blueprintSha256: blueprintSha, reviewManifestSha256: manifestSha,
   }
   const owner = applyStructuredLabelSpec(shell, { version: 2, areas: [compiled] }).areas[0]
+  const imageReceipts: Record<string, string> = options.withImage
+    ? { mark: 'image/image/png/2x1/sha256:' + 'b'.repeat(64) }
+    : {}
+  if (options.withImage) bindImageAssetReceipt(owner.id, 'mark', 'assets/mark.png', 2, 1, imageReceipts.mark!)
   useLabelStore.setState({
     ...useLabelStore.getInitialState(), areas: [owner], activeAreaId: owner.id, activeArea: owner,
     meshIndex: owner.meshIndex, nodeName: owner.nodeName, selectedLayerIds: ['sentinel-selection'],
-    bakeMap: { [owner.id]: bake(owner) },
+    bakeMap: { [owner.id]: bake(owner, channelCanvas(255, 42), imageReceipts) },
   }, true)
   return {
     request: {
@@ -745,28 +759,54 @@ describe('browser Agent clean production review runtime', () => {
     commitValue?: (body: { artifactIds: string[]; resultIds: string[] }, batchId: string) => unknown
     readbackHeaders?: Record<string, string>
     stageRedirected?: boolean
+    onReadback?: () => void
+    stageValue?: (descriptor: Record<string, unknown>, index: number) => Record<string, unknown>
+    failStageAt?: number
+    onCommit?: () => void
+    onAbort?: () => void
   } = {}) {
     const staged = new Map<string, { bytes: Uint8Array; resultId: string; descriptor: Record<string, unknown> }>()
+    const leases = new Map<string, { leaseToken: string; generation: number; expiresAt: number }>()
+    let generation = 0
+    let stageIndex = 0
     vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = new URL(String(input), window.location.origin)
       const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
+      if (init?.method === 'POST' && id === 'acquire') {
+        const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
+        const lease = { leaseToken: 'l'.repeat(32), generation: ++generation, expiresAt: Date.now() + 120_000 }
+        leases.set(batchId, lease)
+        return jsonAt(url, 201, { ok: true, batchId, ...lease })
+      }
       if (init?.method === 'PUT') {
         const descriptor = exactUploadDescriptor(input, init)
         const resultId = String(descriptor.resultId)
         const bytes = new Uint8Array(init.body as Uint8Array)
         events.push(`upload:${resultId}`)
+        stageIndex += 1
+        if (options.failStageAt === stageIndex) return responseAt(url, null, { status: 503 })
         staged.set(id, { bytes, resultId, descriptor })
         const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
-        const response = jsonAt(url, 201, { ok: true, batchId, ...descriptor })
+        const valid = { ok: true, batchId, ...descriptor, generation: leases.get(batchId)?.generation }
+        const response = jsonAt(url, 201, options.stageValue?.(valid, stageIndex) ?? valid)
         if (options.stageRedirected) Object.defineProperty(response, 'redirected', { value: true })
         return response
       }
       if (init?.method === 'POST' && id === 'commit') {
-        const body = JSON.parse(String(init.body)) as { artifactIds: string[]; resultIds: string[] }
+        const body = JSON.parse(String(init.body)) as { artifactIds: string[]; resultIds: string[]; generation: number }
         const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
-        return jsonAt(url, 201, options.commitValue?.(body, batchId) ?? { ok: true, batchId, ...body })
+        options.onCommit?.()
+        return jsonAt(url, 201, options.commitValue?.(body, batchId) ?? {
+          ok: true, batchId, artifactIds: body.artifactIds, resultIds: body.resultIds, generation: body.generation,
+        })
+      }
+      if (init?.method === 'POST' && id === 'finalize') {
+        const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
+        const lease = leases.get(batchId)!
+        return jsonAt(url, 200, { ok: true, batchId, generation: lease.generation, finalized: true })
       }
       if (init?.method === 'GET') {
+        options.onReadback?.()
         const artifact = staged.get(id)!
         return responseAt(url, new Uint8Array(artifact.bytes).buffer, {
           status: 200,
@@ -781,7 +821,9 @@ describe('browser Agent clean production review runtime', () => {
         })
       }
       const batchId = decodeURIComponent(url.pathname.split('/').at(-1)!)
-      return jsonAt(url, 200, { ok: true, batchId, purged: true })
+      const lease = leases.get(batchId)!
+      options.onAbort?.()
+      return jsonAt(url, 200, { ok: true, batchId, generation: lease.generation, aborted: true })
     }))
   }
 
@@ -846,6 +888,21 @@ describe('browser Agent clean production review runtime', () => {
     expect(new Set(putPaths).size).toBe(10)
   })
 
+  it('fails a competing server lease without staging or aborting another runtime transaction', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(String(input), window.location.origin)
+      return jsonAt(url, 409, { ok: false, error: 'Review artifact lease is busy' })
+    }))
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.map(([, init]) => init?.method)).toEqual(['POST'])
+  })
+
   it('rejects a forged ok:false commit acknowledgement and proves exact purge acknowledgement', async () => {
     const { request } = reviewFixture()
     registerReviewCapture()
@@ -878,6 +935,24 @@ describe('browser Agent clean production review runtime', () => {
       .renderReviewEvidence(request)).resolves.toMatchObject({
       ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
     })
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
+  })
+
+  it('fails when a live same-URL image receipt is invalidated during committed readback', async () => {
+    const { request, owner } = reviewFixture({ withImage: true })
+    registerReviewCapture()
+    let invalidated = false
+    acceptUploads([], { onReadback: () => {
+      if (invalidated) return
+      invalidated = true
+      beginImageAssetLoad(owner.id, 'mark')
+    } })
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(invalidated).toBe(true)
     expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true)
   })
 
@@ -951,7 +1026,7 @@ describe('browser Agent clean production review runtime', () => {
       workspaceTab: useUiStore.getState().workspaceTab,
     }
     registerReviewCapture()
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 }) as Response))
+    acceptUploads([], { failStageAt: 1 })
 
     await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderReviewEvidence(request)).resolves.toMatchObject({
@@ -993,16 +1068,22 @@ describe('browser Agent clean production review runtime', () => {
     let putCount = 0
     vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = new URL(String(input), window.location.origin)
+      const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
+      const batchId = decodeURIComponent(url.pathname.split('/').at(-2) ?? '')
+      if (init?.method === 'POST' && id === 'acquire') {
+        return jsonAt(url, 201, {
+          ok: true, batchId, leaseToken: 'l'.repeat(32), generation: 1, expiresAt: Date.now() + 120_000,
+        })
+      }
       if (init?.method === 'DELETE') {
         readable.clear()
-        return { ok: true, json: async () => ({ ok: true }) } as Response
+        return jsonAt(url, 200, { ok: true, batchId: id, generation: 1, aborted: true })
       }
       if (init?.method === 'PUT') {
-        const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
         putCount += 1
         if (putCount === 2) return { ok: false, status: 503 } as Response
         readable.add(id)
-        return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
+        return jsonAt(url, 201, { ok: true, batchId, ...exactUploadDescriptor(input, init), generation: 1 })
       }
       return { ok: true, json: async () => ({ ok: true }) } as Response
     }))
@@ -1018,12 +1099,9 @@ describe('browser Agent clean production review runtime', () => {
   it('rejects a same-origin locator bound to a different session artifact', async () => {
     const { request } = reviewFixture()
     registerReviewCapture()
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => ({
-      ok: true,
-      json: async () => exactUploadDescriptor(input, init, {
-        url: `/session/s1/artifact/model-back?token=${token}`,
-      }),
-    }) as Response))
+    acceptUploads([], { stageValue: (descriptor) => ({
+      ...descriptor, url: `/session/s1/artifact/model-back?token=${token}`,
+    }) })
 
     await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderReviewEvidence(request)).resolves.toMatchObject({
@@ -1039,10 +1117,7 @@ describe('browser Agent clean production review runtime', () => {
   ])('rejects an upload response with mismatched %s binding', async (_label, mismatch) => {
     const { request } = reviewFixture()
     registerReviewCapture()
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      if (init?.method === 'DELETE') return { ok: true, json: async () => ({ ok: true }) } as Response
-      return { ok: true, json: async () => exactUploadDescriptor(input, init, mismatch) } as Response
-    }))
+    acceptUploads([], { stageValue: (descriptor) => ({ ...descriptor, ...mismatch }) })
 
     await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderReviewEvidence(request)).resolves.toMatchObject({
@@ -1053,36 +1128,17 @@ describe('browser Agent clean production review runtime', () => {
   it('purges an already committed attempt when state mutates during commit', async () => {
     const { request, owner } = reviewFixture()
     registerReviewCapture()
-    const staged = new Set<string>()
-    const readable = new Set<string>()
-    vi.stubGlobal('fetch', vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-      const url = new URL(String(input), window.location.origin)
-      const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
-      if (init?.method === 'PUT') {
-        staged.add(id)
-        return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
-      }
-      if (init?.method === 'POST') {
-        const body = JSON.parse(String(init.body)) as { artifactIds: string[] }
-        body.artifactIds.forEach((artifactId) => readable.add(artifactId))
-        staged.clear()
-        useLabelStore.getState().applyAreaOp(owner.id, (current) => ({ ...current, name: 'mutated-during-commit' }))
-        return { ok: true, json: async () => ({ ok: true, artifactIds: body.artifactIds }) } as Response
-      }
-      if (init?.method === 'DELETE') {
-        staged.clear()
-        readable.clear()
-        return { ok: true, json: async () => ({ ok: true }) } as Response
-      }
-      throw new Error(`Unexpected fetch: ${url.pathname}`)
-    }))
+    let aborted = false
+    acceptUploads([], {
+      onCommit: () => useLabelStore.getState().applyAreaOp(owner.id, (current) => ({ ...current, name: 'mutated-during-commit' })),
+      onAbort: () => { aborted = true },
+    })
 
     await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderReviewEvidence(request)).resolves.toMatchObject({
       ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
     })
-    expect(staged).toEqual(new Set())
-    expect(readable).toEqual(new Set())
+    expect(aborted).toBe(true)
   })
 
   it('fails the final synchronous freshness barrier when state mutates during the last digest', async () => {

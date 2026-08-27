@@ -136,10 +136,22 @@ describe('plugin runtime security', () => {
       const session = server.createSession()
       const base = `${server.origin}/session/${session.id}/artifact`
       const auth = `token=${session.token}`
+      const acquire = async () => {
+        const response = await fetch(`${base}/stage/review-attempt/acquire?${auth}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+        })
+        expect(response.status).toBe(201)
+        return response.json() as Promise<{ leaseToken: string; generation: number }>
+      }
+      let lease = await acquire()
+      const leaseHeaders = () => ({
+        'x-artifact-lease-token': lease.leaseToken,
+        'x-artifact-generation': String(lease.generation),
+      })
       for (const id of ['front', 'back']) {
         const staged = await fetch(`${base}/stage/review-attempt/${id}?${auth}`, {
           method: 'PUT',
-          headers: { 'content-type': 'image/png', 'x-artifact-file-name': encodeURIComponent(`${id}.png`) },
+          headers: { ...leaseHeaders(), 'content-type': 'image/png', 'x-artifact-file-name': encodeURIComponent(`${id}.png`) },
           body: new Uint8Array([1, 2, 3]),
         })
         expect(staged.status).toBe(201)
@@ -151,26 +163,28 @@ describe('plugin runtime security', () => {
       }
       expect(server.getArtifacts(session.id)).toEqual([])
 
-      const purged = await fetch(`${base}/stage/review-attempt?${auth}`, { method: 'DELETE' })
+      const purged = await fetch(`${base}/stage/review-attempt?${auth}`, { method: 'DELETE', headers: leaseHeaders() })
       expect(purged.status).toBe(200)
       expect(server.getArtifacts(session.id)).toEqual([])
 
+      lease = await acquire()
       for (const id of ['front', 'back']) {
         expect((await fetch(`${base}/stage/review-attempt/${id}?${auth}`, {
           method: 'PUT',
-          headers: { 'content-type': 'image/png', 'x-artifact-file-name': encodeURIComponent(`${id}.png`) },
+          headers: { ...leaseHeaders(), 'content-type': 'image/png', 'x-artifact-file-name': encodeURIComponent(`${id}.png`) },
           body: new Uint8Array([1, 2, 3]),
         })).status).toBe(201)
       }
       const committed = await fetch(`${base}/stage/review-attempt/commit?${auth}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ artifactIds: ['front', 'back'] }),
+        method: 'POST', headers: { ...leaseHeaders(), 'content-type': 'application/json' },
+        body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation, artifactIds: ['front', 'back'] }),
       })
       expect(committed.status).toBe(201)
       expect((await committed.json()).artifactIds).toEqual(['front', 'back'])
-      expect((await fetch(`${base}/front?${auth}`)).status).toBe(200)
+      expect((await fetch(`${base}/front?${auth}`)).status).toBe(409)
+      expect((await fetch(`${base}/front?${auth}`, { headers: leaseHeaders() })).status).toBe(200)
 
-      expect((await fetch(`${base}/stage/review-attempt?${auth}`, { method: 'DELETE' })).status).toBe(200)
+      expect((await fetch(`${base}/stage/review-attempt?${auth}`, { method: 'DELETE', headers: leaseHeaders() })).status).toBe(200)
       expect((await fetch(`${base}/front?${auth}`)).status).toBe(404)
       expect(server.getArtifacts(session.id)).toEqual([])
     } finally {
@@ -186,10 +200,26 @@ describe('plugin runtime security', () => {
       const session = server.createSession()
       const base = `${server.origin}/session/${session.id}/artifact`
       const auth = `token=${session.token}`
+      const leases = new Map<string, { leaseToken: string; generation: number }>()
+      const acquire = async (batch: string) => {
+        const response = await fetch(`${base}/stage/${batch}/acquire?${auth}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+        })
+        expect(response.status).toBe(201)
+        const lease = await response.json() as { leaseToken: string; generation: number }
+        leases.set(batch, lease)
+        return lease
+      }
+      const leaseHeaders = (batch: string) => {
+        const lease = leases.get(batch)!
+        return { 'x-artifact-lease-token': lease.leaseToken, 'x-artifact-generation': String(lease.generation) }
+      }
       const stage = async (batch: string, internalId: string, resultId: string, byte: number) => {
+        if (!leases.has(batch)) await acquire(batch)
         const response = await fetch(`${base}/stage/${batch}/${internalId}?${auth}`, {
           method: 'PUT',
           headers: {
+            ...leaseHeaders(batch),
             'content-type': 'image/png',
             'x-artifact-file-name': encodeURIComponent(`${resultId}.png`),
             'x-artifact-result-id': resultId,
@@ -199,23 +229,36 @@ describe('plugin runtime security', () => {
         expect(response.status).toBe(201)
         return response.json()
       }
-      const commit = async (batch: string, artifactIds: string[], resultIds: string[]) => fetch(`${base}/stage/${batch}/commit?${auth}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ artifactIds, resultIds }),
-      })
+      const commit = async (batch: string, artifactIds: string[], resultIds: string[]) => {
+        const lease = leases.get(batch)!
+        return fetch(`${base}/stage/${batch}/commit?${auth}`, {
+          method: 'POST', headers: { ...leaseHeaders(batch), 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation, artifactIds, resultIds }),
+        })
+      }
+      const finalize = async (batch: string) => {
+        const lease = leases.get(batch)!
+        return fetch(`${base}/stage/${batch}/finalize?${auth}`, {
+          method: 'POST', headers: { ...leaseHeaders(batch), 'content-type': 'application/json' },
+          body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation }),
+        })
+      }
+      const abort = (batch: string) => fetch(`${base}/stage/${batch}?${auth}`, { method: 'DELETE', headers: leaseHeaders(batch) })
 
       const first = await stage('attempt-one', 'attempt-one--front', 'front', 1)
       expect(first).toMatchObject({ id: 'attempt-one--front', resultId: 'front' })
       expect((await commit('attempt-one', [first.id], ['front'])).status).toBe(201)
+      expect((await finalize('attempt-one')).status).toBe(200)
       expect((await fetch(first.url)).status).toBe(200)
 
       const failed = await stage('attempt-two', 'attempt-two--front', 'front', 2)
-      expect((await fetch(`${base}/stage/attempt-two?${auth}`, { method: 'DELETE' })).status).toBe(200)
+      expect((await abort('attempt-two')).status).toBe(200)
       expect((await fetch(first.url)).status).toBe(200)
       expect((await fetch(failed.url)).status).toBe(404)
 
       const second = await stage('attempt-three', 'attempt-three--front', 'front', 3)
       expect((await commit('attempt-three', [second.id], ['front'])).status).toBe(201)
+      expect((await finalize('attempt-three')).status).toBe(200)
       expect((await fetch(first.url)).status).toBe(404)
       const current = await fetch(second.url)
       expect(current.status).toBe(200)
@@ -225,8 +268,8 @@ describe('plugin runtime security', () => {
 
       const fourth = await stage('attempt-four', 'attempt-four--front', 'front', 4)
       expect((await commit('attempt-four', [fourth.id], ['front'])).status).toBe(201)
-      const rollback = await fetch(`${base}/stage/attempt-four?${auth}`, { method: 'DELETE' })
-      expect(await rollback.json()).toEqual({ ok: true, batchId: 'attempt-four', purged: true })
+      const rollback = await abort('attempt-four')
+      expect(await rollback.json()).toMatchObject({ ok: true, batchId: 'attempt-four', aborted: true })
       expect((await fetch(second.url)).status).toBe(200)
       expect((await fetch(fourth.url)).status).toBe(404)
     } finally {

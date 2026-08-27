@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadContentBoundImage } from '../src/label/imageAssetReceipt'
+import {
+  loadAreaContentBoundImage,
+  loadContentBoundImage,
+  releaseImageAssetArea,
+  syncImageAssetProject,
+  visibleImageLayersForRuntime,
+} from '../src/label/imageAssetReceipt'
+import type { ImageLayer, LabelAreaConfig } from '../src/label/types'
 import { pngBytes } from './pngTestUtils'
 
 function crc32(bytes: Uint8Array): number {
@@ -97,5 +104,61 @@ describe('content-bound image receipts', () => {
     })))
 
     await expect(loadContentBoundImage('https://assets.test/huge.png', 1, 1)).rejects.toThrow(/byte limit/i)
+  })
+
+  it('skips hidden images and aborts stale pending revisions, removed areas, and explicit unmounts', async () => {
+    const visible = { id: 'visible', kind: 'image', src: '/visible.png', naturalWidth: 2, naturalHeight: 1, visible: true } as ImageLayer
+    const hidden = { ...visible, id: 'hidden', src: '/hidden.png', visible: false }
+    const area = { id: 'area', layers: [visible, hidden] } as LabelAreaConfig
+    expect(visibleImageLayersForRuntime(area).map((layer) => layer.id)).toEqual(['visible'])
+
+    const signals: AbortSignal[] = []
+    vi.stubGlobal('fetch', vi.fn((_input: URL | RequestInfo, init?: RequestInit) => {
+      signals.push(init?.signal as AbortSignal)
+      return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+    }))
+    const first = loadAreaContentBoundImage('area', 1, visible)
+    await Promise.resolve()
+    const second = loadAreaContentBoundImage('area', 2, visible)
+    await Promise.resolve()
+    expect(signals[0].aborted).toBe(true)
+    syncImageAssetProject([])
+    expect(signals[1].aborted).toBe(true)
+    void first.catch(() => undefined)
+    void second.catch(() => undefined)
+
+    const third = loadAreaContentBoundImage('area', 3, visible)
+    await Promise.resolve()
+    releaseImageAssetArea('area')
+    expect(signals[2].aborted).toBe(true)
+    void third.catch(() => undefined)
+  })
+
+  it('bounds concurrent content image fetches and releases queued work after completion', async () => {
+    const bytes = pngBytes(2, 1)
+    let active = 0
+    let maximum = 0
+    const releases: Array<() => void> = []
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      active += 1
+      maximum = Math.max(maximum, active)
+      await new Promise<void>((resolve) => releases.push(resolve))
+      active -= 1
+      return new Response(new Uint8Array(bytes).buffer, {
+        status: 200, headers: { 'content-type': 'image/png', 'content-length': String(bytes.byteLength) },
+      })
+    }))
+    vi.stubGlobal('Image', ImmediateImage)
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:bounded'), revokeObjectURL: vi.fn() })
+
+    const loads = Array.from({ length: 5 }, (_, index) => loadContentBoundImage(`/asset-${index}.png`, 2, 1))
+    for (let index = 0; index < 8; index += 1) await Promise.resolve()
+    expect(maximum).toBe(4)
+    for (let index = 0; index < 100; index += 1) {
+      releases.splice(0).forEach((release) => release())
+      await Promise.resolve()
+    }
+    await expect(Promise.all(loads)).resolves.toHaveLength(5)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(5)
   })
 })

@@ -9,6 +9,8 @@ import { computeRemap, deriveCanvasSpec, deriveSurfaceCanvasSpec, type MeshAcces
 import { normalizeAreaRange } from '../glb/areaMath'
 import { assertRasterAspect, assertRasterDimensions, withBakeCanvasSize } from '../app/canvasLayout'
 import { assertPhysicalAreaPlacement, resolveLayersForCanvas } from '../app/physicalLayout'
+import { syncUploadedFontProject } from '../label/fontRuntime'
+import { syncImageAssetProject } from '../label/imageAssetReceipt'
 
 export interface BakeResult {
   color: HTMLCanvasElement
@@ -492,6 +494,12 @@ export const useUiStore = create<UiState>((set) => ({
     },
   })),
 }))
+
+useLabelStore.subscribe((state, previous) => {
+  if (state.areas === previous.areas) return
+  syncUploadedFontProject(state.areas.flatMap((area) => area.fonts))
+  syncImageAssetProject(state.areas)
+})
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 export function flashToast(msg: string, kind: 'info' | 'success' | 'error' = 'info'): void {

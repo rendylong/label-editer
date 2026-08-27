@@ -13,7 +13,12 @@ import { fontCssFor } from './fonts'
 import { resolvedTextDirection } from './textDirection'
 import { useDesignFontReadiness } from './designFontReadiness'
 import { designAssetReadinessKey, designFontReadinessKey } from './exportReadiness'
-import { beginImageAssetLoad, bindImageAssetReceipt, loadContentBoundImage } from './imageAssetReceipt'
+import {
+  bindImageAssetReceipt,
+  loadAreaContentBoundImage,
+  releaseImageAssetArea,
+  visibleImageLayersForRuntime,
+} from './imageAssetReceipt'
 import { clearTransparentCanvasBorder } from './canvasBorder'
 import {
   renderCarrierMasks,
@@ -223,26 +228,6 @@ interface ImageBits {
   preview: HTMLCanvasElement
 }
 
-const contentImageLoads = new Map<string, { identity: string; load: ReturnType<typeof loadContentBoundImage> }>()
-
-function loadAreaImage(
-  areaId: string,
-  activationRevision: number,
-  layer: ImageLayer,
-): ReturnType<typeof loadContentBoundImage> {
-  const owner = `${areaId}\u0000${layer.id}`
-  const identity = `${activationRevision}\u0000${layer.src}\u0000${layer.naturalWidth}\u0000${layer.naturalHeight}`
-  const cached = contentImageLoads.get(owner)
-  if (cached?.identity === identity) return cached.load
-  beginImageAssetLoad(areaId, layer.id)
-  const load = loadContentBoundImage(layer.src, layer.naturalWidth, layer.naturalHeight)
-  contentImageLoads.set(owner, { identity, load })
-  void load.catch(() => {
-    if (contentImageLoads.get(owner)?.load === load) contentImageLoads.delete(owner)
-  })
-  return load
-}
-
 export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JSX.Element {
   const config = useLabelStore((s) => s.activeArea)
   const areaId = config?.id ?? null
@@ -281,7 +266,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
   // 图片图层位图缓存
   useEffect(() => {
     let alive = true
-    const imageLayers = layers.filter((layer): layer is ImageLayer => layer.kind === 'image')
+    const imageLayers = config ? visibleImageLayersForRuntime(config) : []
     setImgBits((previous) => {
       const current = new Map<string, ImageBits>()
       for (const layer of imageLayers) {
@@ -294,7 +279,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       .map(async (layer) => {
         try {
           if (!areaId) throw new Error('Image area is inactive')
-          const loaded = await loadAreaImage(areaId, activationRevision, layer)
+          const loaded = await loadAreaContentBoundImage(areaId, activationRevision, layer)
           return { layer, src: layer.src, image: loaded.image, receiptKey: loaded.receiptKey }
         } catch {
           return null
@@ -323,6 +308,10 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       alive = false
     }
   }, [layers.map((l) => (l.kind === 'image' ? `${l.src}:${l.naturalWidth}:${l.naturalHeight}:${l.width}:${l.height}:${l.fit ?? 'stretch'}:${JSON.stringify(l.craft)}` : '')).join('|'), config?.meshIndex, activationRevision])
+
+  useEffect(() => () => {
+    if (areaId) releaseImageAssetArea(areaId)
+  }, [areaId])
 
   const displayHeight = useMemo(() => {
     if (!spec || displayWidth <= 0) return 300

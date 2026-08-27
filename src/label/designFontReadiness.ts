@@ -3,6 +3,7 @@ import type { LabelLayer, UploadedFontRecord } from './types'
 import {
   deriveDesignFontRequests,
   loadDesignFontRequests,
+  retainDesignFontRequests,
   type FontLoadReport,
 } from './fontRuntime'
 
@@ -83,8 +84,12 @@ export function useDesignFontReadiness(
       gate.invalidate()
       return
     }
+    const release = retainDesignFontRequests(requests)
     void gate.track(areaId, loadDesignFontRequests(requests), signature)
-    return () => gate.invalidate()
+    return () => {
+      gate.invalidate()
+      release()
+    }
   }, [areaId, signature])
 
   if (requests.length === 0) return { revision: 0, ready: true }

@@ -34,7 +34,14 @@ export type DesignFontRequest =
   | { key: string; kind: 'unresolved'; id: string; name: string }
 
 const fontLoads = new Map<string, Promise<FontLoadResult>>()
-const uploadedFontLoads = new Map<string, Promise<FontLoadResult>>()
+interface UploadedFontLoadEntry {
+  promise: Promise<FontLoadResult>
+  face?: FontFace
+  refs: number
+  retired: boolean
+}
+
+const uploadedFontLoads = new Map<string, UploadedFontLoadEntry>()
 
 const SYSTEM_FONT_IDS = [
   'system-sans', 'pingfang-sc', 'microsoft-yahei', 'noto-sans-cjk-system', 'system-serif',
@@ -166,9 +173,14 @@ export function ensureUploadedFontLoaded(record: UploadedFontRecord): Promise<Fo
   }
   const cacheKey = `${id}/${receipt.receiptKey}`
   const cached = uploadedFontLoads.get(cacheKey)
-  if (cached) return cached
+  if (cached) return cached.promise
 
   const family = receipt.cssFamily
+  const entry: UploadedFontLoadEntry = {
+    promise: Promise.resolve(failedResult(id, 'sans-serif', 'Font load was not initialized')),
+    refs: 0,
+    retired: false,
+  }
   const load = (async (): Promise<FontLoadResult> => {
     try {
       if (typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts) {
@@ -178,14 +190,64 @@ export function ensureUploadedFontLoaded(record: UploadedFontRecord): Promise<Fo
       const loadedFace = await face.load()
       document.fonts.add(loadedFace)
       await document.fonts.ready
+      entry.face = loadedFace
+      if (entry.retired) document.fonts.delete(loadedFace)
       return { id, ok: true, cssFamily: family }
     } catch (error) {
       return failedResult(id, 'sans-serif', errorMessage(error))
     }
   })()
 
-  uploadedFontLoads.set(cacheKey, load)
+  entry.promise = load
+  uploadedFontLoads.set(cacheKey, entry)
   return load
+}
+
+function uploadedRequestCacheKey(request: Extract<DesignFontRequest, { kind: 'uploaded' }>): string {
+  return `${request.id}/${uploadedFontReceipt(request.record).receiptKey}`
+}
+
+function retireUploadedFont(cacheKey: string, entry: UploadedFontLoadEntry): void {
+  if (uploadedFontLoads.get(cacheKey) === entry) uploadedFontLoads.delete(cacheKey)
+  entry.retired = true
+  if (entry.face && typeof document !== 'undefined' && document.fonts) document.fonts.delete(entry.face)
+}
+
+/** Retain uploaded faces for one mounted design consumer; release evicts zero-reference faces. */
+export function retainDesignFontRequests(requests: readonly DesignFontRequest[]): () => void {
+  const retained: Array<{ key: string; entry: UploadedFontLoadEntry }> = []
+  for (const request of requests) {
+    if (request.kind !== 'uploaded') continue
+    void ensureUploadedFontLoaded(request.record)
+    const key = uploadedRequestCacheKey(request)
+    const entry = uploadedFontLoads.get(key)
+    if (!entry) continue
+    entry.refs += 1
+    retained.push({ key, entry })
+  }
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    for (const { key, entry } of retained) {
+      entry.refs = Math.max(0, entry.refs - 1)
+      if (entry.refs === 0) retireUploadedFont(key, entry)
+    }
+  }
+}
+
+/** Retire unreferenced uploaded revisions no longer present in the current project. */
+export function syncUploadedFontProject(records: readonly UploadedFontRecord[]): void {
+  const allowed = new Set(records.flatMap((record) => {
+    try {
+      const id = uploadedFontId(record.name)
+      return [`${id}/${uploadedFontReceipt(record).receiptKey}`]
+    } catch { return [] }
+  }))
+  for (const [key, entry] of uploadedFontLoads) {
+    if (!allowed.has(key) && entry.refs === 0) retireUploadedFont(key, entry)
+    else if (!allowed.has(key)) entry.retired = true
+  }
 }
 
 /** Derive a stable, deduplicated load plan from only the text faces used by an area. */

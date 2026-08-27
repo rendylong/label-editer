@@ -39,7 +39,11 @@ async function readBody(request, maxBytes) {
   let length = 0
   for await (const chunk of request) {
     length += chunk.length
-    if (length > maxBytes) throw new Error('Upload exceeds byte limit')
+    if (length > maxBytes) {
+      const error = new Error('Upload exceeds byte limit')
+      error.statusCode = 413
+      throw error
+    }
     chunks.push(chunk)
   }
   return Buffer.concat(chunks)
@@ -55,9 +59,50 @@ function safeStaticPath(root, pathname) {
   return target
 }
 
-export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1024 * 1024 } = {}) {
+export async function createSessionServer({
+  editorRoot,
+  maxUploadBytes = 128 * 1024 * 1024,
+  maxReviewBatchBytes = 128 * 1024 * 1024,
+  maxReviewBatchArtifacts = 131,
+  maxSessionAssetBytes = 256 * 1024 * 1024,
+  reviewLeaseMs = 120_000,
+  now = Date.now,
+} = {}) {
   if (!editorRoot) throw new Error('editorRoot is required')
+  if (!Number.isSafeInteger(maxReviewBatchBytes) || maxReviewBatchBytes < 1
+    || !Number.isSafeInteger(maxReviewBatchArtifacts) || maxReviewBatchArtifacts < 1
+    || !Number.isSafeInteger(maxSessionAssetBytes) || maxSessionAssetBytes < 1
+    || !Number.isSafeInteger(reviewLeaseMs) || reviewLeaseMs < 1
+    || typeof now !== 'function') throw new Error('Invalid session resource limits')
   const sessions = new Map()
+
+  function rollbackReviewLease(session, lease) {
+    if (lease.phase === 'committed') {
+      for (const artifact of lease.committed.values()) session.artifacts.delete(artifact.id)
+      session.currentArtifactsByResultId.clear()
+      for (const [resultId, artifact] of lease.prior) {
+        session.artifacts.set(artifact.id, artifact)
+        session.currentArtifactsByResultId.set(resultId, artifact)
+      }
+    }
+    session.reviewLease = null
+  }
+
+  function expireReviewLease(session) {
+    const lease = session.reviewLease
+    if (lease && now() > lease.expiresAt) rollbackReviewLease(session, lease)
+  }
+
+  function requestLease(session, batchId, request, body) {
+    expireReviewLease(session)
+    const lease = session.reviewLease
+    const token = body?.leaseToken ?? request.headers['x-artifact-lease-token']
+    const generation = body?.generation ?? Number(request.headers['x-artifact-generation'])
+    if (!lease || lease.batchId !== batchId || !validToken(lease.leaseToken, token)
+      || generation !== lease.generation) return null
+    lease.expiresAt = now() + reviewLeaseMs
+    return lease
+  }
 
   const server = createServer(async (request, response) => {
     try {
@@ -69,6 +114,7 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
           json(response, 403, { ok: false, error: 'Forbidden' })
           return
         }
+        expireReviewLease(session)
         response.setHeader('cache-control', 'no-store')
         if (parts[2] === 'bootstrap' && request.method === 'GET') {
           json(response, 200, {
@@ -93,18 +139,45 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
           if (!batchId || !/^[A-Za-z0-9._-]{1,160}$/.test(batchId)) {
             return json(response, 400, { ok: false, error: 'Invalid artifact batch id' })
           }
+          if (request.method === 'POST' && parts[5] === 'acquire') {
+            if (session.reviewLease) return json(response, 409, { ok: false, error: 'Review artifact lease is busy' })
+            const body = JSON.parse((await readBody(request, 1024)).toString('utf8') || '{}')
+            if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) {
+              return json(response, 400, { ok: false, error: 'Invalid lease request' })
+            }
+            const lease = {
+              batchId,
+              leaseToken: randomBytes(32).toString('base64url'),
+              generation: ++session.reviewGeneration,
+              expiresAt: now() + reviewLeaseMs,
+              phase: 'staging',
+              staged: new Map(),
+              stagedBytes: 0,
+            }
+            session.reviewLease = lease
+            json(response, 201, {
+              ok: true, batchId, leaseToken: lease.leaseToken,
+              generation: lease.generation, expiresAt: lease.expiresAt,
+            })
+            return
+          }
           if (request.method === 'PUT') {
             const id = parts[5]
             if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
+            const lease = requestLease(session, batchId, request)
+            if (!lease || lease.phase !== 'staging') return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
             if (session.artifacts.has(id)) return json(response, 409, { ok: false, error: 'Artifact already exists' })
-            const batch = session.stagedArtifacts.get(batchId) ?? new Map()
+            const batch = lease.staged
             if (batch.has(id)) return json(response, 409, { ok: false, error: 'Artifact already staged' })
+            if (batch.size >= maxReviewBatchArtifacts) return json(response, 413, { ok: false, error: 'Review artifact count exceeds limit' })
             const resultId = String(request.headers['x-artifact-result-id'] ?? id)
             if (!/^[A-Za-z0-9._-]{1,160}$/.test(resultId)
               || [...batch.values()].some((artifact) => artifact.resultId === resultId)) {
               return json(response, 400, { ok: false, error: 'Invalid or duplicate artifact result id' })
             }
-            const bytes = await readBody(request, maxUploadBytes)
+            const remaining = maxReviewBatchBytes - lease.stagedBytes
+            if (remaining < 1) return json(response, 413, { ok: false, error: 'Review artifact bytes exceed limit' })
+            const bytes = await readBody(request, Math.min(maxUploadBytes, remaining))
             const encodedName = request.headers['x-artifact-file-name']
             const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
             const artifact = {
@@ -127,17 +200,18 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
               url: `${origin}/session/${session.id}/artifact/${encodeURIComponent(id)}?token=${session.token}`,
             }
             batch.set(id, artifact)
-            session.stagedArtifacts.set(batchId, batch)
+            lease.stagedBytes += bytes.byteLength
             const { bytes: _bytes, ...descriptor } = artifact
-            json(response, 201, { ok: true, ...descriptor })
+            json(response, 201, { ok: true, ...descriptor, generation: lease.generation })
             return
           }
           if (request.method === 'POST' && parts[5] === 'commit') {
             const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
+            const lease = requestLease(session, batchId, request, body)
             const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : null
             const resultIds = Array.isArray(body?.resultIds) ? body.resultIds : artifactIds
-            const batch = session.stagedArtifacts.get(batchId)
-            if (!batch || !artifactIds || artifactIds.length !== batch.size
+            const batch = lease?.staged
+            if (!lease || lease.phase !== 'staging' || !batch || !artifactIds || artifactIds.length !== batch.size
               || !resultIds || resultIds.length !== batch.size
               || artifactIds.some((id, index) => typeof id !== 'string' || id !== [...batch.keys()][index])
               || resultIds.some((id, index) => typeof id !== 'string' || id !== [...batch.values()][index].resultId)) {
@@ -147,41 +221,33 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
               return json(response, 409, { ok: false, error: 'Artifact already exists' })
             }
             const committed = new Map(batch)
-            const prior = new Map()
+            const prior = new Map(session.currentArtifactsByResultId)
+            for (const previous of prior.values()) session.artifacts.delete(previous.id)
+            session.currentArtifactsByResultId.clear()
             for (const [id, artifact] of committed) {
-              const previous = session.currentArtifactsByResultId.get(artifact.resultId)
-              prior.set(artifact.resultId, previous)
-              if (previous) {
-                session.artifacts.delete(previous.id)
-                if (previous.batchId) session.committedArtifactBatches.delete(previous.batchId)
-              }
               session.artifacts.set(id, artifact)
               session.currentArtifactsByResultId.set(artifact.resultId, artifact)
             }
-            session.committedArtifactBatches.set(batchId, { committed, prior })
-            session.stagedArtifacts.delete(batchId)
-            json(response, 201, { ok: true, batchId, artifactIds, resultIds })
+            Object.assign(lease, { phase: 'committed', committed, prior })
+            delete lease.staged
+            delete lease.stagedBytes
+            json(response, 201, { ok: true, batchId, artifactIds, resultIds, generation: lease.generation })
+            return
+          }
+          if (request.method === 'POST' && parts[5] === 'finalize') {
+            const body = JSON.parse((await readBody(request, 4096)).toString('utf8'))
+            const lease = requestLease(session, batchId, request, body)
+            if (!lease || lease.phase !== 'committed') return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
+            session.reviewLease = null
+            json(response, 200, { ok: true, batchId, generation: lease.generation, finalized: true })
             return
           }
           if (request.method === 'DELETE' && parts.length === 5) {
-            session.stagedArtifacts.delete(batchId)
-            const transaction = session.committedArtifactBatches.get(batchId)
-            if (transaction) {
-              for (const [id, artifact] of transaction.committed) {
-                if (session.artifacts.get(id) === artifact) {
-                  session.artifacts.delete(id)
-                  const previous = transaction.prior.get(artifact.resultId)
-                  if (previous) {
-                    session.artifacts.set(previous.id, previous)
-                    session.currentArtifactsByResultId.set(artifact.resultId, previous)
-                  } else {
-                    session.currentArtifactsByResultId.delete(artifact.resultId)
-                  }
-                }
-              }
-              session.committedArtifactBatches.delete(batchId)
-            }
-            json(response, 200, { ok: true, batchId, purged: true })
+            const lease = requestLease(session, batchId, request)
+            if (!lease) return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
+            const generation = lease.generation
+            rollbackReviewLease(session, lease)
+            json(response, 200, { ok: true, batchId, generation, aborted: true })
             return
           }
           json(response, 404, { ok: false, error: 'Artifact batch route not found' })
@@ -217,6 +283,11 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
         if (parts[2] === 'artifact' && request.method === 'GET') {
           const artifact = session.artifacts.get(parts[3])
           if (!artifact) return json(response, 404, { ok: false, error: 'Artifact not found' })
+          if (artifact.batchId && session.reviewLease?.phase === 'committed'
+            && session.reviewLease.batchId === artifact.batchId
+            && !requestLease(session, artifact.batchId, request)) {
+            return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
+          }
           response.writeHead(200, {
             'content-type': artifact.mimeType,
             'content-length': artifact.byteLength,
@@ -251,7 +322,8 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
       if (request.method === 'HEAD') response.end()
       else createReadStream(fallback).pipe(response)
     } catch (error) {
-      json(response, 500, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500
+      json(response, status, { ok: false, error: error instanceof Error ? error.message : String(error) })
     }
   })
 
@@ -270,10 +342,11 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
         id: randomBytes(12).toString('base64url'),
         token: randomBytes(32).toString('base64url'),
         assets: new Map(),
+        assetBytes: 0,
         artifacts: new Map(),
-        stagedArtifacts: new Map(),
-        committedArtifactBatches: new Map(),
         currentArtifactsByResultId: new Map(),
+        reviewLease: null,
+        reviewGeneration: 0,
       }
       sessions.set(session.id, session)
       return { id: session.id, token: session.token }
@@ -281,8 +354,20 @@ export async function createSessionServer({ editorRoot, maxUploadBytes = 128 * 1
     addAsset(sessionId, { id = randomBytes(10).toString('base64url'), bytes, mimeType = 'application/octet-stream', fileName = id }) {
       const session = sessions.get(sessionId)
       if (!session) throw new Error(`Unknown session: ${sessionId}`)
-      session.assets.set(id, { id, bytes: Buffer.from(bytes), mimeType, fileName: sanitizeArtifactName(fileName) })
-      return `${origin}/session/${session.id}/asset/${encodeURIComponent(id)}?token=${session.token}`
+      const byteLength = bytes?.byteLength
+      if (!Number.isSafeInteger(byteLength) || byteLength < 0 || byteLength > maxSessionAssetBytes) throw new Error('Session asset byte limit exceeded')
+      const content = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      const contentIdentity = sha256Bytes(Buffer.concat([Buffer.from(`${mimeType}\0`), content]))
+      const versionId = `asset-${contentIdentity}`
+      if (!session.assets.has(versionId)) {
+        if (byteLength > maxSessionAssetBytes - session.assetBytes) throw new Error('Session asset byte limit exceeded')
+        session.assets.set(versionId, {
+          id: versionId, logicalId: id, bytes: Buffer.from(content), mimeType,
+          fileName: sanitizeArtifactName(fileName), sha256: sha256Bytes(content),
+        })
+        session.assetBytes += byteLength
+      }
+      return `${origin}/session/${session.id}/asset/${encodeURIComponent(versionId)}?token=${session.token}`
     },
     getArtifacts(sessionId) {
       const session = sessions.get(sessionId)

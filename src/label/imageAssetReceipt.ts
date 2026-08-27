@@ -1,10 +1,13 @@
 import { parsePortablePng } from '../../scripts/lib/png-core.mjs'
 import { sha256HexSync } from '../agent/syncSha256'
 import { decodeBoundedDataUrl, MAX_EMBEDDED_ASSET_BYTES } from './boundedAssetBytes'
+import type { ImageLayer, LabelAreaConfig } from './types'
 
 const MAX_IMAGE_DIMENSION = 8192
 const MAX_IMAGE_PIXELS = 32 * 1024 * 1024
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp'])
+const MAX_CONCURRENT_IMAGE_LOADS = 4
+const MAX_CONCURRENT_IMAGE_BYTES = 64 * 1024 * 1024
 
 export interface ContentBoundImage {
   image: HTMLImageElement
@@ -22,6 +25,16 @@ interface CurrentImageReceipt {
 }
 
 const currentReceipts = new Map<string, Map<string, CurrentImageReceipt>>()
+interface AreaImageLoad {
+  identity: string
+  sourceIdentity: string
+  controller: AbortController
+  load: Promise<ContentBoundImage>
+}
+const areaImageLoads = new Map<string, AreaImageLoad>()
+let activeImageLoads = 0
+let reservedImageBytes = 0
+const imageLoadQueue: Array<{ signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void }> = []
 
 function sourceIdentity(src: string, width: number, height: number): string {
   return `${src}\u0000${width}\u0000${height}`
@@ -54,6 +67,63 @@ export function currentImageAssetReceipt(
 ): string | undefined {
   const receipt = currentReceipts.get(areaId)?.get(layerId)
   return receipt?.sourceIdentity === sourceIdentity(src, width, height) ? receipt.receiptKey : undefined
+}
+
+function abortError(): Error {
+  const error = new Error('Image load was aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function drainImageLoadQueue(): void {
+  while (activeImageLoads < MAX_CONCURRENT_IMAGE_LOADS && imageLoadQueue.length > 0) {
+    const queued = imageLoadQueue.shift()!
+    if (queued.signal?.aborted) { queued.reject(abortError()); continue }
+    activeImageLoads += 1
+    let released = false
+    queued.resolve(() => {
+      if (released) return
+      released = true
+      activeImageLoads -= 1
+      drainImageLoadQueue()
+    })
+  }
+}
+
+function acquireImageLoadSlot(signal?: AbortSignal): Promise<() => void> {
+  if (signal?.aborted) return Promise.reject(abortError())
+  return new Promise((resolve, reject) => {
+    const queued = { signal, resolve, reject }
+    imageLoadQueue.push(queued)
+    const onAbort = () => {
+      const index = imageLoadQueue.indexOf(queued)
+      if (index >= 0) {
+        imageLoadQueue.splice(index, 1)
+        reject(abortError())
+      }
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    const wrappedResolve = queued.resolve
+    queued.resolve = (release) => {
+      signal?.removeEventListener('abort', onAbort)
+      wrappedResolve(release)
+    }
+    drainImageLoadQueue()
+  })
+}
+
+function reserveImageBytes(length: number): () => void {
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_EMBEDDED_ASSET_BYTES
+    || length > MAX_CONCURRENT_IMAGE_BYTES - reservedImageBytes) {
+    throw new Error('Image exceeds the aggregate concurrent byte limit')
+  }
+  reservedImageBytes += length
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    reservedImageBytes -= length
+  }
 }
 
 function readU16Be(bytes: Uint8Array, offset: number): number {
@@ -137,7 +207,7 @@ function structuralDimensions(bytes: Uint8Array, mimeType: string): { width: num
   return dimensions
 }
 
-async function readResponseBytes(response: Response): Promise<Uint8Array> {
+async function readResponseBytes(response: Response, signal?: AbortSignal): Promise<{ bytes: Uint8Array; release: () => void }> {
   const declared = response.headers.get('content-length')
   if (declared !== null) {
     const length = Number(declared)
@@ -147,72 +217,154 @@ async function readResponseBytes(response: Response): Promise<Uint8Array> {
   }
   const reader = response.body?.getReader()
   if (!reader) throw new Error('Image response is not stream-readable')
+  const declaredLength = declared === null ? undefined : Number(declared)
+  let releaseReservation: (() => void) | undefined
+  if (declaredLength !== undefined) releaseReservation = reserveImageBytes(declaredLength)
   const chunks: Uint8Array[] = []
   let total = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-    if (value.byteLength > MAX_EMBEDDED_ASSET_BYTES - total) {
-      await reader.cancel()
-      throw new Error('Image exceeds the bounded byte limit')
+  try {
+    while (true) {
+      if (signal?.aborted) { await reader.cancel(); throw abortError() }
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      if (value.byteLength > MAX_EMBEDDED_ASSET_BYTES - total) {
+        await reader.cancel()
+        throw new Error('Image exceeds the bounded byte limit')
+      }
+      total += value.byteLength
+      chunks.push(value)
     }
-    total += value.byteLength
-    chunks.push(value)
+    if (total < 1 || (declaredLength !== undefined && total !== declaredLength)) throw new Error('Image byte length does not match its response')
+    if (!releaseReservation) releaseReservation = reserveImageBytes(total)
+    const bytes = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+    return { bytes, release: releaseReservation }
+  } catch (error) {
+    releaseReservation?.()
+    throw error
   }
-  if (total < 1 || (declared !== null && total !== Number(declared))) throw new Error('Image byte length does not match its response')
-  const bytes = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
-  return bytes
 }
 
-async function exactImageBytes(src: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+async function exactImageBytes(src: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; mimeType: string; release: () => void }> {
   if (src.startsWith('data:')) {
     const embedded = decodeBoundedDataUrl(src)
-    return { bytes: embedded.bytes, mimeType: embedded.mimeType }
+    return { bytes: embedded.bytes, mimeType: embedded.mimeType, release: reserveImageBytes(embedded.bytes.byteLength) }
   }
-  const response = await fetch(src, { cache: 'no-store', redirect: 'error', credentials: 'same-origin' })
+  const response = await fetch(src, { cache: 'no-store', redirect: 'error', credentials: 'same-origin', signal })
   if (response.status !== 200 || !response.ok) throw new Error(`Image fetch failed (${response.status})`)
   const mimeType = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase()
-  return { bytes: await readResponseBytes(response), mimeType }
+  return { ...(await readResponseBytes(response, signal)), mimeType }
 }
 
 /** Fetch, structurally verify, hash, and decode one immutable image payload. */
-export async function loadContentBoundImage(src: string, expectedWidth: number, expectedHeight: number): Promise<ContentBoundImage> {
+export async function loadContentBoundImage(
+  src: string,
+  expectedWidth: number,
+  expectedHeight: number,
+  options: { signal?: AbortSignal } = {},
+): Promise<ContentBoundImage> {
   if (!Number.isInteger(expectedWidth) || !Number.isInteger(expectedHeight) || expectedWidth < 1 || expectedHeight < 1) {
     throw new Error('Declared image dimensions are invalid')
   }
-  const { bytes, mimeType } = await exactImageBytes(src)
-  if (!IMAGE_MIMES.has(mimeType)) throw new Error(`Unsupported image MIME: ${mimeType || 'missing'}`)
-  const dimensions = structuralDimensions(bytes, mimeType)
-  if (dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
-    throw new Error('Image bytes do not match declared dimensions')
-  }
-  const sha256 = sha256HexSync(bytes)
-  const objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], { type: mimeType }))
-  const image = new Image()
+  const releaseSlot = await acquireImageLoadSlot(options.signal)
+  let releaseBytes: (() => void) | undefined
   try {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve()
-      image.onerror = () => reject(new Error('Image content cannot be decoded'))
-      image.src = objectUrl
-    })
-    if (image.naturalWidth !== expectedWidth || image.naturalHeight !== expectedHeight) {
-      throw new Error('Decoded image dimensions do not match verified bytes')
+    const exact = await exactImageBytes(src, options.signal)
+    const { bytes, mimeType } = exact
+    releaseBytes = exact.release
+    if (!IMAGE_MIMES.has(mimeType)) throw new Error(`Unsupported image MIME: ${mimeType || 'missing'}`)
+    const dimensions = structuralDimensions(bytes, mimeType)
+    if (dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
+      throw new Error('Image bytes do not match declared dimensions')
+    }
+    const sha256 = sha256HexSync(bytes)
+    const objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], { type: mimeType }))
+    const image = new Image()
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onAbort = () => { image.src = ''; reject(abortError()) }
+        image.onload = () => { options.signal?.removeEventListener('abort', onAbort); resolve() }
+        image.onerror = () => { options.signal?.removeEventListener('abort', onAbort); reject(new Error('Image content cannot be decoded')) }
+        options.signal?.addEventListener('abort', onAbort, { once: true })
+        image.src = objectUrl
+      })
+      if (image.naturalWidth !== expectedWidth || image.naturalHeight !== expectedHeight) {
+        throw new Error('Decoded image dimensions do not match verified bytes')
+      }
+    } finally {
+      image.onload = null
+      image.onerror = null
+      URL.revokeObjectURL(objectUrl)
+    }
+    return {
+      image,
+      width: dimensions.width,
+      height: dimensions.height,
+      mimeType,
+      byteLength: bytes.byteLength,
+      sha256,
+      receiptKey: `image/${mimeType}/${dimensions.width}x${dimensions.height}/sha256:${sha256}`,
     }
   } finally {
-    image.onload = null
-    image.onerror = null
-    URL.revokeObjectURL(objectUrl)
+    releaseBytes?.()
+    releaseSlot()
   }
-  return {
-    image,
-    width: dimensions.width,
-    height: dimensions.height,
-    mimeType,
-    byteLength: bytes.byteLength,
-    sha256,
-    receiptKey: `image/${mimeType}/${dimensions.width}x${dimensions.height}/sha256:${sha256}`,
+}
+
+export function visibleImageLayersForRuntime(area: Pick<LabelAreaConfig, 'layers'>): ImageLayer[] {
+  return area.layers.filter((layer): layer is ImageLayer => layer.kind === 'image' && layer.visible)
+}
+
+export function loadAreaContentBoundImage(
+  areaId: string,
+  activationRevision: number,
+  layer: ImageLayer,
+): Promise<ContentBoundImage> {
+  const owner = `${areaId}\u0000${layer.id}`
+  const source = sourceIdentity(layer.src, layer.naturalWidth, layer.naturalHeight)
+  const identity = `${activationRevision}\u0000${source}`
+  const cached = areaImageLoads.get(owner)
+  if (cached?.identity === identity) return cached.load
+  cached?.controller.abort()
+  areaImageLoads.delete(owner)
+  beginImageAssetLoad(areaId, layer.id)
+  const controller = new AbortController()
+  const load = loadContentBoundImage(layer.src, layer.naturalWidth, layer.naturalHeight, { signal: controller.signal })
+  const entry = { identity, sourceIdentity: source, controller, load }
+  areaImageLoads.set(owner, entry)
+  void load.catch(() => {
+    if (areaImageLoads.get(owner) === entry) areaImageLoads.delete(owner)
+  })
+  return load
+}
+
+function evictAreaImageOwner(owner: string, entry: AreaImageLoad): void {
+  entry.controller.abort()
+  if (areaImageLoads.get(owner) === entry) areaImageLoads.delete(owner)
+  const separator = owner.indexOf('\u0000')
+  if (separator >= 0) currentReceipts.get(owner.slice(0, separator))?.delete(owner.slice(separator + 1))
+}
+
+/** Abort and evict image work not required by the exact visible project layer set. */
+export function syncImageAssetProject(areas: readonly Pick<LabelAreaConfig, 'id' | 'layers'>[]): void {
+  const allowed = new Map<string, string>()
+  for (const area of areas) for (const layer of visibleImageLayersForRuntime(area)) {
+    allowed.set(`${area.id}\u0000${layer.id}`, sourceIdentity(layer.src, layer.naturalWidth, layer.naturalHeight))
   }
+  for (const [owner, entry] of areaImageLoads) {
+    if (allowed.get(owner) !== entry.sourceIdentity) evictAreaImageOwner(owner, entry)
+  }
+  for (const [areaId, receipts] of currentReceipts) {
+    for (const layerId of receipts.keys()) if (!allowed.has(`${areaId}\u0000${layerId}`)) receipts.delete(layerId)
+    if (receipts.size === 0) currentReceipts.delete(areaId)
+  }
+}
+
+/** Component unmount boundary: no pending load or stale receipt survives the area canvas. */
+export function releaseImageAssetArea(areaId: string): void {
+  const prefix = `${areaId}\u0000`
+  for (const [owner, entry] of areaImageLoads) if (owner.startsWith(prefix)) evictAreaImageOwner(owner, entry)
+  currentReceipts.delete(areaId)
 }

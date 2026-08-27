@@ -25,6 +25,7 @@ class FontFaceDouble {
 }
 
 const addFont = vi.fn()
+const deleteFont = vi.fn()
 
 function textLayer(fontFamily: string, fontWeight: number = 400, italic = false): LabelLayer {
   return {
@@ -59,8 +60,9 @@ beforeEach(() => {
   FontFaceDouble.created = []
   FontFaceDouble.failingSource = ''
   addFont.mockReset()
+  deleteFont.mockReset()
   vi.stubGlobal('FontFace', FontFaceDouble)
-  vi.stubGlobal('document', { fonts: { add: addFont, ready: Promise.resolve() } })
+  vi.stubGlobal('document', { fonts: { add: addFont, delete: deleteFont, ready: Promise.resolve() } })
 })
 
 afterEach(() => {
@@ -217,6 +219,42 @@ describe('font runtime', () => {
     expect(fontCssFor(firstResult.id, [first])).toContain(firstResult.cssFamily)
     expect(fontCssFor(secondResult.id, [second])).toContain(secondResult.cssFamily)
     expect(FontFaceDouble.created).toHaveLength(2)
+  })
+
+  it('evicts revisioned uploaded FontFaces on replacement, removal, and final scope release', async () => {
+    const first: UploadedFontRecord = { name: 'Scoped Brand', dataUrl: 'data:font/woff2;base64,QUFB' }
+    const second: UploadedFontRecord = { name: 'Scoped Brand', dataUrl: 'data:font/woff2;base64,QkJC' }
+    const runtime = await freshRuntime()
+    const firstRequests = runtime.deriveDesignFontRequests([textLayer('upload:scoped-brand')], [first])
+    const release = runtime.retainDesignFontRequests(firstRequests)
+    await runtime.loadDesignFontRequests(firstRequests)
+    const secondRequests = runtime.deriveDesignFontRequests([textLayer('upload:scoped-brand')], [second])
+    await runtime.loadDesignFontRequests(secondRequests)
+
+    runtime.syncUploadedFontProject([second])
+    release()
+    expect(deleteFont).toHaveBeenCalledWith(FontFaceDouble.created[0])
+    expect(deleteFont).not.toHaveBeenCalledWith(FontFaceDouble.created[1])
+    runtime.syncUploadedFontProject([])
+    expect(deleteFont).toHaveBeenCalledWith(FontFaceDouble.created[1])
+  })
+
+  it('deletes a pending uploaded FontFace when its project scope disappears before load settles', async () => {
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => { finish = resolve })
+    const realLoad = FontFaceDouble.prototype.load
+    FontFaceDouble.prototype.load = async function () { await pending; return this }
+    try {
+      const runtime = await freshRuntime()
+      const record: UploadedFontRecord = { name: 'Pending Brand', dataUrl: 'data:font/woff2;base64,UEVORElORw==' }
+      const loading = runtime.ensureUploadedFontLoaded(record)
+      runtime.syncUploadedFontProject([])
+      finish()
+      await loading
+      expect(deleteFont).toHaveBeenCalledWith(FontFaceDouble.created[0])
+    } finally {
+      FontFaceDouble.prototype.load = realLoad
+    }
   })
 
   it('rejects an oversized uploaded font before decoding or constructing FontFace', async () => {

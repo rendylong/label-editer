@@ -447,7 +447,8 @@ function assertReviewStateUnchanged(snapshot: ReviewStateSnapshot, stage: string
       || value.version !== expected.version || value.areaOwner !== expected.areaOwner
       || (value.fontReadinessKey ?? '') !== expected.fontReadinessKey
       || (value.assetReadinessKey ?? '') !== expected.assetReadinessKey
-      || value.assetReadinessKey !== designAssetReadinessKey(expected.areaOwner, value.imageAssetReceipts)) {
+      || value.assetReadinessKey !== designAssetReadinessKey(expected.areaOwner, value.imageAssetReceipts)
+      || !isBakeAssetReadyForArea(expected.areaOwner, value)) {
       throw reviewNotReady(stage, `Review bake changed during capture (${stage})`, { areaId })
     }
   }
@@ -594,7 +595,7 @@ function hasExactKeys(value: object, expected: readonly string[]): boolean {
 async function uploadArtifact(
   bootstrap: AgentBridgeBootstrap,
   artifact: BrowserArtifact,
-  options: { batchId?: string; internalId?: string; resultId?: string } = {},
+  options: { batchId?: string; internalId?: string; resultId?: string; lease?: ReviewArtifactLease } = {},
 ): Promise<ArtifactDescriptor> {
   const uploadId = options.internalId ?? artifact.id
   const resultId = options.resultId ?? artifact.id
@@ -608,6 +609,7 @@ async function uploadArtifact(
       'content-type': artifact.mimeType,
       'x-artifact-file-name': encodeURIComponent(artifact.fileName),
       ...(options.batchId ? { 'x-artifact-result-id': resultId } : {}),
+      ...(options.lease ? leaseHeaders(options.lease) : {}),
       ...(artifact.width ? { 'x-artifact-width': String(artifact.width) } : {}),
       ...(artifact.height ? { 'x-artifact-height': String(artifact.height) } : {}),
       ...(artifact.areaId ? { 'x-artifact-area-id': encodeURIComponent(artifact.areaId) } : {}),
@@ -631,11 +633,13 @@ async function uploadArtifact(
     ...(artifact.height ? ['height'] : []),
     ...(artifact.areaId ? ['areaId'] : []),
     ...(artifact.channel ? ['channel'] : []),
+    ...(options.lease ? ['generation'] : []),
   ]
   if ((options.batchId && !hasExactKeys(descriptor, descriptorKeys))
     || descriptor.id !== uploadId
     || (options.batchId && (descriptor.ok !== true || descriptor.batchId !== options.batchId))
     || (options.batchId && descriptor.resultId !== resultId)
+    || (options.lease && (descriptor as { generation?: unknown }).generation !== options.lease.generation)
     || descriptor.fileName !== artifact.fileName
     || descriptor.mimeType !== artifact.mimeType
     || typeof descriptor.url !== 'string'
@@ -677,6 +681,20 @@ async function uploadArtifact(
   }
 }
 
+interface ReviewArtifactLease {
+  batchId: string
+  leaseToken: string
+  generation: number
+  expiresAt: number
+}
+
+function leaseHeaders(lease: ReviewArtifactLease): Record<string, string> {
+  return {
+    'x-artifact-lease-token': lease.leaseToken,
+    'x-artifact-generation': String(lease.generation),
+  }
+}
+
 let reviewBatchCounter = 0
 
 function nextReviewBatchId(): string {
@@ -687,17 +705,43 @@ function nextReviewBatchId(): string {
   return `review-${reviewBatchCounter}-${random}`
 }
 
+async function acquireArtifactBatch(bootstrap: AgentBridgeBootstrap, batchId: string): Promise<ReviewArtifactLease> {
+  const url = artifactStageUrl(bootstrap, batchId, '/acquire')
+  const response = await fetch(url, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}', redirect: 'error',
+  })
+  if (!response.ok || response.redirected || response.status !== 201 || response.url !== url.href
+    || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
+    throw new Error(`Artifact batch lease failed (${response.status})`)
+  }
+  let value: unknown
+  try { value = await response.json() } catch { throw new Error('Invalid artifact batch lease response') }
+  const body = value as Partial<ReviewArtifactLease> & { ok?: unknown }
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'leaseToken', 'generation', 'expiresAt'])
+    || body.ok !== true || body.batchId !== batchId
+    || typeof body.leaseToken !== 'string' || !/^[A-Za-z0-9_-]{32,160}$/.test(body.leaseToken)
+    || !Number.isSafeInteger(body.generation) || (body.generation ?? 0) < 1
+    || !Number.isSafeInteger(body.expiresAt) || (body.expiresAt ?? 0) < 1) {
+    throw new Error('Invalid artifact batch lease response')
+  }
+  return {
+    batchId, leaseToken: body.leaseToken,
+    generation: body.generation, expiresAt: body.expiresAt,
+  } as ReviewArtifactLease
+}
+
 async function commitArtifactBatch(
   bootstrap: AgentBridgeBootstrap,
   batchId: string,
   artifactIds: readonly string[],
   resultIds: readonly string[],
+  lease: ReviewArtifactLease,
 ): Promise<void> {
   const url = artifactStageUrl(bootstrap, batchId, '/commit')
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ artifactIds, resultIds }),
+    headers: { 'content-type': 'application/json', ...leaseHeaders(lease) },
+    body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation, artifactIds, resultIds }),
     redirect: 'error',
   })
   if (!response.ok || response.redirected || response.status !== 201 || response.url !== url.href
@@ -706,30 +750,53 @@ async function commitArtifactBatch(
   }
   let value: unknown
   try { value = await response.json() } catch { throw new Error('Invalid artifact batch commit response') }
-  const body = value as { ok?: unknown; batchId?: unknown; artifactIds?: unknown; resultIds?: unknown }
+  const body = value as { ok?: unknown; batchId?: unknown; artifactIds?: unknown; resultIds?: unknown; generation?: unknown }
   const ids = Array.isArray(body?.artifactIds) ? body.artifactIds : undefined
   const results = Array.isArray(body?.resultIds) ? body.resultIds : undefined
-  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'artifactIds', 'resultIds'])
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'artifactIds', 'resultIds', 'generation'])
     || body.ok !== true || body.batchId !== batchId
+    || body.generation !== lease.generation
     || !ids || ids.length !== artifactIds.length || ids.some((id, index) => id !== artifactIds[index])
     || !results || results.length !== resultIds.length || results.some((id, index) => id !== resultIds[index])) {
     throw new Error('Invalid artifact batch commit response')
   }
 }
 
-async function purgeArtifactBatch(bootstrap: AgentBridgeBootstrap, batchId: string): Promise<void> {
+async function abortArtifactBatch(bootstrap: AgentBridgeBootstrap, lease: ReviewArtifactLease): Promise<void> {
+  const { batchId } = lease
   const url = artifactStageUrl(bootstrap, batchId)
-  const response = await fetch(url, { method: 'DELETE', redirect: 'error' })
+  const response = await fetch(url, { method: 'DELETE', headers: leaseHeaders(lease), redirect: 'error' })
   if (!response.ok || response.redirected || response.status !== 200 || response.url !== url.href
     || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
     throw new Error(`Artifact batch purge failed (${response.status})`)
   }
   let value: unknown
   try { value = await response.json() } catch { throw new Error('Invalid artifact batch purge response') }
-  const body = value as { ok?: unknown; batchId?: unknown; purged?: unknown }
-  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'purged'])
-    || body.ok !== true || body.batchId !== batchId || body.purged !== true) {
+  const body = value as { ok?: unknown; batchId?: unknown; generation?: unknown; aborted?: unknown }
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'generation', 'aborted'])
+    || body.ok !== true || body.batchId !== batchId
+    || body.generation !== lease.generation || body.aborted !== true) {
     throw new Error('Invalid artifact batch purge response')
+  }
+}
+
+async function finalizeArtifactBatch(bootstrap: AgentBridgeBootstrap, lease: ReviewArtifactLease): Promise<void> {
+  const url = artifactStageUrl(bootstrap, lease.batchId, '/finalize')
+  const response = await fetch(url, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...leaseHeaders(lease) },
+    body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation }), redirect: 'error',
+  })
+  if (!response.ok || response.redirected || response.status !== 200 || response.url !== url.href
+    || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
+    throw new Error(`Artifact batch finalize failed (${response.status})`)
+  }
+  let value: unknown
+  try { value = await response.json() } catch { throw new Error('Invalid artifact batch finalize response') }
+  const body = value as { ok?: unknown; batchId?: unknown; generation?: unknown; finalized?: unknown }
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'generation', 'finalized'])
+    || body.ok !== true || body.batchId !== lease.batchId
+    || body.generation !== lease.generation || body.finalized !== true) {
+    throw new Error('Invalid artifact batch finalize response')
   }
 }
 
@@ -740,8 +807,11 @@ async function readBackReviewArtifact(
   width: number,
   height: number,
   consumeBytes: (length: number) => void,
+  lease: ReviewArtifactLease,
 ): Promise<void> {
-  const response = await fetch(descriptor.url, { method: 'GET', cache: 'no-store', redirect: 'error', credentials: 'same-origin' })
+  const response = await fetch(descriptor.url, {
+    method: 'GET', cache: 'no-store', redirect: 'error', credentials: 'same-origin', headers: leaseHeaders(lease),
+  })
   if (!response.ok || response.redirected || response.status !== 200 || response.url !== descriptor.url
     || response.headers.get('content-type') !== descriptor.mimeType
     || response.headers.get('content-length') !== String(expectedBytes.byteLength)
@@ -1001,8 +1071,16 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         const finalFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
         assertFidelityReady(finalFidelity)
         const batchId = nextReviewBatchId()
+        let lease: ReviewArtifactLease | undefined
         let completed = false
         try {
+          try {
+            lease = await acquireArtifactBatch(bootstrap, batchId)
+          } catch (error) {
+            throw reviewNotReady('upload-lease', 'Review artifact transaction is busy or unavailable', {
+              cause: error instanceof Error ? error.message : String(error),
+            })
+          }
           const views: ReviewViewResult[] = []
           const internalIds: string[] = []
           for (const source of prepared) {
@@ -1014,7 +1092,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
                 id: source.request.id, fileName: `${source.request.id}.png`, mimeType: 'image/png',
                 bytes: source.bytes, width: source.request.width, height: source.request.height,
                 areaId: source.request.areaId,
-              }, { batchId, internalId, resultId: source.request.id })
+              }, { batchId, internalId, resultId: source.request.id, lease })
             } catch (error) {
               throw reviewNotReady(`upload:${source.request.id}`, `Review artifact upload failed: ${source.request.id}`, {
                 cause: error instanceof Error ? error.message : String(error),
@@ -1038,6 +1116,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
               batchId,
               internalIds,
               prepared.map((source) => source.request.id),
+              lease,
             )
           } catch (error) {
             throw reviewNotReady('upload-commit', 'Review artifact batch commit failed', {
@@ -1055,6 +1134,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
                 source.request.width,
                 source.request.height,
                 (length) => { encodedByteTotal = assertReviewEncodedByteBudget(encodedByteTotal, length) },
+                lease,
               )
             } catch (error) {
               throw reviewNotReady(`readback:${source.request.id}`, `Review artifact readback failed: ${source.request.id}`, {
@@ -1063,8 +1143,8 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             }
           }
 
-          // Final no-await barrier. Every digest and network operation is complete;
-          // no mutable evidence input may change between these checks and return.
+          // Final client-evidence barrier while the exclusive server lease still owns
+          // the complete prior/new logical sets. Finalize is the sole remaining operation.
           assertReviewStateUnchanged(snapshot, 'before-result')
           assertReviewPlanUnchanged(plan, width, height, 'before-result-plan')
           if (currentReviewDocument().json !== document.json) {
@@ -1077,6 +1157,13 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           assertValidationReady(returnValidation)
           const returnFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
           assertFidelityReady(returnFidelity)
+          try {
+            await finalizeArtifactBatch(bootstrap, lease)
+          } catch (error) {
+            throw reviewNotReady('upload-finalize', 'Review artifact batch could not be finalized', {
+              cause: error instanceof Error ? error.message : String(error),
+            })
+          }
           completed = true
           return {
             inputKind: 'label-project-v3',
@@ -1092,9 +1179,9 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             fidelity: returnFidelity,
           }
         } finally {
-          if (!completed) {
+          if (!completed && lease) {
             try {
-              await purgeArtifactBatch(bootstrap, batchId)
+              await abortArtifactBatch(bootstrap, lease)
             } catch (error) {
               throw reviewNotReady('upload-rollback', 'Review artifact batch could not be purged', {
                 cause: error instanceof Error ? error.message : String(error),
