@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, readFile, readlink, rename, rm, rmdir, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, open, readdir, readFile, readlink, rename, rm, rmdir, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -39,9 +39,11 @@ const childPublisher = String.raw`
   let initializationDelayMs = Number(process.env.INITIALIZATION_DELAY_MS || 0)
   const crash = () => process.exit(86)
   let verifiedMarkerWritten = false
+  let recoveryClaimOpened = false
   const fileSystem = {
     async open(target, flags) {
       if (boundary === 'initialize-owner' && target.endsWith('owner.json')) crash()
+      if (target.endsWith('recovery.json')) recoveryClaimOpened = true
       if (initializationDelayMs > 0 && /transaction\.[^.]+\.tmp$/.test(String(target))) {
         const delay = initializationDelayMs
         initializationDelayMs = 0
@@ -71,6 +73,9 @@ const childPublisher = String.raw`
     },
     async rm(target, options) {
       await rm(target, options)
+      if (recoveryClaimOpened && boundary === 'recover-remove-journal' && target.endsWith('transaction.json')) crash()
+      if (recoveryClaimOpened && boundary === 'recover-remove-staged' && target.endsWith('staged.complete')) crash()
+      if (recoveryClaimOpened && boundary === 'recover-remove-verified' && target.endsWith('published.verified')) crash()
       if (boundary === 'cleanup-release-owner' && /[/\\]owner\.json\.cleanup-[0-9a-f]{24}$/.test(String(target))) crash()
       if (boundary === 'cleanup-release-staged' && /[/\\]staged\.complete\.cleanup-[0-9a-f]{24}$/.test(String(target))) crash()
       if (boundary === 'cleanup-backup' && target.endsWith('.backup')) crash()
@@ -79,7 +84,7 @@ const childPublisher = String.raw`
     },
     async rmdir(target) {
       await rmdir(target)
-      if (boundary === 'cleanup-lock' && target.includes('.publish.lock.cleanup.r.')) crash()
+      if (boundary === 'cleanup-lock' && target.includes('.cleanup.r.')) crash()
     },
   }
   const artifacts = [
@@ -406,7 +411,7 @@ describe('atomic directory publication recovery', () => {
 
     const interrupted = await runPublisher({ output, round: boundary, force: false, boundary })
     expect(interrupted, interrupted.stderr).toMatchObject({ code: 86 })
-    const residueName = (await readdir(root)).find((entry) => entry.includes('.publish.lock.cleanup.r.'))
+    const residueName = (await readdir(root)).find((entry) => entry.includes('.cleanup.r.'))
     expect(residueName).toBeDefined()
     expect((await readdir(path.join(root, residueName!))).sort()).toEqual([...expectedMarkers].sort())
 
@@ -424,7 +429,7 @@ describe('atomic directory publication recovery', () => {
       output, round: 'claimed-owner', force: false, boundary: 'claim-release-owner',
     })
     expect(interrupted, interrupted.stderr).toMatchObject({ code: 86 })
-    const residueName = (await readdir(root)).find((entry) => entry.includes('.publish.lock.cleanup.r.'))
+    const residueName = (await readdir(root)).find((entry) => entry.includes('.cleanup.r.'))
     expect(residueName).toBeDefined()
     expect(await readdir(path.join(root, residueName!))).toEqual(expect.arrayContaining([
       expect.stringMatching(/^owner\.json\.cleanup-[0-9a-f]{24}$/),
@@ -453,7 +458,7 @@ describe('atomic directory publication recovery', () => {
       sessionId: 'normal',
       fileSystem: {
         async rename(source: string, target: string) {
-          if (!swapped && source === residue && path.basename(target).includes('.publish.lock.cleanup.t.')) {
+          if (!swapped && source === residue && path.basename(target).includes('.cleanup.t.')) {
             await rename(source, original)
             await mkdir(source)
             await writeFile(path.join(source, 'sentinel'), 'user-owned replacement directory')
@@ -500,6 +505,137 @@ describe('atomic directory publication recovery', () => {
     expect(await readRound(output)).toBe('new')
   })
 
+  it('never unlinks a replacement metadata inode installed while the verified claim handle closes', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const pid = 2_147_483_637
+    const token = 'close-swap-0123456789ab'
+    const residue = path.join(root, `.review.publish.lock.${pid}.${token}.tmp`)
+    await mkdir(residue)
+    await writeFile(path.join(residue, 'owner.json'), JSON.stringify({ version: 1, pid, token }))
+    let replacementInode: bigint | number | undefined
+    let swapped = false
+
+    await publishAtomically(output, artifacts('new'), {
+      sessionId: 'normal',
+      fileSystem: {
+        async open(target: string, flags: string | number) {
+          const handle = await open(target, flags)
+          if (!swapped && /^owner\.json\.cleanup-[0-9a-f]{24}$/.test(path.basename(target))) {
+            return new Proxy(handle, {
+              get(subject, property) {
+                if (property === 'close') return async () => {
+                  await subject.close()
+                  await rename(target, `${target}.publisher-inode`)
+                  await writeFile(target, 'user-owned replacement after verified handle close')
+                  replacementInode = (await stat(target, { bigint: true })).ino
+                  swapped = true
+                }
+                const value = Reflect.get(subject, property, subject)
+                return typeof value === 'function' ? value.bind(subject) : value
+              },
+            })
+          }
+          return handle
+        },
+      },
+    })
+
+    expect(swapped).toBe(true)
+    const replacement = await findFileWithContents(root, 'user-owned replacement after verified handle close')
+    expect(replacement).toBeDefined()
+    expect((await stat(replacement!, { bigint: true })).ino).toBe(replacementInode)
+    expect(await readRound(output)).toBe('new')
+  })
+
+  it('publishes and cleans a 180-byte output name despite fixed cleanup-claim collisions', async () => {
+    const root = await temporaryDirectory()
+    const base = 'r'.repeat(180)
+    const output = path.join(root, base)
+    const pid = 2_147_483_636
+    const token = 'long-output-0123456789ab'
+    const residue = path.join(root, `.${base}.publish.lock.${pid}.${token}.tmp`)
+    await mkdir(residue)
+    await writeFile(path.join(residue, 'owner.json'), JSON.stringify({ version: 1, pid, token }))
+    let collisions = 0
+
+    await publishAtomically(output, artifacts('new'), {
+      sessionId: 's'.repeat(500),
+      fileSystem: {
+        async rename(source: string, target: string) {
+          if (source === residue && target.includes('.cleanup.') && collisions < 3) {
+            collisions += 1
+            throw Object.assign(new Error('fixed cleanup claim collision'), { code: 'EEXIST' })
+          }
+          await rename(source, target)
+        },
+      },
+    })
+
+    expect(collisions).toBe(3)
+    expect(await readRound(output)).toBe('new')
+    expect(await readdir(root)).toEqual([base])
+  })
+
+  it('preflights component NAME_MAX before any publication mutation', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'x'.repeat(256))
+    let mutationAttempted = false
+
+    await expect(publishAtomically(output, artifacts('new'), {
+      sessionId: 'normal',
+      fileSystem: {
+        async mkdir(target: string, options?: Parameters<typeof mkdir>[1]) {
+          mutationAttempted = true
+          return mkdir(target, options)
+        },
+        async open(target: string, flags: string | number) {
+          mutationAttempted = true
+          return open(target, flags)
+        },
+        async rename(source: string, target: string) {
+          mutationAttempted = true
+          return rename(source, target)
+        },
+        async rm(target: string, options?: Parameters<typeof rm>[1]) {
+          mutationAttempted = true
+          return rm(target, options)
+        },
+      },
+    })).rejects.toMatchObject({ code: 'PATH_NOT_ALLOWED' })
+
+    expect(mutationAttempted).toBe(false)
+    expect(await readdir(root)).toEqual([])
+  })
+
+  it('converges a handled marker-only cleanup claim later in the same process', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    let injected = false
+
+    await expect(publishAtomically(output, artifacts('first'), {
+      sessionId: 'first',
+      fileSystem: {
+        async rm(target: string, options?: Parameters<typeof rm>[1]) {
+          if (!injected && /^published\.verified\.cleanup-[0-9a-f]{24}$/.test(path.basename(target))) {
+            injected = true
+            throw Object.assign(new Error('handled final marker cleanup failure'), { code: 'EIO' })
+          }
+          return rm(target, options)
+        },
+      },
+    })).rejects.toThrow('handled final marker cleanup failure')
+    expect(injected).toBe(true)
+    expect(await readRound(output)).toBe('first')
+    expect((await readdir(root)).some((entry) => entry.includes('.cleanup.'))).toBe(true)
+
+    await expect(publishAtomically(output, artifacts('probe'), { sessionId: 'probe' }))
+      .rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
+
+    expect(await readRound(output)).toBe('first')
+    expect(await readdir(root)).toEqual(['review'])
+  })
+
   it('uses one Unicode-safe canonical token grammar for NFKC input ending at an astral boundary', async () => {
     const root = await temporaryDirectory()
     const output = path.join(root, 'review')
@@ -536,6 +672,30 @@ describe('atomic directory publication recovery', () => {
     await expect(publishAtomically(output, artifacts('probe'), { sessionId: 'probe' }))
       .rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
     expect(await readRound(output)).toBe(expectedRound)
+    expect(await readdir(root)).toEqual(['round-0'])
+  })
+
+  it.each([
+    'recover-remove-journal',
+    'recover-remove-staged',
+    'recover-remove-verified',
+  ])('converges a verified publication when recovery crashes after %s', async (boundary) => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'round-0')
+    const publishedRound = 'new-after-verified-marker'
+    const published = await runPublisher({
+      output, round: publishedRound, force: false, boundary: 'after-verified-marker',
+    })
+    expect(published, published.stderr).toMatchObject({ code: 86 })
+
+    const interruptedRecovery = await runPublisher({
+      output, round: `recovery-${boundary}`, force: true, boundary,
+    })
+    expect(interruptedRecovery, interruptedRecovery.stderr).toMatchObject({ code: 86 })
+
+    await expect(publishAtomically(output, artifacts('probe'), { sessionId: 'probe' }))
+      .rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
+    expect(await readRound(output)).toBe(publishedRound)
     expect(await readdir(root)).toEqual(['round-0'])
   })
 

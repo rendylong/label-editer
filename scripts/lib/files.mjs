@@ -10,6 +10,10 @@ const EMPTY_LOCK_GRACE_MS = 200
 const MAX_PROCESS_PID = 0x7fffffff
 const SANITIZED_TOKEN_MAX_CODE_UNITS = 160
 const RESIDUE_CLAIM_HEX_LENGTH = 24
+const PUBLICATION_BINDING_HEX_LENGTH = 12
+const PORTABLE_NAME_MAX_BYTES = 255
+const RESIDUE_NAMESPACE = 'label-publish'
+const MAX_RESIDUE_JSON_BYTES = 4_096
 const RESIDUE_ENTRY_NAMES = [
   'owner.json', 'transaction.json', 'recovery.json', 'staged.complete', 'published.verified',
 ]
@@ -161,7 +165,7 @@ function validProcessPid(pid) {
 
 function ownerIsActive(owner) {
   if (!owner || !validProcessPid(owner.pid) || typeof owner.token !== 'string') return true
-  if (owner.pid === process.pid) return ACTIVE_PUBLICATIONS.has(owner.token)
+  if (owner.pid === process.pid) return ACTIVE_PUBLICATIONS.has(publicationTokenHash(owner.token))
   try {
     process.kill(owner.pid, 0)
     return true
@@ -268,6 +272,68 @@ function publicationTokenHash(token) {
   return createHash('sha256').update(token, 'utf8').digest('hex').slice(0, RESIDUE_CLAIM_HEX_LENGTH)
 }
 
+function createPublicationToken(sessionId) {
+  const binding = createHash('sha256')
+    .update(String(sessionId), 'utf8')
+    .digest('hex')
+    .slice(0, PUBLICATION_BINDING_HEX_LENGTH)
+  return `${binding}-${randomBytes(6).toString('hex')}`
+}
+
+function publicationResidueNamespace(lockPath) {
+  const binding = createHash('sha256')
+    .update(path.basename(lockPath), 'utf8')
+    .digest('hex')
+    .slice(0, RESIDUE_CLAIM_HEX_LENGTH)
+  return `.${RESIDUE_NAMESPACE}.${binding}`
+}
+
+function assertPortableNameComponent(component, purpose) {
+  const bytes = new TextEncoder().encode(component).byteLength
+  if (component.length === 0 || component === '.' || component === '..'
+    || bytes > PORTABLE_NAME_MAX_BYTES) {
+    throw new PathPolicyError(
+      `${purpose} exceeds the portable ${PORTABLE_NAME_MAX_BYTES}-byte NAME_MAX: ${component}`,
+    )
+  }
+}
+
+function artifactRelativePath(artifact) {
+  return artifact.relativePath
+    ? String(artifact.relativePath).split('/').filter(Boolean).map(sanitizeArtifactName).join(path.sep)
+    : sanitizeArtifactName(artifact.fileName)
+}
+
+function assertPublicationNameBudget(outputDir, token, artifactPaths = []) {
+  const base = path.basename(outputDir)
+  const lockName = `.${base}.publish.lock`
+  const recoveryToken = `recovery-${token}`
+  const tokenHash = 'f'.repeat(RESIDUE_CLAIM_HEX_LENGTH)
+  const claim = 'e'.repeat(RESIDUE_CLAIM_HEX_LENGTH)
+  const namespace = publicationResidueNamespace(lockName)
+  const components = [
+    [base, 'Output name'],
+    [`.${base}.${token}.tmp`, 'Staging name'],
+    [`.${base}.${token}.backup`, 'Backup name'],
+    [lockName, 'Publication lock name'],
+    [`${lockName}.${MAX_PROCESS_PID}.${token}.tmp`, 'Temporary lock name'],
+    [`${lockName}.${MAX_PROCESS_PID}.${token}.released`, 'Released lock name'],
+    [`${lockName}.${MAX_PROCESS_PID}.${recoveryToken}.released`, 'Recovery lock name'],
+    [`${namespace}.cleanup.r.${MAX_PROCESS_PID}.${tokenHash}.${claim}`, 'Cleanup claim name'],
+    [`${namespace}.preserved.${MAX_PROCESS_PID}.${tokenHash}.${claim}`, 'Preserved claim name'],
+    [`transaction.${token}.tmp`, 'Journal staging name'],
+    [`published.verified.${token}.tmp`, 'Verified marker staging name'],
+    [`staged.complete.${token}.tmp`, 'Staged marker staging name'],
+    [`published.verified.cleanup-${claim}`, 'Metadata claim name'],
+  ]
+  for (const [component, purpose] of components) assertPortableNameComponent(component, purpose)
+  for (const relativePath of artifactPaths) {
+    for (const component of relativePath.split(path.sep)) {
+      assertPortableNameComponent(component, 'Artifact path component')
+    }
+  }
+}
+
 function validSanitizedTokenPrefix(value) {
   return typeof value === 'string' && value.length > 0 && value.length <= SANITIZED_TOKEN_MAX_CODE_UNITS
     && sanitizeArtifactName(value) === value
@@ -292,12 +358,14 @@ async function inspectResidueJson(fileSystem, filePath) {
     if (error?.code === 'ENOENT') return { state: 'missing' }
     throw error
   }
-  if (info.isSymbolicLink() || !info.isFile()) return { state: 'invalid' }
+  if (info.isSymbolicLink() || !info.isFile() || info.size > MAX_RESIDUE_JSON_BYTES) {
+    return { state: 'invalid' }
+  }
   let handle
   try {
     handle = await fileSystem.open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
     const openedInfo = await handle.stat()
-    if (!openedInfo.isFile()
+    if (!openedInfo.isFile() || openedInfo.size > MAX_RESIDUE_JSON_BYTES
       || (info.dev !== undefined && openedInfo.dev !== info.dev)
       || (info.ino !== undefined && openedInfo.ino !== info.ino)) return { state: 'invalid' }
     const raw = await handle.readFile('utf8')
@@ -353,8 +421,12 @@ function validGeneratedOwner(owner) {
 function parseLockResidueCandidateName(lockPath, name) {
   const direct = parseLockResidueName(lockPath, name)
   if (direct) return { ...direct, isCleanupClaim: false }
-  const prefix = `${path.basename(lockPath)}.cleanup.`
-  if (!name.startsWith(prefix)) return undefined
+  const legacyPrefix = `${path.basename(lockPath)}.cleanup.`
+  const compactPrefix = `${publicationResidueNamespace(lockPath)}.cleanup.`
+  const prefix = name.startsWith(compactPrefix)
+    ? compactPrefix
+    : name.startsWith(legacyPrefix) ? legacyPrefix : undefined
+  if (!prefix) return undefined
   const claimMatch = /^([tr])\.([1-9][0-9]*)\.([0-9a-f]{24})\.([0-9a-f]{24})$/.exec(
     name.slice(prefix.length),
   )
@@ -491,6 +563,14 @@ function classifyResiduePhase(identity, snapshot) {
       cleanupOrder: ['owner.json', 'recovery.json', 'staged.complete', 'published.verified'],
     }
   }
+  if (hasResidueEntries(snapshot, ['owner.json', 'recovery.json', 'published.verified'])
+    && validGeneratedOwner(owner) && validGeneratedOwner(recovery)
+    && matchesResidueIdentity(recovery, identity)) {
+    return {
+      initializer: recovery,
+      cleanupOrder: ['owner.json', 'recovery.json', 'published.verified'],
+    }
+  }
   if (hasResidueEntries(snapshot, ['recovery.json', 'staged.complete', 'published.verified'])
     && validGeneratedOwner(recovery) && matchesResidueIdentity(recovery, identity)) {
     return {
@@ -516,7 +596,8 @@ function sameOwner(left, right) {
 function residueOwnerIsActive(owner, allowedActiveOwner) {
   if (sameOwner(owner, allowedActiveOwner)) return false
   if (typeof owner?.token !== 'string') {
-    if (!validProcessPid(owner?.pid) || owner.pid === process.pid) return true
+    if (!validProcessPid(owner?.pid)) return true
+    if (owner.pid === process.pid) return ACTIVE_PUBLICATIONS.has(owner.tokenHash)
     try {
       process.kill(owner.pid, 0)
       return true
@@ -533,7 +614,7 @@ function randomResidueClaim() {
 
 function residueClaimName(lockPath, identity) {
   const phase = identity.suffix === '.tmp' ? 't' : 'r'
-  return `${path.basename(lockPath)}.cleanup.${phase}.${identity.pid}.${identity.tokenHash}.${randomResidueClaim()}`
+  return `${publicationResidueNamespace(lockPath)}.cleanup.${phase}.${identity.pid}.${identity.tokenHash}.${randomResidueClaim()}`
 }
 
 async function renameToResidueClaim(fileSystem, sourcePath, parent, lockPath, identity) {
@@ -552,7 +633,7 @@ async function renameToResidueClaim(fileSystem, sourcePath, parent, lockPath, id
 
 async function preserveResidueClaim(fileSystem, claimPath, parent, lockPath, identity) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const preservedPath = path.join(parent, `${path.basename(lockPath)}.preserved.${identity.pid}.${identity.tokenHash}.${randomResidueClaim()}`)
+    const preservedPath = path.join(parent, `${publicationResidueNamespace(lockPath)}.preserved.${identity.pid}.${identity.tokenHash}.${randomResidueClaim()}`)
     try {
       await renameAndSync(fileSystem, claimPath, preservedPath)
       return preservedPath
@@ -564,21 +645,84 @@ async function preserveResidueClaim(fileSystem, claimPath, parent, lockPath, ide
   return claimPath
 }
 
-async function claimAndRemoveResidueFile(fileSystem, residuePath, logicalName, expected) {
-  const sourcePath = path.join(residuePath, expected.actualName)
-  const claimedPath = path.join(residuePath, `${logicalName}.cleanup-${randomResidueClaim()}`)
+async function renameResidueFileClaim(fileSystem, sourcePath, residuePath, logicalName) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const claimedPath = path.join(residuePath, `${logicalName}.cleanup-${randomResidueClaim()}`)
+    try {
+      await renameAndSync(fileSystem, sourcePath, claimedPath)
+      return claimedPath
+    } catch (error) {
+      if (error?.code === 'ENOENT') return undefined
+      if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error
+    }
+  }
+  return undefined
+}
+
+async function removeResidueFileWithOpenClaim(fileSystem, claimedPath, expected) {
+  let info
   try {
-    await renameAndSync(fileSystem, sourcePath, claimedPath)
+    info = await fileSystem.lstat(claimedPath)
   } catch (error) {
     if (error?.code === 'ENOENT') return false
     throw error
   }
+  if (info.isSymbolicLink() || !info.isFile()
+    || (expected.marker ? info.size !== 0 : info.size > MAX_RESIDUE_JSON_BYTES)) return false
+
+  let handle
+  try {
+    handle = await fileSystem.open(claimedPath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
+    const openedInfo = await handle.stat()
+    if (!sameInode(info, openedInfo, 'isFile')
+      || (expected.marker ? openedInfo.size !== 0 : openedInfo.size > MAX_RESIDUE_JSON_BYTES)) {
+      return false
+    }
+    let raw
+    let value
+    if (!expected.marker) {
+      raw = await handle.readFile('utf8')
+      try {
+        value = JSON.parse(raw)
+      } catch (error) {
+        if (error instanceof SyntaxError) return false
+        throw error
+      }
+    }
+    const current = { state: 'valid', info: openedInfo, raw, value }
+    if (!sameInspection(expected, current, expected.marker)) return false
+    const finalInfo = await fileSystem.lstat(claimedPath).catch((error) => {
+      if (error?.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (!sameInode(openedInfo, finalInfo, 'isFile')) return false
+
+    // Node exposes pathname unlink, not inode-conditional unlink. Keep the
+    // verified descriptor open through deletion and use a second unpredictable
+    // atomic claim after the first readback. If either claim observes a swap,
+    // the current object is retained inside one preserved quarantine instead.
+    // Publisher-owned retained metadata is bounded to five files, 4 KiB each.
+    await removeAndSync(fileSystem, claimedPath, { force: true })
+    return true
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ELOOP') return false
+    throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+async function claimAndRemoveResidueFile(fileSystem, residuePath, logicalName, expected) {
+  const sourcePath = path.join(residuePath, expected.actualName)
+  const claimedPath = await renameResidueFileClaim(fileSystem, sourcePath, residuePath, logicalName)
+  if (!claimedPath) return false
   const current = expected.marker
     ? await inspectResidueMarker(fileSystem, claimedPath)
     : await inspectResidueJson(fileSystem, claimedPath)
   if (!sameInspection(expected, current, expected.marker)) return false
-  await removeAndSync(fileSystem, claimedPath, { force: true })
-  return true
+  const terminalClaim = await renameResidueFileClaim(fileSystem, claimedPath, residuePath, logicalName)
+  if (!terminalClaim) return false
+  return removeResidueFileWithOpenClaim(fileSystem, terminalClaim, expected)
 }
 
 async function cleanupLockResidueCandidate(fileSystem, lockPath, name, {
@@ -670,13 +814,14 @@ async function claimAndRecoverPublication(fileSystem, lockPath, outputDir, token
     return false
   }
 
-  ACTIVE_PUBLICATIONS.add(claimToken)
+  const activeClaim = publicationTokenHash(claimToken)
+  ACTIVE_PUBLICATIONS.add(activeClaim)
   try {
     await recoverLockedPublication(fileSystem, lockPath, outputDir)
     await releasePublicationLock(fileSystem, lockPath, claimToken)
     return true
   } finally {
-    ACTIVE_PUBLICATIONS.delete(claimToken)
+    ACTIVE_PUBLICATIONS.delete(activeClaim)
   }
 }
 
@@ -685,7 +830,8 @@ async function acquirePublicationLock(fileSystem, lockPath, outputDir, token, { 
   const lockTemporary = `${lockPath}.${process.pid}.${token}.tmp`
   const ownerPath = path.join(lockTemporary, 'owner.json')
   let acquired = false
-  ACTIVE_PUBLICATIONS.add(token)
+  const activeToken = publicationTokenHash(token)
+  ACTIVE_PUBLICATIONS.add(activeToken)
   try {
     await cleanupAbandonedLockResidue(fileSystem, lockPath)
     await fileSystem.mkdir(lockTemporary, { recursive: false })
@@ -731,7 +877,7 @@ async function acquirePublicationLock(fileSystem, lockPath, outputDir, token, { 
     }
   } finally {
     if (!acquired) {
-      ACTIVE_PUBLICATIONS.delete(token)
+      ACTIVE_PUBLICATIONS.delete(activeToken)
       await fileSystem.rm(lockTemporary, { recursive: true, force: true }).catch(() => undefined)
     }
   }
@@ -748,7 +894,9 @@ export async function publishAtomically(outputDir, artifacts, {
 } = {}) {
   const parent = path.dirname(outputDir)
   const base = path.basename(outputDir)
-  const token = `${sanitizeArtifactName(sessionId)}-${randomBytes(6).toString('hex')}`
+  const token = createPublicationToken(sessionId)
+  const artifactPaths = artifacts.map(artifactRelativePath)
+  assertPublicationNameBudget(outputDir, token, artifactPaths)
   const temporary = path.join(parent, `.${base}.${token}.tmp`)
   const backup = path.join(parent, `.${base}.${token}.backup`)
   const lockPath = path.join(parent, `.${base}.publish.lock`)
@@ -782,10 +930,8 @@ export async function publishAtomically(outputDir, artifacts, {
     await renameAndSync(fileSystem, journalTemporary, journalPath)
     journalInstalled = true
     await fileSystem.mkdir(temporary, { recursive: false })
-    for (const artifact of artifacts) {
-      const relativePath = artifact.relativePath
-        ? String(artifact.relativePath).split('/').filter(Boolean).map(sanitizeArtifactName).join(path.sep)
-        : sanitizeArtifactName(artifact.fileName)
+    for (const [index, artifact] of artifacts.entries()) {
+      const relativePath = artifactPaths[index]
       if (!relativePath) throw new PathPolicyError('Artifact path is empty')
       const artifactPath = path.join(temporary, relativePath)
       await fileSystem.mkdir(path.dirname(artifactPath), { recursive: true })
@@ -822,7 +968,7 @@ export async function publishAtomically(outputDir, artifacts, {
     } catch (error) {
       if (!primaryError) throw error
     } finally {
-      ACTIVE_PUBLICATIONS.delete(token)
+      ACTIVE_PUBLICATIONS.delete(publicationTokenHash(token))
     }
   }
 }
@@ -830,8 +976,12 @@ export async function publishAtomically(outputDir, artifacts, {
 export async function publishFileAtomically(outputPath, bytes, { force = false, sessionId = randomBytes(8).toString('hex') } = {}) {
   const parent = path.dirname(outputPath)
   const base = path.basename(outputPath)
-  const temporary = path.join(parent, `.${base}.${sessionId}.tmp`)
-  const backup = path.join(parent, `.${base}.${sessionId}.backup`)
+  const token = createPublicationToken(sessionId)
+  assertPortableNameComponent(base, 'Output name')
+  assertPortableNameComponent(`.${base}.${token}.tmp`, 'Staging name')
+  assertPortableNameComponent(`.${base}.${token}.backup`, 'Backup name')
+  const temporary = path.join(parent, `.${base}.${token}.tmp`)
+  const backup = path.join(parent, `.${base}.${token}.backup`)
   let movedExisting = false
   await rm(temporary, { force: true })
   try {
