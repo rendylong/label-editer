@@ -57,6 +57,16 @@ function carrierBlueprint(carrier: CarrierMode): LayoutBlueprintV1 {
   }
 }
 
+describe('layout blueprint font stack validation', () => {
+  it.each([
+    [['   '], 'space-only'], [['\t'], 'tab-only'], [['\u00a0'], 'NBSP-only'], [['Arial', '   '], 'mixed valid and blank'],
+  ] as const)('rejects %s font families before runtime consumption', (fontStack, _label) => {
+    const blueprint = carrierBlueprint('direct_surface_print')
+    blueprint.areas[0].layers[0].fontStack = [...fontStack]
+    expect(() => validateLayoutBlueprint(blueprint)).toThrow(/fontStack|schema/i)
+  })
+})
+
 function approvedHandoff(): EditorHandoffV2 {
   return {
     handoff_version: 2,

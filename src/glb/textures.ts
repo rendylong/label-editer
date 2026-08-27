@@ -12,6 +12,13 @@ export function configureTransparentLabelExport(material: { setAlphaMode(mode: '
 
 export function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   return new Promise((res, rej) => {
+    const width = canvas.width
+    const height = canvas.height
+    const pixels = width * height
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || !Number.isSafeInteger(pixels)) {
+      rej(new Error('PNG 编码源画布尺寸无效'))
+      return
+    }
     canvas.toBlob((blob) => {
       if (!blob) {
         rej(new Error('PNG 编码失败'))
@@ -20,7 +27,12 @@ export function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array>
       try {
         void blob.arrayBuffer().then((buffer) => {
           const bytes = new Uint8Array(buffer)
-          try { parsePortablePng(bytes) } catch (error) { rej(new Error(`PNG 编码返回了无效数据：${error instanceof Error ? error.message : String(error)}`)); return }
+          try {
+            parsePortablePng(bytes, {
+              expectedWidth: width, expectedHeight: height,
+              maxWidth: width, maxHeight: height, maxPixels: pixels,
+            })
+          } catch (error) { rej(new Error(`PNG 编码返回了无效数据：${error instanceof Error ? error.message : String(error)}`)); return }
           res(bytes)
         }, rej)
       } catch (error) {

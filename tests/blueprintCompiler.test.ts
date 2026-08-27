@@ -202,6 +202,20 @@ describe('blueprint compiler', () => {
     expect(layer).toMatchObject({ fontFamily: 'arial', fontStack: ['arial', 'sans-serif'] })
   })
 
+  it('trims valid font aliases across blueprint to Label Spec to Project roundtrip and rejects mixed blank entries', () => {
+    const blueprint = laviraBlueprint()
+    blueprint.areas[0].layers = [blueprint.areas[0].layers[0]]
+    blueprint.areas[0].layers[0].fontStack = ['  Arial  ', ' sans-serif ']
+
+    const specAreas = compileBlueprintToSpecAreas(blueprint)
+    const project = serializeLabelProject('bottle.glb', applyStructuredLabelSpec(shell, { version: 2, areas: specAreas }).areas)
+    expect(specAreas[0].layers[0]).toMatchObject({ fontFamily: 'arial', fontStack: ['arial', 'sans-serif'] })
+    expect(project.areas[0].layers[0]).toMatchObject({ fontFamily: 'arial', fontStack: ['arial', 'sans-serif'] })
+
+    blueprint.areas[0].layers[0].fontStack = ['Arial', '   ']
+    expect(() => compileBlueprintToSpecAreas(blueprint)).toThrow(/fontStack/i)
+  })
+
   it('round-trips rgba, named, and transparent colors without rewriting source strings', () => {
     const blueprint = laviraBlueprint()
     blueprint.areas[0].layers[0].color = 'rgba(125, 63, 42, 0.72)'

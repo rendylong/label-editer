@@ -257,6 +257,51 @@ describe('blueprint-derived design review', () => {
     }
   })
 
+  it('preserves every hard newline through browser preflight and the final script-free HTML for every wrap policy', async () => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    const base = source.areas[0].layers[0]
+    source.areas[0].layers = [
+      { ...base, id: 'none-hard-break', text: 'A\nB', wrapPolicy: 'none', maxLines: 4, anchor: 'baseline_center', rotation: 31 },
+      { ...base, id: 'none-blank-trailing', text: 'A\n\nB\n', wrapPolicy: 'none', maxLines: 3, anchor: 'center', rotation: -17 },
+      { ...base, id: 'word-hard-break', text: 'LEFT\nRIGHT', wrapPolicy: 'word', maxLines: 4 },
+      { ...base, id: 'character-hard-break', text: 'ABC\nمرحبا', writingDirection: 'auto', wrapPolicy: 'character', maxLines: 4 },
+    ]
+    const blueprintPath = await writeFixture(root, source)
+
+    const result = await renderDesignReview({ blueprintPath, outputDir: path.join(root, 'hard-breaks'), width: 640, height: 480, pxPerMm: 5 })
+
+    expect(result.html).not.toContain('<script')
+    expect(result.html).toContain('white-space:pre;overflow-wrap:normal')
+    expect(result.html).not.toContain('white-space:nowrap')
+    for (const [id, lineCount] of [
+      ['none-hard-break', 2], ['none-blank-trailing', 3], ['word-hard-break', 2], ['character-hard-break', 2],
+    ] as const) {
+      const tag = result.html.match(new RegExp(`<div class="art-layer" data-layer-id="${id}"[^>]+>`))?.[0] ?? ''
+      expect(tag).toContain(`data-resolved-line-count="${lineCount}"`)
+      const height = Number(tag.match(/data-resolved-text-height="([^"]+)"/)?.[1])
+      expect(height).toBeCloseTo(lineCount * 22, 4)
+    }
+    expect(result.html).toContain('A\n\nB\n</div>')
+    expect(result.html).toContain('ABC\nمرحبا')
+
+    for (const id of ['none-hard-break', 'none-blank-trailing'] as const) {
+      const tag = result.html.match(new RegExp(`<div class="art-layer" data-layer-id="${id}"[^>]+>`))?.[0] ?? ''
+      const layer = source.areas[0].layers.find((candidate: any) => candidate.id === id)
+      const metric = (name: string) => Number(tag.match(new RegExp(`data-resolved-${name}="([^"]+)"`))?.[1])
+      const bounds = layer.boundsMm
+      const anchorX = (bounds.x + bounds.width / 2) * 5
+      const anchorY = (bounds.y + (layer.anchor === 'center' ? bounds.height / 2 : 0)) * 5
+      const resolved = resolveLayerRenderTransform({
+        x: anchorX, y: anchorY, rotation: layer.rotation,
+        width: metric('text-width'), height: metric('text-height'), anchor: layer.anchor,
+        baselineFromTop: metric('baseline-from-top'),
+      })
+      expect(Number(tag.match(/left:([-0-9.]+)px/)?.[1])).toBeCloseTo(resolved.origin.x + resolved.box.x, 4)
+      expect(Number(tag.match(/top:([-0-9.]+)px/)?.[1])).toBeCloseTo(resolved.origin.y + resolved.box.y, 4)
+    }
+  })
+
   it('applies the authoritative blueprint schema even on direct HTML rendering', () => {
     const source = blueprint()
     source.areas[0].layers[0].onclick = 'globalThis.executed=true'
@@ -319,7 +364,54 @@ describe('blueprint-derived design review', () => {
 
     expect(html).toContain("@font-face{font-family:'review-font-brand-font';src:url('data:font/woff2;base64,d09GMg==') format('woff2')}")
     expect(html).toContain("font-family:'review-font-brand-font'")
-    expect(html).toContain('white-space:nowrap')
+    expect(html).toContain('white-space:pre')
+    expect(html).not.toContain('white-space:nowrap')
+  })
+
+  it.each([
+    [['   '], 'space-only'], [['\t'], 'tab-only'], [['\u00a0'], 'NBSP-only'], [['Arial', '   '], 'mixed valid and blank'],
+  ] as const)('rejects a %s blueprint font stack before HTML generation', (fontStack, _label) => {
+    const source = blueprint()
+    source.areas[0].layers[0].fontStack = fontStack
+
+    expect(() => renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() }))
+      .toThrow(/fontStack|schema/i)
+  })
+
+  it('rejects a 16384-square compressed PNG header before Chromium capture', async () => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    const bomb = pngWithDimensions(16_384, 16_384)
+    Object.assign(source.assets[0], {
+      width: 16_384, height: 16_384,
+      sha256: createHash('sha256').update(bomb).digest('hex'),
+    })
+    const blueprintPath = await writeFixture(root, source)
+    await writeFile(path.join(root, 'assets/mark.png'), bomb)
+    const capture = fakeCapture()
+
+    await expect(renderDesignReview({ blueprintPath, outputDir: path.join(root, 'png-bomb'), width: 640, height: 480, pxPerMm: 5, capture }))
+      .rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
+    expect(capture).not.toHaveBeenCalled()
+  })
+
+  it('caps requested and physical-area capture dimensions before browser allocation', async () => {
+    const stdout: string[] = []
+    const render = vi.fn(async () => ({ outputDir: '/tmp/review', artifacts: [], manifest: { version: 1 } }))
+    const code = await runDesignReviewCli(['layout-blueprint.json', '--output', 'review', '--width', '4097', '--height', '1', '--json'], {
+      renderDesignReview: render, stdout: (value: string) => stdout.push(value), stderr: () => undefined,
+    })
+    expect(code).not.toBe(0)
+    expect(render).not.toHaveBeenCalled()
+
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    source.areas[0].artboard = { ...source.areas[0].artboard, widthMm: 5_000, heightMm: 5_000 }
+    const blueprintPath = await writeFixture(root, source)
+    const capture = fakeCapture()
+    await expect(renderDesignReview({ blueprintPath, outputDir: path.join(root, 'oversized-area'), width: 640, height: 480, pxPerMm: 1, capture }))
+      .rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT' })
+    expect(capture).not.toHaveBeenCalled()
   })
 
   it('maps the declared stretch image fit to the browser-supported fill behavior', () => {

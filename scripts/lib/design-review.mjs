@@ -16,6 +16,10 @@ import { portablePngDimensions } from './png-core.mjs'
 import { resolvePortableTextLayoutMetric } from './text-layout-core.mjs'
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024
+const MAX_DECODED_IMAGE_PIXELS = 16 * 1024 * 1024
+const MAX_IMAGE_DIMENSION = 16_384
+const MAX_CAPTURE_DIMENSION = 4_096
+const MAX_CAPTURE_PIXELS = 16 * 1024 * 1024
 
 const ajv = new Ajv2020({ allErrors: true, strict: true })
 ajv.addFormat('date-time', { type: 'string', validate: isStrictRfc3339DateTime })
@@ -237,7 +241,7 @@ function renderLayer(layer, area, options) {
   if (layer.kind === 'text') {
     const fontFamily = layer.fontAsset ? `"review-font-${layer.fontAsset}"` : cssFontStack(layer.fontStack)
     const wrapping = layer.wrapPolicy === 'none'
-      ? 'white-space:nowrap;overflow-wrap:normal;'
+      ? 'white-space:pre;overflow-wrap:normal;'
       : layer.wrapPolicy === 'character'
         ? 'white-space:pre-wrap;overflow-wrap:anywhere;'
         : 'white-space:pre-wrap;overflow-wrap:normal;'
@@ -304,7 +308,7 @@ export function renderBlueprintHtml(blueprint, options) {
   }).join('')
   const renderOptions = { ...options, geometry: prepared.geometry }
   return `<!doctype html><html lang="en" data-blueprint-revision="${revision}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Label design review ${revision}</title><style>
-${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
+${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.text-geometry::after{content:'\\200b'}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
 </style></head><body>${renderView('front', front, renderOptions, validated.revision)}${renderView('back', back, renderOptions, validated.revision)}</body></html>`
 }
 
@@ -321,8 +325,8 @@ function safeRelativePath(value, label) {
   return value
 }
 
-function pngDimensions(bytes) {
-  return portablePngDimensions(bytes)
+function pngDimensions(bytes, policy) {
+  return portablePngDimensions(bytes, policy)
 }
 
 function jpegDimensions(bytes) {
@@ -375,10 +379,16 @@ function webpDimensions(bytes) {
 }
 
 function imageDimensions(bytes, mimeType) {
-  if (mimeType === 'image/png') return pngDimensions(bytes)
-  if (mimeType === 'image/jpeg') return jpegDimensions(bytes)
-  if (mimeType === 'image/webp') return webpDimensions(bytes)
-  return undefined
+  const dimensions = mimeType === 'image/png'
+    ? pngDimensions(bytes, { maxWidth: MAX_IMAGE_DIMENSION, maxHeight: MAX_IMAGE_DIMENSION, maxPixels: MAX_DECODED_IMAGE_PIXELS })
+    : mimeType === 'image/jpeg'
+      ? jpegDimensions(bytes)
+      : mimeType === 'image/webp'
+        ? webpDimensions(bytes)
+        : undefined
+  if (!dimensions || dimensions.width > MAX_IMAGE_DIMENSION || dimensions.height > MAX_IMAGE_DIMENSION
+    || dimensions.width > MAX_DECODED_IMAGE_PIXELS / dimensions.height) return undefined
+  return dimensions
 }
 
 function validFontContainer(bytes, mimeType) {
@@ -397,8 +407,8 @@ function validFontContainer(bytes, mimeType) {
   return false
 }
 
-function verifyMagic(bytes, mimeType) {
-  if (mimeType.startsWith('image/')) return Boolean(imageDimensions(bytes, mimeType))
+function verifyMagic(bytes, mimeType, dimensions) {
+  if (mimeType.startsWith('image/')) return Boolean(dimensions)
   if (mimeType === 'font/woff' || mimeType === 'font/woff2') return validFontContainer(bytes, mimeType)
   return false
 }
@@ -415,8 +425,8 @@ async function resolveLocalFiles(blueprint, blueprintPath, referencePaths) {
     const bytes = await readFile(absolute)
     const digest = sha256Bytes(bytes)
     if (digest !== asset.sha256) throw new DesignReviewError('DIGEST_MISMATCH', `Asset ${asset.id} digest mismatch`)
-    if (!verifyMagic(bytes, asset.mimeType)) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Asset ${asset.id} MIME/magic mismatch`)
     const dimensions = imageDimensions(bytes, asset.mimeType)
+    if (!verifyMagic(bytes, asset.mimeType, dimensions)) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Asset ${asset.id} MIME/magic or decoded dimensions are unsafe`)
     if (dimensions && ((asset.width && asset.width !== dimensions.width) || (asset.height && asset.height !== dimensions.height))) {
       throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Asset ${asset.id} dimensions mismatch`)
     }
@@ -434,11 +444,32 @@ async function resolveLocalFiles(blueprint, blueprintPath, referencePaths) {
 }
 
 function assertDimension(value, label) {
-  if (!Number.isInteger(value) || value < 1 || value > 4096) throw new DesignReviewError('INVALID_USAGE', `${label} must be an integer from 1 to 4096`)
+  if (!Number.isInteger(value) || value < 1 || value > MAX_CAPTURE_DIMENSION) throw new DesignReviewError('INVALID_USAGE', `${label} must be an integer from 1 to ${MAX_CAPTURE_DIMENSION}`)
+}
+
+function assertCaptureAllocation(width, height, label, code) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1
+    || width > MAX_CAPTURE_DIMENSION || height > MAX_CAPTURE_DIMENSION || width > MAX_CAPTURE_PIXELS / height) {
+    throw new DesignReviewError(code, `${label} dimensions exceed the ${MAX_CAPTURE_DIMENSION}px / ${MAX_CAPTURE_PIXELS}-pixel capture limit`)
+  }
+}
+
+function assertCapturePlan(blueprint, width, height, pxPerMm) {
+  assertCaptureAllocation(width, height, 'Requested front/back capture', 'INVALID_USAGE')
+  for (const area of blueprint.areas.filter((candidate) => candidate.carrier !== 'bare')) {
+    assertCaptureAllocation(
+      Math.round(area.artboard.widthMm * pxPerMm),
+      Math.round(area.artboard.heightMm * pxPerMm),
+      `Area ${area.id} capture`,
+      'INVALID_LAYOUT_BLUEPRINT',
+    )
+  }
 }
 
 function assertCapture(entry, width, height, label) {
-  const dimensions = entry && (entry.bytes instanceof Uint8Array || Buffer.isBuffer(entry.bytes)) ? pngDimensions(entry.bytes) : undefined
+  const dimensions = entry && (entry.bytes instanceof Uint8Array || Buffer.isBuffer(entry.bytes))
+    ? pngDimensions(entry.bytes, { expectedWidth: width, expectedHeight: height, maxWidth: width, maxHeight: height, maxPixels: width * height })
+    : undefined
   if (!entry || !dimensions || entry.width !== width || entry.height !== height || dimensions.width !== width || dimensions.height !== height) {
     throw new DesignReviewError('BROWSER_NOT_READY', `${label} capture returned wrong dimensions or invalid PNG bytes`)
   }
@@ -447,6 +478,7 @@ function assertCapture(entry, width, height, label) {
 export async function captureDesignReview({ html, blueprint, width, height, pxPerMm, resolveHtml }) {
   let browser
   try {
+    assertCapturePlan(blueprint, width, height, pxPerMm)
     browser = await chromium.launch({ headless: true })
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, serviceWorkers: 'block' })
     const externalRequests = []
@@ -557,6 +589,7 @@ export async function renderDesignReview({
   let parsed
   try { parsed = JSON.parse(blueprintBytes.toString('utf8')) } catch (error) { throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Blueprint JSON is invalid: ${error.message}`) }
   const blueprint = validateLayoutBlueprint(parsed, pxPerMm)
+  assertCapturePlan(blueprint, width, height, pxPerMm)
   const resolvedOutputDir = path.resolve(outputDir)
   if (!force && await stat(resolvedOutputDir).then(() => true, (error) => {
     if (error?.code === 'ENOENT') return false

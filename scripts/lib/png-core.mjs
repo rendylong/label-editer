@@ -1,7 +1,7 @@
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10]
 const MAX_PNG_BYTES = 256 * 1024 * 1024
-const MAX_PNG_DIMENSION = 1_000_000
-const MAX_PNG_PIXELS = 268_435_456
+const MAX_PNG_CHUNK_LENGTH = 64 * 1024 * 1024
+const MAX_PNG_CHUNKS = 4_096
 let crcTable
 
 function table() {
@@ -27,15 +27,25 @@ function readU32(bytes, offset) {
 
 function fail(message) { throw new Error(`Invalid PNG: ${message}`) }
 
-export function parsePortablePng(input) {
+function validateDimensionPolicy(width, height, policy) {
+  if (policy.expectedWidth !== undefined && width !== policy.expectedWidth) fail('width does not match expected dimensions')
+  if (policy.expectedHeight !== undefined && height !== policy.expectedHeight) fail('height does not match expected dimensions')
+  if (policy.maxWidth !== undefined && width > policy.maxWidth) fail('width exceeds policy')
+  if (policy.maxHeight !== undefined && height > policy.maxHeight) fail('height exceeds policy')
+  if (policy.maxPixels !== undefined && width > policy.maxPixels / height) fail('decoded pixels exceed policy')
+}
+
+export function parsePortablePng(input, policy = {}) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input)
   if (bytes.length < 8 || bytes.length > MAX_PNG_BYTES || PNG_SIGNATURE.some((value, index) => bytes[index] !== value)) fail('signature or size')
-  let offset = 8; let width; let height; let colorType; let sawIhdr = false; let sawPlte = false; let sawIdat = false; let endedIdat = false; let sawIend = false
+  let offset = 8; let chunkCount = 0; let width; let height; let colorType; let sawIhdr = false; let sawPlte = false; let sawIdat = false; let endedIdat = false; let sawIend = false
   while (offset < bytes.length) {
+    chunkCount += 1
+    if (chunkCount > MAX_PNG_CHUNKS) fail('chunk count exceeds work limit')
     if (offset + 12 > bytes.length) fail('truncated chunk')
     const length = readU32(bytes, offset)
     const typeOffset = offset + 4; const dataOffset = offset + 8; const dataEnd = dataOffset + length; const chunkEnd = dataEnd + 4
-    if (length > MAX_PNG_BYTES || dataEnd < dataOffset || chunkEnd > bytes.length) fail('illegal chunk length')
+    if (length > MAX_PNG_CHUNK_LENGTH || dataEnd < dataOffset || chunkEnd > bytes.length) fail('illegal chunk length')
     const type = String.fromCharCode(...bytes.subarray(typeOffset, typeOffset + 4))
     if (!/^[A-Za-z]{4}$/.test(type)) fail('invalid chunk type')
     if (readU32(bytes, dataEnd) !== crc32(bytes, typeOffset, dataEnd)) fail(`${type} CRC mismatch`)
@@ -47,7 +57,8 @@ export function parsePortablePng(input) {
       const validDepths = colorType === 0 ? [1, 2, 4, 8, 16]
         : colorType === 2 || colorType === 4 || colorType === 6 ? [8, 16]
           : colorType === 3 ? [1, 2, 4, 8] : []
-      if (!(width > 0) || !(height > 0) || width > MAX_PNG_DIMENSION || height > MAX_PNG_DIMENSION || width * height > MAX_PNG_PIXELS) fail('invalid dimensions')
+      if (!(width > 0) || !(height > 0)) fail('invalid dimensions')
+      validateDimensionPolicy(width, height, policy)
       if (!validDepths.includes(bitDepth) || bytes[dataOffset + 10] !== 0 || bytes[dataOffset + 11] !== 0 || bytes[dataOffset + 12] > 1) fail('invalid IHDR fields')
     } else if (type === 'PLTE') {
       if (sawPlte || sawIdat || colorType === 0 || colorType === 4 || length === 0 || length % 3 !== 0 || length > 768) fail('invalid PLTE')
@@ -69,6 +80,6 @@ export function parsePortablePng(input) {
   return Object.freeze({ width, height })
 }
 
-export function portablePngDimensions(input) {
-  try { return parsePortablePng(input) } catch { return undefined }
+export function portablePngDimensions(input, policy) {
+  try { return parsePortablePng(input, policy) } catch { return undefined }
 }

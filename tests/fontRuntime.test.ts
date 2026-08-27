@@ -235,6 +235,13 @@ describe('font runtime', () => {
     expect(FontFaceDouble.created).toEqual([])
   })
 
+  it('fails closed on blank stack families instead of emitting an empty CSS family', async () => {
+    const { fontCssFor } = await freshRuntime()
+
+    expect(() => fontCssFor('arial', [], ['Arial', '   '])).toThrow(/fontStack/i)
+    expect(() => fontCssFor('arial', [], ['\u00a0'])).toThrow(/fontStack/i)
+  })
+
   it('preserves every legacy system stack including the dedicated Hei stack', async () => {
     const { fontCssFor, SYSTEM_FONT_ENTRIES } = await freshRuntime()
 

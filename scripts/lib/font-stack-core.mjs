@@ -30,7 +30,11 @@ export function canonicalPortableFontStack(stack) {
 }
 export function validatePortableFontStack(stack) {
   return Array.isArray(stack) && stack.length > 0 && stack.length <= 16
-    && stack.every((family) => typeof family === 'string' && family.length > 0 && family.length <= 128 && /^[\p{L}\p{N} ._-]+$/u.test(family))
+    && stack.every((family) => {
+      if (typeof family !== 'string' || family.length === 0 || family.length > 128) return false
+      const trimmed = family.trim()
+      return trimmed.length > 0 && /^[\p{L}\p{N} ._-]+$/u.test(trimmed)
+    })
 }
 export function portableFontStackCss(stack) {
   if (!validatePortableFontStack(stack)) throw new Error('Invalid fontStack')

@@ -6,6 +6,7 @@ import editorHandoffV2Schema from './editor-handoff-v2.schema.json'
 import layoutBlueprintV1Schema from './layout-blueprint-v1.schema.json'
 import reviewManifestV1Schema from './review-manifest-v1.schema.json'
 import { isStrictRfc3339DateTime, validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
+import { validateFontStack } from '../label/fontStack'
 
 export type CarrierMode =
   | 'direct_surface_print'
@@ -337,10 +338,8 @@ function assertLayerShape(layer: LayoutBlueprintLayer, areaId: string, assetsByI
     if (layer.fontAsset && !['font/woff', 'font/woff2'].includes(assetsById.get(layer.fontAsset)?.mimeType ?? '')) {
       throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${areaId}/${layer.id} fontAsset must reference WOFF or WOFF2`)
     }
-    for (const family of layer.fontStack ?? []) {
-      if (!/^[\p{L}\p{N} ._-]+$/u.test(family)) {
-        throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${areaId}/${layer.id} fontStack contains an unsafe font family`)
-      }
+    if (layer.fontStack && !validateFontStack(layer.fontStack)) {
+      throw new DesignContractError('INVALID_LAYOUT_BLUEPRINT', `Text layer ${areaId}/${layer.id} fontStack contains an unsafe or blank font family`)
     }
   }
   if (layer.kind === 'image' && !layer.assetId) {

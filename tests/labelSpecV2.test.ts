@@ -18,6 +18,22 @@ const baseArea: LabelAreaConfig = {
 
 describe('Label Spec v2', () => {
   it.each([
+    [['   '], 'space-only'], [['\t'], 'tab-only'], [['\u00a0'], 'NBSP-only'], [['Arial', '   '], 'mixed valid and blank'],
+  ] as const)('rejects a %s font stack without throwing or producing an empty family', (fontStack, _label) => {
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{ id: 'copy', type: 'text', text: 'Copy', x: 0.5, y: 0.5, fontFamily: 'Arial', fontStack }],
+      }],
+    }
+
+    expect(validateLabelSpec(spec)).toMatchObject({ ok: false })
+    expect(() => applyStructuredLabelSpec(baseArea, spec)).toThrow(/Label Spec/)
+  })
+
+  it.each([
     ['process spotName', (area: Record<string, unknown>) => {
       area.layers = [{
         id: 'mark', type: 'shape', shape: 'rectangle', x: 0.5, y: 0.5, width: 0.5, height: 0.5,

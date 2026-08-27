@@ -63,6 +63,13 @@ describe('project font stack contract', () => {
     ;((project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>)[0].fontStack = Array.from({ length: 17 }, () => 'Arial')
     expect(() => parseLabelProject(project)).toThrow(/fontStack/i)
   })
+
+  it.each([
+    [['   '], 'space-only'], [['\t'], 'tab-only'], [['\u00a0'], 'NBSP-only'], [['Arial', '   '], 'mixed valid and blank'],
+  ] as const)('rejects %s families instead of importing an empty canonical font id', (fontStack, _label) => {
+    const project = projectWithLayers([{ ...makeTextLayer(), fontStack }])
+    expect(() => parseLabelProject(project)).toThrow(/fontStack/i)
+  })
 })
 
 function makeImageLayer(): Record<string, unknown> {
