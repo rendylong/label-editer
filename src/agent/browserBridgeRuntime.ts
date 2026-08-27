@@ -780,26 +780,6 @@ async function abortArtifactBatch(bootstrap: AgentBridgeBootstrap, lease: Review
   }
 }
 
-async function finalizeArtifactBatch(bootstrap: AgentBridgeBootstrap, lease: ReviewArtifactLease): Promise<void> {
-  const url = artifactStageUrl(bootstrap, lease.batchId, '/finalize')
-  const response = await fetch(url, {
-    method: 'POST', headers: { 'content-type': 'application/json', ...leaseHeaders(lease) },
-    body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation }), redirect: 'error',
-  })
-  if (!response.ok || response.redirected || response.status !== 200 || response.url !== url.href
-    || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
-    throw new Error(`Artifact batch finalize failed (${response.status})`)
-  }
-  let value: unknown
-  try { value = await response.json() } catch { throw new Error('Invalid artifact batch finalize response') }
-  const body = value as { ok?: unknown; batchId?: unknown; generation?: unknown; finalized?: unknown }
-  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'generation', 'finalized'])
-    || body.ok !== true || body.batchId !== lease.batchId
-    || body.generation !== lease.generation || body.finalized !== true) {
-    throw new Error('Invalid artifact batch finalize response')
-  }
-}
-
 async function readBackReviewArtifact(
   descriptor: ArtifactDescriptor,
   internalId: string,
@@ -1143,8 +1123,11 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             }
           }
 
-          // Final client-evidence barrier while the exclusive server lease still owns
-          // the complete prior/new logical sets. Finalize is the sole remaining operation.
+          // The server marks a transaction recoverably verified only after every exact
+          // committed artifact has been read back. Nothing asynchronous may run between
+          // this last live barrier and the successful return: a failed barrier can still
+          // abort to the prior set, while a successful verified lease seals on the next
+          // acquire/legacy mutation or its monotonic deadline.
           assertReviewStateUnchanged(snapshot, 'before-result')
           assertReviewPlanUnchanged(plan, width, height, 'before-result-plan')
           if (currentReviewDocument().json !== document.json) {
@@ -1157,13 +1140,6 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           assertValidationReady(returnValidation)
           const returnFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
           assertFidelityReady(returnFidelity)
-          try {
-            await finalizeArtifactBatch(bootstrap, lease)
-          } catch (error) {
-            throw reviewNotReady('upload-finalize', 'Review artifact batch could not be finalized', {
-              cause: error instanceof Error ? error.message : String(error),
-            })
-          }
           completed = true
           return {
             inputKind: 'label-project-v3',

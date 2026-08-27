@@ -239,7 +239,7 @@ describe('font runtime', () => {
     expect(deleteFont).toHaveBeenCalledWith(FontFaceDouble.created[1])
   })
 
-  it('deletes a pending uploaded FontFace when its project scope disappears before load settles', async () => {
+  it('never reports a retired pending uploaded FontFace as ready and deletes it exactly once', async () => {
     let finish!: () => void
     const pending = new Promise<void>((resolve) => { finish = resolve })
     const realLoad = FontFaceDouble.prototype.load
@@ -250,11 +250,69 @@ describe('font runtime', () => {
       const loading = runtime.ensureUploadedFontLoaded(record)
       runtime.syncUploadedFontProject([])
       finish()
-      await loading
+      await expect(loading).resolves.toMatchObject({ ok: false })
       expect(deleteFont).toHaveBeenCalledWith(FontFaceDouble.created[0])
+      runtime.syncUploadedFontProject([])
+      expect(deleteFont).toHaveBeenCalledTimes(1)
     } finally {
       FontFaceDouble.prototype.load = realLoad
     }
+  })
+
+  it('clears pending retirement when the exact font revision is reactivated before load completes', async () => {
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => { finish = resolve })
+    const realLoad = FontFaceDouble.prototype.load
+    FontFaceDouble.prototype.load = async function () { await pending; return this }
+    try {
+      const runtime = await freshRuntime()
+      const record: UploadedFontRecord = { name: 'Reactivated Brand', dataUrl: 'data:font/woff2;base64,UkVBQ1RJVkFURUQ=' }
+      const loading = runtime.ensureUploadedFontLoaded(record)
+      runtime.syncUploadedFontProject([])
+      runtime.syncUploadedFontProject([record])
+      finish()
+
+      await expect(loading).resolves.toMatchObject({ ok: true })
+      expect(deleteFont).not.toHaveBeenCalled()
+    } finally {
+      FontFaceDouble.prototype.load = realLoad
+    }
+  })
+
+  it('reactivates a face retired while document font registration is still pending', async () => {
+    let finishReady!: () => void
+    const ready = new Promise<void>((resolve) => { finishReady = resolve })
+    vi.stubGlobal('document', { fonts: { add: addFont, delete: deleteFont, ready } })
+    const runtime = await freshRuntime()
+    const record: UploadedFontRecord = { name: 'Registering Brand', dataUrl: 'data:font/woff2;base64,UkVHSVNURVJJTkc=' }
+    const loading = runtime.ensureUploadedFontLoaded(record)
+    for (let index = 0; index < 4; index += 1) await Promise.resolve()
+    expect(addFont).toHaveBeenCalledOnce()
+
+    runtime.syncUploadedFontProject([])
+    runtime.syncUploadedFontProject([record])
+    finishReady()
+
+    await expect(loading).resolves.toMatchObject({ ok: true })
+    expect(deleteFont).not.toHaveBeenCalled()
+  })
+
+  it('creates a fresh managed face after removal and never deletes either revision twice', async () => {
+    const runtime = await freshRuntime()
+    const record: UploadedFontRecord = { name: 'Repeat Brand', dataUrl: 'data:font/woff2;base64,UkVQRUFU' }
+    runtime.syncUploadedFontProject([record])
+    await runtime.ensureUploadedFontLoaded(record)
+    runtime.syncUploadedFontProject([])
+    runtime.syncUploadedFontProject([])
+    expect(deleteFont).toHaveBeenCalledTimes(1)
+
+    runtime.syncUploadedFontProject([record])
+    await runtime.ensureUploadedFontLoaded(record)
+    expect(FontFaceDouble.created).toHaveLength(2)
+    runtime.syncUploadedFontProject([])
+    runtime.syncUploadedFontProject([])
+    expect(deleteFont).toHaveBeenCalledTimes(2)
+    expect(deleteFont.mock.calls.map(([face]) => face)).toEqual(FontFaceDouble.created)
   })
 
   it('rejects an oversized uploaded font before decoding or constructing FontFace', async () => {

@@ -116,6 +116,32 @@ function projectWithLayers(layers: unknown[]): Record<string, unknown> {
   }
 }
 
+describe('project image resource budget', () => {
+  it('rejects more than 64 image layers even when non-image layers remain independently allowed', () => {
+    const images = Array.from({ length: 65 }, (_, index) => ({ ...makeImageLayer(), id: `image-${index}` }))
+    const project = projectWithLayers(images)
+
+    expect(() => parseLabelProject(project)).toThrow(/image.*count|image.*layer/i)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(project)).toBe(false)
+  })
+
+  it('rejects per-image and aggregate decoded-pixel declarations before runtime decode', () => {
+    const oversized = projectWithLayers([{ ...makeImageLayer(), naturalWidth: 8193, naturalHeight: 1 }])
+    expect(() => parseLabelProject(oversized)).toThrow(/image.*pixel|dimensions/i)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(oversized)).toBe(false)
+
+    const tooManyPerLayerPixels = projectWithLayers([{
+      ...makeImageLayer(), naturalWidth: 4097, naturalHeight: 4096,
+    }])
+    expect(() => parseLabelProject(tooManyPerLayerPixels)).toThrow(/image.*pixel|dimensions/i)
+
+    const aggregate = projectWithLayers(Array.from({ length: 3 }, (_, index) => ({
+      ...makeImageLayer(), id: `image-${index}`, naturalWidth: 4096, naturalHeight: 4096,
+    })))
+    expect(() => parseLabelProject(aggregate)).toThrow(/aggregate.*pixel|image.*budget/i)
+  })
+})
+
 function physicalProjectFixture(): Record<string, unknown> {
   return {
     version: 3,

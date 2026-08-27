@@ -5,6 +5,7 @@ import { hasValidLegacyPaperCarrierProvenance, resolveLabelPaper } from '../labe
 import { validateVectorPath } from '../label/vectorPathValidation'
 import { canonicalFontStack, validateFontStack } from '../label/fontStack'
 import { uploadedFontIdentity } from '../label/uploadedFontIdentity'
+import { imageResourceBudgetIssue } from '../label/imageResourceLimits'
 import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
@@ -587,6 +588,10 @@ export function parseLabelProject(raw: unknown): LabelProjectV3 {
 
   const areas = rawAreas.map((area, index) => normalizeArea(area, index, version))
   if (areas.length === 0) throw new Error('项目至少需要一个区域')
+  const imageIssue = imageResourceBudgetIssue(areas)
+  if (imageIssue) {
+    throw new Error(`areas[${imageIssue.areaIndex}].layers[${imageIssue.layerIndex}]: ${imageIssue.message}`)
+  }
 
   return {
     version: PROJECT_VERSION,

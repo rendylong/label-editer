@@ -10,7 +10,7 @@ import { normalizeAreaRange } from '../glb/areaMath'
 import { assertRasterAspect, assertRasterDimensions, withBakeCanvasSize } from '../app/canvasLayout'
 import { assertPhysicalAreaPlacement, resolveLayersForCanvas } from '../app/physicalLayout'
 import { syncUploadedFontProject } from '../label/fontRuntime'
-import { syncImageAssetProject } from '../label/imageAssetReceipt'
+import { resetImageAssetProject, syncImageAssetProject } from '../label/imageAssetReceipt'
 
 export interface BakeResult {
   color: HTMLCanvasElement
@@ -359,6 +359,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
   replaceAreasAtomically: (areas, activeAreaId, runtime) => {
     const activeArea = areas.find((area) => area.id === activeAreaId)
     if (!activeArea) throw new Error(`无法激活不存在的贴标区域：${activeAreaId}`)
+    resetImageAssetProject()
     set((state) => ({
       areas,
       activeAreaId,

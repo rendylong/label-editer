@@ -2,9 +2,11 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  bindImageAssetReceipt,
+  currentImageAssetReceipt,
   loadAreaContentBoundImage,
   loadContentBoundImage,
-  releaseImageAssetArea,
+  resetImageAssetProject,
   syncImageAssetProject,
   visibleImageLayersForRuntime,
 } from '../src/label/imageAssetReceipt'
@@ -39,20 +41,28 @@ function withTextChunk(bytes: Uint8Array): Uint8Array {
 
 class ImmediateImage {
   static sources: string[] = []
+  static naturalWidth = 2
+  static naturalHeight = 1
   onload: (() => void) | null = null
   onerror: (() => void) | null = null
-  naturalWidth = 2
-  naturalHeight = 1
+  naturalWidth = ImmediateImage.naturalWidth
+  naturalHeight = ImmediateImage.naturalHeight
+  private value = ''
   set src(value: string) {
+    this.value = value
     ImmediateImage.sources.push(value)
     queueMicrotask(() => this.onload?.())
   }
+  get src(): string { return this.value }
 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   ImmediateImage.sources = []
+  ImmediateImage.naturalWidth = 2
+  ImmediateImage.naturalHeight = 1
+  syncImageAssetProject([])
 })
 
 describe('content-bound image receipts', () => {
@@ -83,6 +93,8 @@ describe('content-bound image receipts', () => {
     expect(loadedSecond.receiptKey).not.toBe(loadedFirst.receiptKey)
     expect(ImmediateImage.sources).toEqual(['blob:content-1', 'blob:content-2'])
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+    loadedFirst.release()
+    loadedSecond.release()
   })
 
   it('rejects declared dimensions that do not match structurally parsed bytes before image decode', async () => {
@@ -106,32 +118,110 @@ describe('content-bound image receipts', () => {
     await expect(loadContentBoundImage('https://assets.test/huge.png', 1, 1)).rejects.toThrow(/byte limit/i)
   })
 
-  it('skips hidden images and aborts stale pending revisions, removed areas, and explicit unmounts', async () => {
+  it('reserves unknown-length response chunks incrementally across concurrent streams', async () => {
+    const chunk = new Uint8Array(17 * 1024 * 1024)
+    let closeStreams!: () => void
+    const closeGate = new Promise<void>((resolve) => { closeStreams = resolve })
+    const cancellations: ReturnType<typeof vi.fn>[] = []
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      let pulled = false
+      const cancel = vi.fn()
+      cancellations.push(cancel)
+      const body = new ReadableStream<Uint8Array>({
+        pull: async (controller) => {
+          if (!pulled) {
+            pulled = true
+            controller.enqueue(chunk)
+            return
+          }
+          await closeGate
+          controller.close()
+        },
+        cancel,
+      })
+      return new Response(body, { status: 200, headers: { 'content-type': 'image/png' } })
+    }))
+
+    const errors: Error[] = []
+    const loads = Array.from({ length: 4 }, (_, index) => loadContentBoundImage(`/stream-${index}.png`, 1, 1)
+      .catch((error: Error) => { errors.push(error); throw error }))
+    for (let index = 0; index < 30; index += 1) await Promise.resolve()
+
+    expect(errors).toHaveLength(1)
+    expect(errors[0].message).toMatch(/aggregate concurrent byte limit/i)
+    expect(cancellations.some((cancel) => cancel.mock.calls.length > 0)).toBe(true)
+    closeStreams()
+    await Promise.allSettled(loads)
+  })
+
+  it('keeps the same project-scoped image and receipt across activation switches, then evicts removed areas', async () => {
     const visible = { id: 'visible', kind: 'image', src: '/visible.png', naturalWidth: 2, naturalHeight: 1, visible: true } as ImageLayer
     const hidden = { ...visible, id: 'hidden', src: '/hidden.png', visible: false }
     const area = { id: 'area', layers: [visible, hidden] } as LabelAreaConfig
     expect(visibleImageLayersForRuntime(area).map((layer) => layer.id)).toEqual(['visible'])
 
+    const bytes = pngBytes(2, 1)
     const signals: AbortSignal[] = []
-    vi.stubGlobal('fetch', vi.fn((_input: URL | RequestInfo, init?: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn(async (_input: URL | RequestInfo, init?: RequestInit) => {
       signals.push(init?.signal as AbortSignal)
-      return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true }))
+      return new Response(new Uint8Array(bytes).buffer, {
+        status: 200, headers: { 'content-type': 'image/png', 'content-length': String(bytes.byteLength) },
+      })
     }))
-    const first = loadAreaContentBoundImage('area', 1, visible)
-    await Promise.resolve()
-    const second = loadAreaContentBoundImage('area', 2, visible)
-    await Promise.resolve()
-    expect(signals[0].aborted).toBe(true)
-    syncImageAssetProject([])
-    expect(signals[1].aborted).toBe(true)
-    void first.catch(() => undefined)
-    void second.catch(() => undefined)
+    vi.stubGlobal('Image', ImmediateImage)
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => 'blob:shared'), revokeObjectURL: vi.fn() })
+    syncImageAssetProject([area])
 
-    const third = loadAreaContentBoundImage('area', 3, visible)
-    await Promise.resolve()
-    releaseImageAssetArea('area')
-    expect(signals[2].aborted).toBe(true)
-    void third.catch(() => undefined)
+    const first = await loadAreaContentBoundImage('area', 1, visible)
+    bindImageAssetReceipt('area', visible.id, visible.src, visible.naturalWidth, visible.naturalHeight, first.receiptKey)
+    const second = await loadAreaContentBoundImage('area', 2, visible)
+
+    expect(second).toBe(first)
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(signals[0].aborted).toBe(false)
+    expect(currentImageAssetReceipt('area', visible.id, visible.src, 2, 1)).toBe(first.receiptKey)
+
+    resetImageAssetProject()
+    expect(signals[0].aborted).toBe(true)
+    expect(currentImageAssetReceipt('area', visible.id, visible.src, 2, 1)).toBeUndefined()
+    expect(first.image.src).toBe('')
+
+    syncImageAssetProject([area])
+    await loadAreaContentBoundImage('area', 3, visible)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    syncImageAssetProject([])
+  })
+
+  it('rejects a structurally oversized decoded image before constructing an Image', async () => {
+    const bytes = pngBytes(4097, 4096)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(bytes).buffer, {
+      status: 200, headers: { 'content-type': 'image/png', 'content-length': String(bytes.byteLength) },
+    })))
+    vi.stubGlobal('Image', ImmediateImage)
+
+    await expect(loadContentBoundImage('/too-many-pixels.png', 4097, 4096)).rejects.toThrow(/dimensions/i)
+    expect(ImmediateImage.sources).toHaveLength(0)
+  })
+
+  it('bounds retained decoded pixels and releases the HTMLImageElement when its owner is dropped', async () => {
+    const bytes = pngBytes(4096, 4096)
+    ImmediateImage.naturalWidth = 4096
+    ImmediateImage.naturalHeight = 4096
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(bytes).buffer, {
+      status: 200, headers: { 'content-type': 'image/png', 'content-length': String(bytes.byteLength) },
+    })))
+    vi.stubGlobal('Image', ImmediateImage)
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => `blob:decoded-${Math.random()}`), revokeObjectURL: vi.fn() })
+
+    const first = await loadContentBoundImage('/first.png', 4096, 4096)
+    const second = await loadContentBoundImage('/second.png', 4096, 4096)
+    await expect(loadContentBoundImage('/third.png', 4096, 4096)).rejects.toThrow(/decoded.*limit/i)
+
+    first.release()
+    expect(first.image.src).toBe('')
+    const third = await loadContentBoundImage('/third.png', 4096, 4096)
+    second.release()
+    third.release()
   })
 
   it('bounds concurrent content image fetches and releases queued work after completion', async () => {
@@ -158,7 +248,9 @@ describe('content-bound image receipts', () => {
       releases.splice(0).forEach((release) => release())
       await Promise.resolve()
     }
-    await expect(Promise.all(loads)).resolves.toHaveLength(5)
+    const loaded = await Promise.all(loads)
+    expect(loaded).toHaveLength(5)
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(5)
+    loaded.forEach((image) => image.release())
   })
 })

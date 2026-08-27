@@ -248,6 +248,7 @@ describe('plugin runtime security', () => {
       const first = await stage('attempt-one', 'attempt-one--front', 'front', 1)
       expect(first).toMatchObject({ id: 'attempt-one--front', resultId: 'front' })
       expect((await commit('attempt-one', [first.id], ['front'])).status).toBe(201)
+      expect((await fetch(first.url, { headers: leaseHeaders('attempt-one') })).status).toBe(200)
       expect((await finalize('attempt-one')).status).toBe(200)
       expect((await fetch(first.url)).status).toBe(200)
 
@@ -258,6 +259,7 @@ describe('plugin runtime security', () => {
 
       const second = await stage('attempt-three', 'attempt-three--front', 'front', 3)
       expect((await commit('attempt-three', [second.id], ['front'])).status).toBe(201)
+      expect((await fetch(second.url, { headers: leaseHeaders('attempt-three') })).status).toBe(200)
       expect((await finalize('attempt-three')).status).toBe(200)
       expect((await fetch(first.url)).status).toBe(404)
       const current = await fetch(second.url)

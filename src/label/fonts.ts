@@ -3,7 +3,7 @@
  */
 
 import { FONT_STACKS, type UploadedFontRecord } from './types'
-import { fontCssFor, uploadFamily, uploadedFontId, uploadedFontReceipt } from './fontRuntime'
+import { fontCssFor, prepareUploadedFontUpload, uploadFamily, uploadedFontId, uploadedFontReceipt } from './fontRuntime'
 
 export interface UploadedFont {
   id: string
@@ -12,7 +12,7 @@ export interface UploadedFont {
   dataUrl: string
 }
 
-/** 上传字体文件：校验 + 注册 FontFace + 返回记录。 */
+/** 上传字体文件：由项目级托管缓存校验并注册唯一 FontFace。 */
 export async function uploadFontFile(file: File): Promise<UploadedFont> {
   if (!/\.(ttf|otf|woff2)$/i.test(file.name)) throw new Error('仅支持 ttf / otf / woff2 字体')
   if (file.size > 20 * 1024 * 1024) throw new Error('字体文件超过 20MB 上限')
@@ -20,13 +20,8 @@ export async function uploadFontFile(file: File): Promise<UploadedFont> {
   const name = file.name.replace(/\.(ttf|otf|woff2)$/i, '')
   const family = uploadedFontReceipt({ name, dataUrl }).cssFamily
   const css = `"${family}", sans-serif`
-  if (typeof FontFace === 'undefined' || typeof document === 'undefined' || !document.fonts) {
-    throw new Error('当前环境不支持字体加载')
-  }
-  const ff = new FontFace(family, `url("${dataUrl}")`)
-  const loaded = await ff.load()
-  document.fonts.add(loaded)
-  await document.fonts.ready
+  const loaded = await prepareUploadedFontUpload({ name, dataUrl })
+  if (!loaded.ok) throw new Error(loaded.error ?? '字体加载失败')
   return { id: uploadedFontId(name), name, css, dataUrl }
 }
 

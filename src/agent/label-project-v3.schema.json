@@ -215,8 +215,8 @@
             "kind": { "const": "image" },
             "src": { "type": "string", "minLength": 1 },
             "fit": { "enum": ["contain", "cover", "stretch"] },
-            "naturalWidth": { "$ref": "#/$defs/finiteNumber" },
-            "naturalHeight": { "$ref": "#/$defs/finiteNumber" },
+            "naturalWidth": { "type": "number", "minimum": 1, "maximum": 8192 },
+            "naturalHeight": { "type": "number", "minimum": 1, "maximum": 8192 },
             "width": { "$ref": "#/$defs/finiteNumber" },
             "height": { "$ref": "#/$defs/finiteNumber" },
             "x": { "$ref": "#/$defs/finiteNumber" },
@@ -398,7 +398,13 @@
         "placementPolicy": { "enum": ["fit", "crop-approved", "block"] },
         "blueprintAreaId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "designBinding": { "$ref": "#/$defs/designBinding" },
-        "layers": { "type": "array", "items": { "$ref": "#/$defs/layer" } },
+        "layers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/layer" },
+          "contains": { "$ref": "#/$defs/imageLayer" },
+          "minContains": 0,
+          "maxContains": 64
+        },
         "globalCraft": {
           "type": "object",
           "additionalProperties": false,

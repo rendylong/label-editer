@@ -66,7 +66,7 @@ export async function createSessionServer({
   maxReviewBatchArtifacts = 131,
   maxSessionAssetBytes = 256 * 1024 * 1024,
   reviewLeaseMs = 120_000,
-  now = Date.now,
+  now = () => performance.now(),
 } = {}) {
   if (!editorRoot) throw new Error('editorRoot is required')
   if (!Number.isSafeInteger(maxReviewBatchBytes) || maxReviewBatchBytes < 1
@@ -76,8 +76,31 @@ export async function createSessionServer({
     || typeof now !== 'function') throw new Error('Invalid session resource limits')
   const sessions = new Map()
 
-  function rollbackReviewLease(session, lease) {
-    if (lease.phase === 'committed') {
+  function clearReviewLeaseTimer(lease) {
+    if (lease.timer !== undefined) clearTimeout(lease.timer)
+    delete lease.timer
+  }
+
+  function settlementKey(batchId, generation) {
+    return `${batchId}\0${generation}`
+  }
+
+  function rememberReviewSettlement(session, lease, action, payload) {
+    const key = settlementKey(lease.batchId, lease.generation)
+    session.reviewSettlements.delete(key)
+    session.reviewSettlements.set(key, {
+      leaseToken: lease.leaseToken,
+      action,
+      payload,
+    })
+    while (session.reviewSettlements.size > 32) {
+      session.reviewSettlements.delete(session.reviewSettlements.keys().next().value)
+    }
+  }
+
+  function rollbackReviewLease(session, lease, { remember = true } = {}) {
+    clearReviewLeaseTimer(lease)
+    if (lease.phase === 'committed' || lease.phase === 'verified') {
       for (const artifact of lease.committed.values()) session.artifacts.delete(artifact.id)
       session.currentArtifactsByResultId.clear()
       for (const [resultId, artifact] of lease.prior) {
@@ -85,23 +108,71 @@ export async function createSessionServer({
         session.currentArtifactsByResultId.set(resultId, artifact)
       }
     }
-    session.reviewLease = null
+    if (session.reviewLease === lease) session.reviewLease = null
+    const payload = { ok: true, batchId: lease.batchId, generation: lease.generation, aborted: true }
+    if (remember) rememberReviewSettlement(session, lease, 'abort', payload)
+    return payload
   }
 
-  function expireReviewLease(session) {
+  function sealReviewLease(session, lease, { remember = true } = {}) {
+    clearReviewLeaseTimer(lease)
+    if (session.reviewLease === lease) session.reviewLease = null
+    const payload = { ok: true, batchId: lease.batchId, generation: lease.generation, finalized: true }
+    if (remember) rememberReviewSettlement(session, lease, 'finalize', payload)
+    return payload
+  }
+
+  function finishExpiredReviewLease(session, lease) {
+    if (session.reviewLease !== lease) return
+    if (lease.phase === 'verified') sealReviewLease(session, lease)
+    else rollbackReviewLease(session, lease)
+  }
+
+  function scheduleReviewLeaseTimer(session, lease) {
+    clearReviewLeaseTimer(lease)
+    const check = () => {
+      if (session.reviewLease !== lease) return
+      const remaining = lease.deadline - now()
+      if (remaining > 0) {
+        lease.timer = setTimeout(check, Math.max(1, Math.ceil(remaining)))
+        return
+      }
+      finishExpiredReviewLease(session, lease)
+    }
+    lease.timer = setTimeout(check, Math.max(1, Math.ceil(lease.deadline - now())))
+  }
+
+  function renewReviewLease(session, lease) {
+    lease.deadline = now() + reviewLeaseMs
+    lease.expiresAt = Date.now() + reviewLeaseMs
+    scheduleReviewLeaseTimer(session, lease)
+  }
+
+  function expireReviewLeaseAtBoundary(session) {
     const lease = session.reviewLease
-    if (lease && now() > lease.expiresAt) rollbackReviewLease(session, lease)
+    if (lease && now() >= lease.deadline) finishExpiredReviewLease(session, lease)
   }
 
-  function requestLease(session, batchId, request, body) {
-    expireReviewLease(session)
+  function requestLease(session, batchId, request, body, phases) {
+    expireReviewLeaseAtBoundary(session)
     const lease = session.reviewLease
     const token = body?.leaseToken ?? request.headers['x-artifact-lease-token']
     const generation = body?.generation ?? Number(request.headers['x-artifact-generation'])
     if (!lease || lease.batchId !== batchId || !validToken(lease.leaseToken, token)
       || generation !== lease.generation) return null
-    lease.expiresAt = now() + reviewLeaseMs
+    if (phases && !phases.includes(lease.phase)) return null
+    renewReviewLease(session, lease)
     return lease
+  }
+
+  function replayReviewSettlement(session, batchId, request, body, action) {
+    const token = body?.leaseToken ?? request.headers['x-artifact-lease-token']
+    const generation = body?.generation ?? Number(request.headers['x-artifact-generation'])
+    if (!Number.isSafeInteger(generation) || generation < 1) return null
+    if (generation !== session.reviewGeneration) return null
+    const settled = session.reviewSettlements.get(settlementKey(batchId, generation))
+    if (!settled || settled.action !== action || !validToken(settled.leaseToken, token)) return null
+    return settled.payload
   }
 
   const server = createServer(async (request, response) => {
@@ -114,7 +185,7 @@ export async function createSessionServer({
           json(response, 403, { ok: false, error: 'Forbidden' })
           return
         }
-        expireReviewLease(session)
+        expireReviewLeaseAtBoundary(session)
         response.setHeader('cache-control', 'no-store')
         if (parts[2] === 'bootstrap' && request.method === 'GET') {
           json(response, 200, {
@@ -140,6 +211,7 @@ export async function createSessionServer({
             return json(response, 400, { ok: false, error: 'Invalid artifact batch id' })
           }
           if (request.method === 'POST' && parts[5] === 'acquire') {
+            if (session.reviewLease?.phase === 'verified') sealReviewLease(session, session.reviewLease)
             if (session.reviewLease) return json(response, 409, { ok: false, error: 'Review artifact lease is busy' })
             const body = JSON.parse((await readBody(request, 1024)).toString('utf8') || '{}')
             if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) {
@@ -149,12 +221,14 @@ export async function createSessionServer({
               batchId,
               leaseToken: randomBytes(32).toString('base64url'),
               generation: ++session.reviewGeneration,
-              expiresAt: now() + reviewLeaseMs,
+              deadline: now() + reviewLeaseMs,
+              expiresAt: Date.now() + reviewLeaseMs,
               phase: 'staging',
               staged: new Map(),
               stagedBytes: 0,
             }
             session.reviewLease = lease
+            scheduleReviewLeaseTimer(session, lease)
             json(response, 201, {
               ok: true, batchId, leaseToken: lease.leaseToken,
               generation: lease.generation, expiresAt: lease.expiresAt,
@@ -164,8 +238,8 @@ export async function createSessionServer({
           if (request.method === 'PUT') {
             const id = parts[5]
             if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
-            const lease = requestLease(session, batchId, request)
-            if (!lease || lease.phase !== 'staging') return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
+            let lease = requestLease(session, batchId, request, undefined, ['staging'])
+            if (!lease) return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
             if (session.artifacts.has(id)) return json(response, 409, { ok: false, error: 'Artifact already exists' })
             const batch = lease.staged
             if (batch.has(id)) return json(response, 409, { ok: false, error: 'Artifact already staged' })
@@ -178,6 +252,8 @@ export async function createSessionServer({
             const remaining = maxReviewBatchBytes - lease.stagedBytes
             if (remaining < 1) return json(response, 413, { ok: false, error: 'Review artifact bytes exceed limit' })
             const bytes = await readBody(request, Math.min(maxUploadBytes, remaining))
+            lease = requestLease(session, batchId, request, undefined, ['staging'])
+            if (!lease) return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
             const encodedName = request.headers['x-artifact-file-name']
             const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
             const artifact = {
@@ -207,11 +283,11 @@ export async function createSessionServer({
           }
           if (request.method === 'POST' && parts[5] === 'commit') {
             const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
-            const lease = requestLease(session, batchId, request, body)
+            const lease = requestLease(session, batchId, request, body, ['staging'])
             const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : null
             const resultIds = Array.isArray(body?.resultIds) ? body.resultIds : artifactIds
             const batch = lease?.staged
-            if (!lease || lease.phase !== 'staging' || !batch || !artifactIds || artifactIds.length !== batch.size
+            if (!lease || !batch || !artifactIds || artifactIds.length !== batch.size
               || !resultIds || resultIds.length !== batch.size
               || artifactIds.some((id, index) => typeof id !== 'string' || id !== [...batch.keys()][index])
               || resultIds.some((id, index) => typeof id !== 'string' || id !== [...batch.values()][index].resultId)) {
@@ -228,7 +304,7 @@ export async function createSessionServer({
               session.artifacts.set(id, artifact)
               session.currentArtifactsByResultId.set(artifact.resultId, artifact)
             }
-            Object.assign(lease, { phase: 'committed', committed, prior })
+            Object.assign(lease, { phase: 'committed', committed, prior, readBackIds: new Set() })
             delete lease.staged
             delete lease.stagedBytes
             json(response, 201, { ok: true, batchId, artifactIds, resultIds, generation: lease.generation })
@@ -236,27 +312,39 @@ export async function createSessionServer({
           }
           if (request.method === 'POST' && parts[5] === 'finalize') {
             const body = JSON.parse((await readBody(request, 4096)).toString('utf8'))
-            const lease = requestLease(session, batchId, request, body)
-            if (!lease || lease.phase !== 'committed') return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
-            session.reviewLease = null
-            json(response, 200, { ok: true, batchId, generation: lease.generation, finalized: true })
+            const lease = requestLease(session, batchId, request, body, ['verified'])
+            if (!lease) {
+              const replay = replayReviewSettlement(session, batchId, request, body, 'finalize')
+              return replay
+                ? json(response, 200, replay)
+                : json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
+            }
+            json(response, 200, sealReviewLease(session, lease))
             return
           }
           if (request.method === 'DELETE' && parts.length === 5) {
-            const lease = requestLease(session, batchId, request)
-            if (!lease) return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
-            const generation = lease.generation
-            rollbackReviewLease(session, lease)
-            json(response, 200, { ok: true, batchId, generation, aborted: true })
+            const lease = requestLease(session, batchId, request, undefined, ['staging', 'committed', 'verified'])
+            if (!lease) {
+              const replay = replayReviewSettlement(session, batchId, request, undefined, 'abort')
+              return replay
+                ? json(response, 200, replay)
+                : json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
+            }
+            json(response, 200, rollbackReviewLease(session, lease))
             return
           }
           json(response, 404, { ok: false, error: 'Artifact batch route not found' })
           return
         }
         if (parts[2] === 'artifact' && request.method === 'PUT') {
+          if (session.reviewLease?.phase === 'verified') sealReviewLease(session, session.reviewLease)
+          if (session.reviewLease) return json(response, 409, { ok: false, error: 'Review artifact lease is busy' })
           const id = parts[3]
           if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
           const bytes = await readBody(request, maxUploadBytes)
+          expireReviewLeaseAtBoundary(session)
+          if (session.reviewLease?.phase === 'verified') sealReviewLease(session, session.reviewLease)
+          if (session.reviewLease) return json(response, 409, { ok: false, error: 'Review artifact lease is busy' })
           const encodedName = request.headers['x-artifact-file-name']
           const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
           const artifact = {
@@ -283,10 +371,14 @@ export async function createSessionServer({
         if (parts[2] === 'artifact' && request.method === 'GET') {
           const artifact = session.artifacts.get(parts[3])
           if (!artifact) return json(response, 404, { ok: false, error: 'Artifact not found' })
-          if (artifact.batchId && session.reviewLease?.phase === 'committed'
-            && session.reviewLease.batchId === artifact.batchId
-            && !requestLease(session, artifact.batchId, request)) {
-            return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
+          if (artifact.batchId && session.reviewLease?.batchId === artifact.batchId
+            && (session.reviewLease.phase === 'committed' || session.reviewLease.phase === 'verified')) {
+            const lease = requestLease(session, artifact.batchId, request, undefined, ['committed', 'verified'])
+            if (!lease) return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
+            lease.readBackIds.add(artifact.id)
+            if (lease.phase === 'committed' && lease.readBackIds.size === lease.committed.size) {
+              lease.phase = 'verified'
+            }
           }
           response.writeHead(200, {
             'content-type': artifact.mimeType,
@@ -347,6 +439,7 @@ export async function createSessionServer({
         currentArtifactsByResultId: new Map(),
         reviewLease: null,
         reviewGeneration: 0,
+        reviewSettlements: new Map(),
       }
       sessions.set(session.id, session)
       return { id: session.id, token: session.token }
@@ -378,9 +471,14 @@ export async function createSessionServer({
       })) : []
     },
     disposeSession(sessionId) {
+      const session = sessions.get(sessionId)
+      if (session?.reviewLease) clearReviewLeaseTimer(session.reviewLease)
       sessions.delete(sessionId)
     },
     async close() {
+      for (const session of sessions.values()) {
+        if (session.reviewLease) clearReviewLeaseTimer(session.reviewLease)
+      }
       sessions.clear()
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
     },

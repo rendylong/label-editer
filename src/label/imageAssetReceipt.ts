@@ -1,10 +1,13 @@
 import { parsePortablePng } from '../../scripts/lib/png-core.mjs'
 import { sha256HexSync } from '../agent/syncSha256'
 import { decodeBoundedDataUrl, MAX_EMBEDDED_ASSET_BYTES } from './boundedAssetBytes'
+import {
+  MAX_IMAGE_DIMENSION,
+  MAX_IMAGE_PIXELS_PER_LAYER,
+  MAX_PROJECT_IMAGE_PIXELS,
+} from './imageResourceLimits'
 import type { ImageLayer, LabelAreaConfig } from './types'
 
-const MAX_IMAGE_DIMENSION = 8192
-const MAX_IMAGE_PIXELS = 32 * 1024 * 1024
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 const MAX_CONCURRENT_IMAGE_LOADS = 4
 const MAX_CONCURRENT_IMAGE_BYTES = 64 * 1024 * 1024
@@ -17,6 +20,8 @@ export interface ContentBoundImage {
   byteLength: number
   sha256: string
   receiptKey: string
+  /** Release the retained decoded browser resource. Idempotent. */
+  release: () => void
 }
 
 interface CurrentImageReceipt {
@@ -30,10 +35,12 @@ interface AreaImageLoad {
   sourceIdentity: string
   controller: AbortController
   load: Promise<ContentBoundImage>
+  resource?: ContentBoundImage
 }
 const areaImageLoads = new Map<string, AreaImageLoad>()
 let activeImageLoads = 0
 let reservedImageBytes = 0
+let retainedDecodedPixels = 0
 const imageLoadQueue: Array<{ signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void }> = []
 
 function sourceIdentity(src: string, width: number, height: number): string {
@@ -126,6 +133,21 @@ function reserveImageBytes(length: number): () => void {
   }
 }
 
+function reserveDecodedPixels(width: number, height: number): () => void {
+  const pixels = width * height
+  if (!Number.isSafeInteger(pixels) || pixels < 1 || pixels > MAX_IMAGE_PIXELS_PER_LAYER
+    || pixels > MAX_PROJECT_IMAGE_PIXELS - retainedDecodedPixels) {
+    throw new Error('Image exceeds the retained decoded pixel limit')
+  }
+  retainedDecodedPixels += pixels
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    retainedDecodedPixels -= pixels
+  }
+}
+
 function readU16Be(bytes: Uint8Array, offset: number): number {
   return bytes[offset] * 256 + bytes[offset + 1]
 }
@@ -192,19 +214,32 @@ function webpDimensions(bytes: Uint8Array): { width: number; height: number } | 
 
 function structuralDimensions(bytes: Uint8Array, mimeType: string): { width: number; height: number } {
   let dimensions: { width: number; height: number } | undefined
-  if (mimeType === 'image/png') dimensions = parsePortablePng(bytes, {
-    maxWidth: MAX_IMAGE_DIMENSION,
-    maxHeight: MAX_IMAGE_DIMENSION,
-    maxPixels: MAX_IMAGE_PIXELS,
-  })
+  if (mimeType === 'image/png') {
+    try {
+      dimensions = parsePortablePng(bytes, {
+        maxWidth: MAX_IMAGE_DIMENSION,
+        maxHeight: MAX_IMAGE_DIMENSION,
+        maxPixels: MAX_IMAGE_PIXELS_PER_LAYER,
+      })
+    } catch {
+      throw new Error('Image bytes have invalid structure or dimensions')
+    }
+  }
   else if (mimeType === 'image/jpeg') dimensions = jpegDimensions(bytes)
   else if (mimeType === 'image/webp') dimensions = webpDimensions(bytes)
   if (!dimensions || dimensions.width < 1 || dimensions.height < 1
     || dimensions.width > MAX_IMAGE_DIMENSION || dimensions.height > MAX_IMAGE_DIMENSION
-    || dimensions.width > MAX_IMAGE_PIXELS / dimensions.height) {
+    || dimensions.width > MAX_IMAGE_PIXELS_PER_LAYER / dimensions.height) {
     throw new Error('Image bytes have invalid structure or dimensions')
   }
   return dimensions
+}
+
+/** Parse trusted dimensions from supported encoded bytes before invoking a browser decoder. */
+export function inspectBoundedImageBytes(bytes: Uint8Array, mimeType: string): { width: number; height: number } {
+  const normalizedMime = mimeType.split(';')[0].trim().toLowerCase()
+  if (!IMAGE_MIMES.has(normalizedMime)) throw new Error(`Unsupported image MIME: ${normalizedMime || 'missing'}`)
+  return structuralDimensions(bytes, normalizedMime)
 }
 
 async function readResponseBytes(response: Response, signal?: AbortSignal): Promise<{ bytes: Uint8Array; release: () => void }> {
@@ -218,10 +253,13 @@ async function readResponseBytes(response: Response, signal?: AbortSignal): Prom
   const reader = response.body?.getReader()
   if (!reader) throw new Error('Image response is not stream-readable')
   const declaredLength = declared === null ? undefined : Number(declared)
-  let releaseReservation: (() => void) | undefined
-  if (declaredLength !== undefined) releaseReservation = reserveImageBytes(declaredLength)
+  const releaseReservations: Array<() => void> = []
+  if (declaredLength !== undefined) releaseReservations.push(reserveImageBytes(declaredLength))
   const chunks: Uint8Array[] = []
   let total = 0
+  const releaseAll = (): void => releaseReservations.splice(0).forEach((release) => release())
+  const onAbort = (): void => { void reader.cancel(abortError()) }
+  signal?.addEventListener('abort', onAbort, { once: true })
   try {
     while (true) {
       if (signal?.aborted) { await reader.cancel(); throw abortError() }
@@ -232,18 +270,29 @@ async function readResponseBytes(response: Response, signal?: AbortSignal): Prom
         await reader.cancel()
         throw new Error('Image exceeds the bounded byte limit')
       }
+      if (declaredLength !== undefined && value.byteLength > declaredLength - total) {
+        await reader.cancel()
+        throw new Error('Image byte length does not match its response')
+      }
+      if (declaredLength === undefined) {
+        try { releaseReservations.push(reserveImageBytes(value.byteLength)) } catch (error) {
+          void reader.cancel()
+          throw error
+        }
+      }
       total += value.byteLength
       chunks.push(value)
     }
     if (total < 1 || (declaredLength !== undefined && total !== declaredLength)) throw new Error('Image byte length does not match its response')
-    if (!releaseReservation) releaseReservation = reserveImageBytes(total)
     const bytes = new Uint8Array(total)
     let offset = 0
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
-    return { bytes, release: releaseReservation }
+    return { bytes, release: releaseAll }
   } catch (error) {
-    releaseReservation?.()
+    releaseAll()
     throw error
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
 }
 
@@ -270,6 +319,7 @@ export async function loadContentBoundImage(
   }
   const releaseSlot = await acquireImageLoadSlot(options.signal)
   let releaseBytes: (() => void) | undefined
+  let releasePixels: (() => void) | undefined
   try {
     const exact = await exactImageBytes(src, options.signal)
     const { bytes, mimeType } = exact
@@ -279,6 +329,7 @@ export async function loadContentBoundImage(
     if (dimensions.width !== expectedWidth || dimensions.height !== expectedHeight) {
       throw new Error('Image bytes do not match declared dimensions')
     }
+    releasePixels = reserveDecodedPixels(dimensions.width, dimensions.height)
     const sha256 = sha256HexSync(bytes)
     const objectUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes).buffer], { type: mimeType }))
     const image = new Image()
@@ -298,6 +349,17 @@ export async function loadContentBoundImage(
       image.onerror = null
       URL.revokeObjectURL(objectUrl)
     }
+    const releaseRetainedPixels = releasePixels
+    releasePixels = undefined
+    let released = false
+    const release = (): void => {
+      if (released) return
+      released = true
+      image.onload = null
+      image.onerror = null
+      image.src = ''
+      releaseRetainedPixels?.()
+    }
     return {
       image,
       width: dimensions.width,
@@ -306,8 +368,10 @@ export async function loadContentBoundImage(
       byteLength: bytes.byteLength,
       sha256,
       receiptKey: `image/${mimeType}/${dimensions.width}x${dimensions.height}/sha256:${sha256}`,
+      release,
     }
   } finally {
+    releasePixels?.()
     releaseBytes?.()
     releaseSlot()
   }
@@ -319,22 +383,24 @@ export function visibleImageLayersForRuntime(area: Pick<LabelAreaConfig, 'layers
 
 export function loadAreaContentBoundImage(
   areaId: string,
-  activationRevision: number,
+  _activationRevision: number,
   layer: ImageLayer,
 ): Promise<ContentBoundImage> {
   const owner = `${areaId}\u0000${layer.id}`
   const source = sourceIdentity(layer.src, layer.naturalWidth, layer.naturalHeight)
-  const identity = `${activationRevision}\u0000${source}`
+  const identity = source
   const cached = areaImageLoads.get(owner)
   if (cached?.identity === identity) return cached.load
-  cached?.controller.abort()
-  areaImageLoads.delete(owner)
+  if (cached) evictAreaImageOwner(owner, cached)
   beginImageAssetLoad(areaId, layer.id)
   const controller = new AbortController()
   const load = loadContentBoundImage(layer.src, layer.naturalWidth, layer.naturalHeight, { signal: controller.signal })
-  const entry = { identity, sourceIdentity: source, controller, load }
+  const entry: AreaImageLoad = { identity, sourceIdentity: source, controller, load }
   areaImageLoads.set(owner, entry)
-  void load.catch(() => {
+  void load.then((resource) => {
+    if (areaImageLoads.get(owner) === entry) entry.resource = resource
+    else resource.release()
+  }, () => {
     if (areaImageLoads.get(owner) === entry) areaImageLoads.delete(owner)
   })
   return load
@@ -342,6 +408,7 @@ export function loadAreaContentBoundImage(
 
 function evictAreaImageOwner(owner: string, entry: AreaImageLoad): void {
   entry.controller.abort()
+  entry.resource?.release()
   if (areaImageLoads.get(owner) === entry) areaImageLoads.delete(owner)
   const separator = owner.indexOf('\u0000')
   if (separator >= 0) currentReceipts.get(owner.slice(0, separator))?.delete(owner.slice(separator + 1))
@@ -357,14 +424,22 @@ export function syncImageAssetProject(areas: readonly Pick<LabelAreaConfig, 'id'
     if (allowed.get(owner) !== entry.sourceIdentity) evictAreaImageOwner(owner, entry)
   }
   for (const [areaId, receipts] of currentReceipts) {
-    for (const layerId of receipts.keys()) if (!allowed.has(`${areaId}\u0000${layerId}`)) receipts.delete(layerId)
+    for (const [layerId, receipt] of receipts) {
+      if (allowed.get(`${areaId}\u0000${layerId}`) !== receipt.sourceIdentity) receipts.delete(layerId)
+    }
     if (receipts.size === 0) currentReceipts.delete(areaId)
   }
 }
 
-/** Component unmount boundary: no pending load or stale receipt survives the area canvas. */
+/** Explicit area/project disposal boundary; normal active-area switches must not call this. */
 export function releaseImageAssetArea(areaId: string): void {
   const prefix = `${areaId}\u0000`
   for (const [owner, entry] of areaImageLoads) if (owner.startsWith(prefix)) evictAreaImageOwner(owner, entry)
   currentReceipts.delete(areaId)
+}
+
+/** Imported-project replacement boundary, including replacements that reuse ids and sources. */
+export function resetImageAssetProject(): void {
+  for (const [owner, entry] of [...areaImageLoads]) evictAreaImageOwner(owner, entry)
+  currentReceipts.clear()
 }

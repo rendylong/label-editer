@@ -5,6 +5,7 @@ import type { CarrierMode, LabelSide, ProcessIntent } from './designContracts'
 import type { DesignBinding, LayerDesignMetrics, PhysicalArtboard, SubstrateSpec, TargetAspectPolicy } from '../label/types'
 import { canonicalFontStack } from '../label/fontStack'
 import { validateVectorPath } from '../label/vectorPathValidation'
+import { imageResourceBudgetIssue } from '../label/imageResourceLimits'
 
 type UnknownRecord = Record<string, unknown>
 
@@ -182,6 +183,14 @@ export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
   }
   const normalized = structuredClone(migrated.spec) as LabelSpecV2
   const semanticIssues: LabelSpecIssue[] = []
+  const imageIssue = imageResourceBudgetIssue(normalized.areas)
+  if (imageIssue) {
+    semanticIssues.push({
+      path: `/areas/${imageIssue.areaIndex}/layers/${imageIssue.layerIndex}`,
+      message: imageIssue.message,
+      keyword: 'image-resource-budget',
+    })
+  }
   for (const [areaIndex, area] of normalized.areas.entries()) {
     const layerIds = new Set<string>()
     for (const [layerIndex, layer] of area.layers.entries()) {

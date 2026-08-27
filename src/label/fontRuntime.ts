@@ -39,9 +39,13 @@ interface UploadedFontLoadEntry {
   face?: FontFace
   refs: number
   retired: boolean
+  deleted: boolean
+  settled: boolean
+  validationTimer?: ReturnType<typeof setTimeout>
 }
 
 const uploadedFontLoads = new Map<string, UploadedFontLoadEntry>()
+let projectFontKeys = new Set<string>()
 
 const SYSTEM_FONT_IDS = [
   'system-sans', 'pingfang-sc', 'microsoft-yahei', 'noto-sans-cjk-system', 'system-serif',
@@ -173,13 +177,21 @@ export function ensureUploadedFontLoaded(record: UploadedFontRecord): Promise<Fo
   }
   const cacheKey = `${id}/${receipt.receiptKey}`
   const cached = uploadedFontLoads.get(cacheKey)
-  if (cached) return cached.promise
+  if (cached) {
+    if (projectFontKeys.has(cacheKey) && !cached.deleted) cached.retired = false
+    if (cached.retired || cached.deleted) {
+      return Promise.resolve(failedResult(id, 'sans-serif', 'Uploaded font revision is retired'))
+    }
+    return cached.promise
+  }
 
   const family = receipt.cssFamily
   const entry: UploadedFontLoadEntry = {
     promise: Promise.resolve(failedResult(id, 'sans-serif', 'Font load was not initialized')),
     refs: 0,
     retired: false,
+    deleted: false,
+    settled: false,
   }
   const load = (async (): Promise<FontLoadResult> => {
     try {
@@ -188,12 +200,27 @@ export function ensureUploadedFontLoaded(record: UploadedFontRecord): Promise<Fo
       }
       const face = new FontFace(family, `url("${record.dataUrl}")`)
       const loadedFace = await face.load()
+      entry.face = loadedFace
+      if (entry.retired || entry.deleted) {
+        entry.settled = true
+        deleteUploadedFace(entry)
+        if (uploadedFontLoads.get(cacheKey) === entry) uploadedFontLoads.delete(cacheKey)
+        return failedResult(id, 'sans-serif', 'Uploaded font revision was retired before loading completed')
+      }
       document.fonts.add(loadedFace)
       await document.fonts.ready
-      entry.face = loadedFace
-      if (entry.retired) document.fonts.delete(loadedFace)
+      if (entry.retired || entry.deleted) {
+        entry.settled = true
+        deleteUploadedFace(entry)
+        if (uploadedFontLoads.get(cacheKey) === entry) uploadedFontLoads.delete(cacheKey)
+        return failedResult(id, 'sans-serif', 'Uploaded font revision was retired before registration completed')
+      }
+      entry.settled = true
       return { id, ok: true, cssFamily: family }
     } catch (error) {
+      entry.settled = true
+      deleteUploadedFace(entry)
+      if (uploadedFontLoads.get(cacheKey) === entry) uploadedFontLoads.delete(cacheKey)
       return failedResult(id, 'sans-serif', errorMessage(error))
     }
   })()
@@ -203,14 +230,39 @@ export function ensureUploadedFontLoaded(record: UploadedFontRecord): Promise<Fo
   return load
 }
 
+function deleteUploadedFace(entry: UploadedFontLoadEntry): void {
+  if (entry.deleted || !entry.face) return
+  entry.deleted = true
+  if (typeof document !== 'undefined' && document.fonts) document.fonts.delete(entry.face)
+}
+
 function uploadedRequestCacheKey(request: Extract<DesignFontRequest, { kind: 'uploaded' }>): string {
   return `${request.id}/${uploadedFontReceipt(request.record).receiptKey}`
 }
 
 function retireUploadedFont(cacheKey: string, entry: UploadedFontLoadEntry): void {
-  if (uploadedFontLoads.get(cacheKey) === entry) uploadedFontLoads.delete(cacheKey)
+  if (entry.validationTimer !== undefined) clearTimeout(entry.validationTimer)
+  entry.validationTimer = undefined
   entry.retired = true
-  if (entry.face && typeof document !== 'undefined' && document.fonts) document.fonts.delete(entry.face)
+  if (entry.settled) {
+    deleteUploadedFace(entry)
+    if (uploadedFontLoads.get(cacheKey) === entry) uploadedFontLoads.delete(cacheKey)
+  }
+}
+
+/** Validate an upload through the same managed face that project rendering will retain. */
+export async function prepareUploadedFontUpload(record: UploadedFontRecord): Promise<FontLoadResult> {
+  const result = await ensureUploadedFontLoaded(record)
+  if (!result.ok) return result
+  const key = `${uploadedFontId(record.name)}/${uploadedFontReceipt(record).receiptKey}`
+  const entry = uploadedFontLoads.get(key)
+  if (!entry) return failedResult(result.id, 'sans-serif', 'Uploaded font cache entry disappeared')
+  if (entry.validationTimer !== undefined) clearTimeout(entry.validationTimer)
+  entry.validationTimer = setTimeout(() => {
+    entry.validationTimer = undefined
+    if (entry.refs === 0 && !projectFontKeys.has(key)) retireUploadedFont(key, entry)
+  }, 0)
+  return result
 }
 
 /** Retain uploaded faces for one mounted design consumer; release evicts zero-reference faces. */
@@ -244,9 +296,14 @@ export function syncUploadedFontProject(records: readonly UploadedFontRecord[]):
       return [`${id}/${uploadedFontReceipt(record).receiptKey}`]
     } catch { return [] }
   }))
+  projectFontKeys = allowed
   for (const [key, entry] of uploadedFontLoads) {
-    if (!allowed.has(key) && entry.refs === 0) retireUploadedFont(key, entry)
-    else if (!allowed.has(key)) entry.retired = true
+    if (allowed.has(key)) {
+      entry.retired = false
+      if (entry.validationTimer !== undefined) clearTimeout(entry.validationTimer)
+      entry.validationTimer = undefined
+    } else if (entry.refs === 0) retireUploadedFont(key, entry)
+    else entry.retired = true
   }
 }
 

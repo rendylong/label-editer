@@ -16,7 +16,6 @@ import { designAssetReadinessKey, designFontReadinessKey } from './exportReadine
 import {
   bindImageAssetReceipt,
   loadAreaContentBoundImage,
-  releaseImageAssetArea,
   visibleImageLayersForRuntime,
 } from './imageAssetReceipt'
 import { clearTransparentCanvasBorder } from './canvasBorder'
@@ -275,21 +274,20 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
       }
       return current
     })
-    const jobs = imageLayers
-      .map(async (layer) => {
+    void (async () => {
+      const readyImages: Array<{ layer: ImageLayer; src: string; image: HTMLImageElement; receiptKey: string }> = []
+      for (const layer of imageLayers) {
         try {
           if (!areaId) throw new Error('Image area is inactive')
           const loaded = await loadAreaContentBoundImage(areaId, activationRevision, layer)
-          return { layer, src: layer.src, image: loaded.image, receiptKey: loaded.receiptKey }
+          readyImages.push({ layer, src: layer.src, image: loaded.image, receiptKey: loaded.receiptKey })
         } catch {
-          return null
+          // A failed layer remains absent and therefore cannot satisfy bake readiness.
         }
-      })
-    void Promise.all(jobs).then((readyImages) => {
+      }
       if (!alive) return
       const m = new Map<string, ImageBits>()
       for (const readyImage of readyImages) {
-        if (!readyImage) continue
         m.set(readyImage.layer.id, {
           src: readyImage.src,
           receiptKey: readyImage.receiptKey,
@@ -303,15 +301,11 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
         )
       }
       setImgBits(m)
-    })
+    })()
     return () => {
       alive = false
     }
   }, [layers.map((l) => (l.kind === 'image' ? `${l.src}:${l.naturalWidth}:${l.naturalHeight}:${l.width}:${l.height}:${l.fit ?? 'stretch'}:${JSON.stringify(l.craft)}` : '')).join('|'), config?.meshIndex, activationRevision])
-
-  useEffect(() => () => {
-    if (areaId) releaseImageAssetArea(areaId)
-  }, [areaId])
 
   const displayHeight = useMemo(() => {
     if (!spec || displayWidth <= 0) return 300

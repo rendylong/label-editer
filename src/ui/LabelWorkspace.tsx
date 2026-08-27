@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type DragEvent, type ReactNode, type RefOb
 import type { ImageLayer, LabelAreaConfig, LabelLayer, ShapeLayer } from '../label/types'
 import { CRAFT_LABELS } from '../label/types'
 import { bytesToDataUrl } from '../label/imageSource'
+import { MAX_EMBEDDED_ASSET_BYTES } from '../label/boundedAssetBytes'
+import { imageResourceBudgetIssue, MAX_IMAGE_PIXELS_PER_LAYER } from '../label/imageResourceLimits'
+import { inspectBoundedImageBytes } from '../label/imageAssetReceipt'
 import { moveUnlockedLayer, removeUnlockedLayer, reorderUnlockedLayer, type LayerDropPlacement } from '../label/layerMutations'
 import { canonicalLayerOrderDescending } from '../label/layerOrder'
 import { nextLayerSelection } from '../label/selection'
@@ -203,6 +206,7 @@ export function LabelWorkspace(): React.JSX.Element {
   const cancelDeleteButtonRef = useRef<HTMLButtonElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const imageUploadOperationRef = useRef(0)
+  const imageUploadDecodeCancelRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     let activeAreaId = useLabelStore.getState().activeAreaId
@@ -210,10 +214,16 @@ export function LabelWorkspace(): React.JSX.Element {
       if (state.activeAreaId === activeAreaId) return
       activeAreaId = state.activeAreaId
       imageUploadOperationRef.current += 1
+      const cancelDecode = imageUploadDecodeCancelRef.current
+      imageUploadDecodeCancelRef.current = null
+      cancelDecode?.()
     })
     return () => {
       unsubscribe()
       imageUploadOperationRef.current += 1
+      const cancelDecode = imageUploadDecodeCancelRef.current
+      imageUploadDecodeCancelRef.current = null
+      cancelDecode?.()
     }
   }, [])
 
@@ -278,6 +288,9 @@ export function LabelWorkspace(): React.JSX.Element {
     const ownerState = useLabelStore.getState()
     const owner = ownerState.activeArea
     const operation = ++imageUploadOperationRef.current
+    const supersededDecode = imageUploadDecodeCancelRef.current
+    imageUploadDecodeCancelRef.current = null
+    supersededDecode?.()
     if (!owner || ownerState.activeAreaId !== owner.id) return
     const ownsOperation = (): boolean => {
       const current = useLabelStore.getState()
@@ -298,8 +311,8 @@ export function LabelWorkspace(): React.JSX.Element {
       if (ownsOperation()) flashToast('仅支持 PNG / JPG / WebP', 'error')
       return
     }
-    if (file.size > 64 * 1024 * 1024) {
-      if (ownsOperation()) flashToast('图片超过 64MB 上限', 'error')
+    if (file.size > MAX_EMBEDDED_ASSET_BYTES) {
+      if (ownsOperation()) flashToast('图片超过 20MB 上限', 'error')
       return
     }
 
@@ -311,42 +324,84 @@ export function LabelWorkspace(): React.JSX.Element {
       return
     }
     if (!ownsOperation()) return
-    const source = bytesToDataUrl(new Uint8Array(bytes), file.type || acceptedMimes[0])
+    const imageBytes = new Uint8Array(bytes)
+    const mimeType = file.type || acceptedMimes[0]
+    let verifiedDimensions: { width: number; height: number }
+    try {
+      verifiedDimensions = inspectBoundedImageBytes(imageBytes, mimeType)
+    } catch {
+      if (ownsOperation()) flashToast('图片文件结构或尺寸无效，已拒绝', 'error')
+      return
+    }
+    const source = bytesToDataUrl(imageBytes, mimeType)
     if (!ownsOperation()) return
+    const naturalWidth = verifiedDimensions.width
+    const naturalHeight = verifiedDimensions.height
+    const scale = Math.min((owner.canvas.width * 0.5) / naturalWidth, (owner.canvas.height * 0.4) / naturalHeight, 1)
+    const uuid = globalThis.crypto?.randomUUID?.()
+    const layer: ImageLayer = {
+      id: uuid ? `layer-${uuid}` : `layer-image-${Date.now().toString(36)}`,
+      kind: 'image', src: source, naturalWidth, naturalHeight,
+      width: naturalWidth * scale, height: naturalHeight * scale,
+      x: owner.canvas.width / 2, y: owner.canvas.height / 2,
+      rotation: 0, opacity: 1, visible: true, locked: false,
+      zIndex: Math.max(-1, ...owner.layers.map((candidate) => candidate.zIndex)) + 1,
+      craft: [],
+    }
+    const currentAreas = useLabelStore.getState().areas
+    const imageIssue = imageResourceBudgetIssue(currentAreas.map((candidate) => candidate.id === owner.id
+      ? { ...candidate, layers: [...candidate.layers, layer] }
+      : candidate))
+    if (imageIssue) {
+      flashToast('图片资源超出项目上限，已拒绝', 'error')
+      return
+    }
     const image = new Image()
-    image.src = source
+    let cancelDecode: (() => void) | undefined
     try {
       await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve()
-        image.onerror = () => reject(new Error('decode failed'))
+        let settled = false
+        const finish = (callback: () => void): void => {
+          if (settled) return
+          settled = true
+          if (imageUploadDecodeCancelRef.current === cancelDecode) imageUploadDecodeCancelRef.current = null
+          image.onload = null
+          image.onerror = null
+          callback()
+        }
+        cancelDecode = () => finish(() => {
+          image.src = ''
+          reject(new Error('decode cancelled'))
+        })
+        imageUploadDecodeCancelRef.current = cancelDecode
+        image.onload = () => finish(resolve)
+        image.onerror = () => finish(() => reject(new Error('decode failed')))
+        image.src = source
       })
-      if (!ownsOperation()) return
-      const naturalWidth = image.naturalWidth
-      const naturalHeight = image.naturalHeight
-      if (naturalWidth * naturalHeight > 16 * 1024 * 1024) {
-        flashToast('图片像素过大（>1600 万像素），已拒绝', 'error')
+      if (!ownsOperation()) {
+        image.onload = null
+        image.onerror = null
+        image.src = ''
         return
       }
-
-      const scale = Math.min((owner.canvas.width * 0.5) / naturalWidth, (owner.canvas.height * 0.4) / naturalHeight, 1)
-      const uuid = globalThis.crypto?.randomUUID?.()
-      const layer: ImageLayer = {
-        id: uuid ? `layer-${uuid}` : `layer-image-${Date.now().toString(36)}`,
-        kind: 'image',
-        src: source,
-        naturalWidth,
-        naturalHeight,
-        width: naturalWidth * scale,
-        height: naturalHeight * scale,
-        x: owner.canvas.width / 2,
-        y: owner.canvas.height / 2,
-        rotation: 0,
-        opacity: 1,
-        visible: true,
-        locked: false,
-        zIndex: Math.max(-1, ...owner.layers.map((candidate) => candidate.zIndex)) + 1,
-        craft: [],
+      if (image.naturalWidth !== naturalWidth || image.naturalHeight !== naturalHeight) {
+        flashToast('图片解码尺寸与文件结构不一致，已拒绝', 'error')
+        image.onload = null
+        image.onerror = null
+        image.src = ''
+        return
       }
+      if (naturalWidth * naturalHeight > MAX_IMAGE_PIXELS_PER_LAYER) {
+        flashToast('图片像素过大（>1600 万像素），已拒绝', 'error')
+        image.onload = null
+        image.onerror = null
+        image.src = ''
+        return
+      }
+      image.onload = null
+      image.onerror = null
+      image.src = ''
+
       if (!ownsOperation()) return
       let committed = false
       applyAreaOp(owner.id, (config) => {
@@ -366,7 +421,12 @@ export function LabelWorkspace(): React.JSX.Element {
       useLabelStore.getState().selectLayers([layer.id])
       flashToast('已添加图片', 'success')
     } catch {
+      image.onload = null
+      image.onerror = null
+      image.src = ''
       if (ownsOperation()) flashToast('图片解码失败', 'error')
+    } finally {
+      if (imageUploadDecodeCancelRef.current === cancelDecode) imageUploadDecodeCancelRef.current = null
     }
   }
 

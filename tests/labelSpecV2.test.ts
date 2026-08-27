@@ -17,6 +17,30 @@ const baseArea: LabelAreaConfig = {
 }
 
 describe('Label Spec v2', () => {
+  it('enforces image-layer count and aggregate decoded-pixel budgets', () => {
+    const image = (index: number, width = 8, height = 8) => ({
+      id: `image-${index}`, type: 'image', asset: `asset-${index}`,
+      x: 0.5, y: 0.5, width: 0.2, height: 0.2,
+      naturalWidth: width, naturalHeight: height,
+    })
+    const withLayers = (layers: unknown[]) => ({
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }, layers,
+      }],
+    })
+    const tooMany = withLayers(Array.from({ length: 65 }, (_, index) => image(index)))
+    expect(validateLabelSpec(tooMany).ok).toBe(false)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelSpecV2Schema)(tooMany)).toBe(false)
+
+    const aggregate = withLayers(Array.from({ length: 3 }, (_, index) => image(index, 4096, 4096)))
+    expect(validateLabelSpec(aggregate)).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ keyword: 'image-resource-budget' })],
+    })
+  })
+
   it('rejects duplicate layer ids before structured apply reaches the renderer', () => {
     const mark = { id: 'mark', type: 'shape', shape: 'rectangle', x: 0.5, y: 0.5, width: 0.4, height: 0.4 }
     const spec = {

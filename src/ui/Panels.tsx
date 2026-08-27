@@ -2,14 +2,17 @@
  * 兼容面板：旧部件树与图层列表。属性检查器已拆分到 Inspector。
  */
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useModelStore, useLabelStore, useUiStore, flashToast } from '../state/stores'
 import type { PartNode, LabelLayer, TextLayer, ImageLayer, ShapeLayer } from '../label/types'
 import { CRAFT_LABELS, FONT_STACKS } from '../label/types'
 import { bytesToDataUrl } from '../label/imageSource'
+import { MAX_EMBEDDED_ASSET_BYTES } from '../label/boundedAssetBytes'
 import { nextLayerSelection } from '../label/selection'
 import { duplicateUnlockedLayer, moveUnlockedLayer, removeUnlockedLayer } from '../label/layerMutations'
 import { canonicalLayerOrder } from '../label/layerOrder'
+import { imageResourceBudgetIssue, MAX_IMAGE_PIXELS_PER_LAYER } from '../label/imageResourceLimits'
+import { inspectBoundedImageBytes } from '../label/imageAssetReceipt'
 import { Icon } from './icons'
 
 // ── 部件树（含贴标区域分组）───────────────────────────────────────────
@@ -104,11 +107,27 @@ export function uid(): string {
 }
 
 export function LayersPanel(): React.JSX.Element {
+  const areas = useLabelStore((s) => s.areas)
   const area = useLabelStore((s) => s.activeArea)
   const selectedLayerIds = useLabelStore((s) => s.selectedLayerIds)
   const selectLayers = useLabelStore((s) => s.selectLayers)
   const applyAreaOp = useLabelStore((s) => s.applyAreaOp)
   const imgInputRef = useRef<HTMLInputElement>(null)
+  const imageDecodeCancelRef = useRef<(() => void) | null>(null)
+  const imageOperationRef = useRef(0)
+
+  useEffect(() => {
+    imageOperationRef.current += 1
+    const cancelDecode = imageDecodeCancelRef.current
+    imageDecodeCancelRef.current = null
+    cancelDecode?.()
+    return () => {
+      imageOperationRef.current += 1
+      const pendingCancel = imageDecodeCancelRef.current
+      imageDecodeCancelRef.current = null
+      pendingCancel?.()
+    }
+  }, [area])
 
   if (!area) return <div className="panel empty-hint">未激活贴标区域</div>
   const layers = area.layers
@@ -170,53 +189,101 @@ export function LayersPanel(): React.JSX.Element {
   }
 
   const addImage = async (file: File): Promise<void> => {
+    const owner = area
+    const operation = ++imageOperationRef.current
+    const supersededDecode = imageDecodeCancelRef.current
+    imageDecodeCancelRef.current = null
+    supersededDecode?.()
+    const ownsOperation = (): boolean => imageOperationRef.current === operation
+      && useLabelStore.getState().activeArea === owner
     if (!/\.(png|jpe?g|webp)$/i.test(file.name)) {
       flashToast('仅支持 PNG / JPG / WebP', 'error')
       return
     }
-    if (file.size > 64 * 1024 * 1024) {
-      flashToast('图片超过 64MB 上限', 'error')
+    if (file.size > MAX_EMBEDDED_ASSET_BYTES) {
+      flashToast('图片超过 20MB 上限', 'error')
       return
     }
-    const url = bytesToDataUrl(new Uint8Array(await file.arrayBuffer()), file.type || 'application/octet-stream')
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    if (!ownsOperation()) return
+    const mimeType = file.type || ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp' } as Record<string, string>)[file.name.split('.').pop()?.toLowerCase() ?? ''] || 'application/octet-stream'
+    let verifiedDimensions: { width: number; height: number }
+    try {
+      verifiedDimensions = inspectBoundedImageBytes(bytes, mimeType)
+    } catch {
+      flashToast('图片文件结构或尺寸无效，已拒绝', 'error')
+      return
+    }
+    const url = bytesToDataUrl(bytes, mimeType)
+    const z = Math.max(-1, ...layers.map((l) => l.zIndex)) + 1
+    const scale = Math.min((area.canvas.width * 0.5) / verifiedDimensions.width, (area.canvas.height * 0.4) / verifiedDimensions.height, 1)
+    const layer: ImageLayer = {
+      id: uid(), kind: 'image', src: url,
+      naturalWidth: verifiedDimensions.width, naturalHeight: verifiedDimensions.height,
+      width: verifiedDimensions.width * scale, height: verifiedDimensions.height * scale,
+      x: area.canvas.width / 2, y: area.canvas.height / 2,
+      rotation: 0, opacity: 1, visible: true, locked: false, zIndex: z, craft: [],
+    }
+    const imageIssue = imageResourceBudgetIssue(areas.map((candidate) => candidate.id === area.id
+      ? { ...candidate, layers: [...candidate.layers, layer] }
+      : candidate))
+    if (imageIssue) {
+      flashToast('图片资源超出项目上限，已拒绝', 'error')
+      return
+    }
     const img = new Image()
-    img.src = url
+    let cancelDecode: (() => void) | undefined
     try {
       await new Promise<void>((res, rej) => {
-        img.onload = () => res()
-        img.onerror = () => rej(new Error('解码失败'))
+        let settled = false
+        const finish = (callback: () => void): void => {
+          if (settled) return
+          settled = true
+          if (imageDecodeCancelRef.current === cancelDecode) imageDecodeCancelRef.current = null
+          img.onload = null
+          img.onerror = null
+          callback()
+        }
+        cancelDecode = () => finish(() => {
+          img.src = ''
+          rej(new Error('解码已取消'))
+        })
+        imageDecodeCancelRef.current = cancelDecode
+        img.onload = () => finish(res)
+        img.onerror = () => finish(() => rej(new Error('解码失败')))
+        img.src = url
       })
-      const px = img.naturalWidth * img.naturalHeight
-      if (px > 16 * 1024 * 1024) {
-        flashToast('图片像素过大（>1600 万像素），已拒绝', 'error')
+      if (!ownsOperation()) {
+        img.src = ''
         return
       }
-      const z = Math.max(-1, ...layers.map((l) => l.zIndex)) + 1
-      // 默认尺寸适配画布：宽 ≤ 画布 50%、高 ≤ 画布 40%，保持原图比例（避免变形/截断）
-      const scale = Math.min((area.canvas.width * 0.5) / img.naturalWidth, (area.canvas.height * 0.4) / img.naturalHeight, 1)
-      const w = img.naturalWidth * scale
-      const h = img.naturalHeight * scale
-      const layer: ImageLayer = {
-        id: uid(),
-        kind: 'image',
-        src: url,
-        naturalWidth: img.naturalWidth,
-        naturalHeight: img.naturalHeight,
-        width: w,
-        height: h,
-        x: area.canvas.width / 2,
-        y: area.canvas.height / 2,
-        rotation: 0,
-        opacity: 1,
-        visible: true,
-        locked: false,
-        zIndex: z,
-        craft: [],
+      if (img.naturalWidth !== verifiedDimensions.width || img.naturalHeight !== verifiedDimensions.height) {
+        flashToast('图片解码尺寸与文件结构不一致，已拒绝', 'error')
+        img.onload = null
+        img.onerror = null
+        img.src = ''
+        return
       }
+      const px = verifiedDimensions.width * verifiedDimensions.height
+      if (px > MAX_IMAGE_PIXELS_PER_LAYER) {
+        flashToast('图片像素过大（>1600 万像素），已拒绝', 'error')
+        img.onload = null
+        img.onerror = null
+        img.src = ''
+        return
+      }
+      img.onload = null
+      img.onerror = null
+      img.src = ''
       applyAreaOp(area.id, (cfg) => ({ ...cfg, layers: [...cfg.layers, layer] }))
       selectLayers([layer.id])
     } catch {
-      flashToast('图片解码失败', 'error')
+      img.onload = null
+      img.onerror = null
+      img.src = ''
+      if (ownsOperation()) flashToast('图片解码失败', 'error')
+    } finally {
+      if (imageDecodeCancelRef.current === cancelDecode) imageDecodeCancelRef.current = null
     }
   }
 

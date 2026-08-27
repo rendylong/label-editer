@@ -9104,15 +9104,15 @@ return errors === 0;
 validate56.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateWorkflowProjectSchema = validate71;
-const schema139 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/label-project-v3.schema.json","title":"GLB Label Editor Project v3","type":"object","additionalProperties":false,"required":["version","modelFileName","areas"],"properties":{"version":{"const":3},"modelFileName":{"type":"string"},"areas":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/area"}}},"$defs":{"finiteNumber":{"type":"number"},"color":{"type":"string","minLength":1,"maxLength":64},"vector3":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":3,"maxItems":3},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"physicalBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}},"normalizedBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"artboard":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}},"boundary":{"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}},"substrate":{"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"$ref":"#/$defs/color"},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}},"process":{"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}},"designMetrics":{"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1},"strokeWidthMm":{"type":"number","minimum":0,"maximum":10000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":10000}}},"designBinding":{"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}},"craftParams":{"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"$ref":"#/$defs/color"},"foilSpotName":{"type":"string","not":{"const":"white_underbase"}},"gradientAngle":{"$ref":"#/$defs/finiteNumber"},"highlight":{"$ref":"#/$defs/finiteNumber"},"depth":{"$ref":"#/$defs/finiteNumber"},"lightAngle":{"$ref":"#/$defs/finiteNumber"},"intensity":{"$ref":"#/$defs/finiteNumber"},"noise":{"$ref":"#/$defs/finiteNumber"},"gloss":{"$ref":"#/$defs/finiteNumber"},"strokeColor":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"}}},"craft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["foil","emboss","deboss","matte","uv","stroke"]},"params":{"$ref":"#/$defs/craftParams"}}},"craftList":{"type":"array","items":{"$ref":"#/$defs/craft"}},"commonLayer":{"type":"object","required":["id","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}},"textLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","text","fontFamily","fontSize","fontWeight","letterSpacing","lineHeight","color","align","italic","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSize":{"$ref":"#/$defs/finiteNumber"},"fontWeight":{"oneOf":[{"$ref":"#/$defs/finiteNumber"},{"enum":["normal","bold"]}]},"letterSpacing":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"color":{"$ref":"#/$defs/color"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"imageLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"$ref":"#/$defs/finiteNumber"},"naturalHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"shapeGeometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}},"shapeLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]},"layer":{"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]},"remap":{"type":"object","additionalProperties":false,"required":["mode","axis","origin","radius","wrap","offset","planarBox"],"properties":{"mode":{"enum":["cylindrical","planar"]},"axis":{"$ref":"#/$defs/vector3"},"origin":{"$ref":"#/$defs/vector3"},"radius":{"type":"number","exclusiveMinimum":0},"wrap":{"type":"number","exclusiveMinimum":0},"offset":{"$ref":"#/$defs/finiteNumber"},"mirrorU":{"type":"boolean"},"planarBox":{"type":"object","additionalProperties":false,"required":["min","max"],"properties":{"min":{"$ref":"#/$defs/vector3"},"max":{"$ref":"#/$defs/vector3"}}}}},"range":{"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"canvas":{"type":"object","additionalProperties":false,"required":["width","height","aspect"],"properties":{"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"aspect":{"type":"number","exclusiveMinimum":0}}},"paper":{"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string"},"opacity":{"type":"number","minimum":0,"maximum":1}}},"printSpec":{"type":"object","additionalProperties":false,"required":["physicalWidthMm","physicalHeightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"physicalWidthMm":{"type":"number","exclusiveMinimum":0},"physicalHeightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","items":{"type":"string","minLength":1,"not":{"const":"white_underbase"}}}}},"font":{"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}},"area":{"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"}},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}}}};
-const schema140 = {"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"}},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}};
+const schema139 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/label-project-v3.schema.json","title":"GLB Label Editor Project v3","type":"object","additionalProperties":false,"required":["version","modelFileName","areas"],"properties":{"version":{"const":3},"modelFileName":{"type":"string"},"areas":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/area"}}},"$defs":{"finiteNumber":{"type":"number"},"color":{"type":"string","minLength":1,"maxLength":64},"vector3":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":3,"maxItems":3},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"physicalBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}},"normalizedBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"artboard":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}},"boundary":{"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}},"substrate":{"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"$ref":"#/$defs/color"},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}},"process":{"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}},"designMetrics":{"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1},"strokeWidthMm":{"type":"number","minimum":0,"maximum":10000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":10000}}},"designBinding":{"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}},"craftParams":{"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"$ref":"#/$defs/color"},"foilSpotName":{"type":"string","not":{"const":"white_underbase"}},"gradientAngle":{"$ref":"#/$defs/finiteNumber"},"highlight":{"$ref":"#/$defs/finiteNumber"},"depth":{"$ref":"#/$defs/finiteNumber"},"lightAngle":{"$ref":"#/$defs/finiteNumber"},"intensity":{"$ref":"#/$defs/finiteNumber"},"noise":{"$ref":"#/$defs/finiteNumber"},"gloss":{"$ref":"#/$defs/finiteNumber"},"strokeColor":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"}}},"craft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["foil","emboss","deboss","matte","uv","stroke"]},"params":{"$ref":"#/$defs/craftParams"}}},"craftList":{"type":"array","items":{"$ref":"#/$defs/craft"}},"commonLayer":{"type":"object","required":["id","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}},"textLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","text","fontFamily","fontSize","fontWeight","letterSpacing","lineHeight","color","align","italic","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSize":{"$ref":"#/$defs/finiteNumber"},"fontWeight":{"oneOf":[{"$ref":"#/$defs/finiteNumber"},{"enum":["normal","bold"]}]},"letterSpacing":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"color":{"$ref":"#/$defs/color"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"imageLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"type":"number","minimum":1,"maximum":8192},"naturalHeight":{"type":"number","minimum":1,"maximum":8192},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"shapeGeometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}},"shapeLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]},"layer":{"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]},"remap":{"type":"object","additionalProperties":false,"required":["mode","axis","origin","radius","wrap","offset","planarBox"],"properties":{"mode":{"enum":["cylindrical","planar"]},"axis":{"$ref":"#/$defs/vector3"},"origin":{"$ref":"#/$defs/vector3"},"radius":{"type":"number","exclusiveMinimum":0},"wrap":{"type":"number","exclusiveMinimum":0},"offset":{"$ref":"#/$defs/finiteNumber"},"mirrorU":{"type":"boolean"},"planarBox":{"type":"object","additionalProperties":false,"required":["min","max"],"properties":{"min":{"$ref":"#/$defs/vector3"},"max":{"$ref":"#/$defs/vector3"}}}}},"range":{"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"canvas":{"type":"object","additionalProperties":false,"required":["width","height","aspect"],"properties":{"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"aspect":{"type":"number","exclusiveMinimum":0}}},"paper":{"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string"},"opacity":{"type":"number","minimum":0,"maximum":1}}},"printSpec":{"type":"object","additionalProperties":false,"required":["physicalWidthMm","physicalHeightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"physicalWidthMm":{"type":"number","exclusiveMinimum":0},"physicalHeightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","items":{"type":"string","minLength":1,"not":{"const":"white_underbase"}}}}},"font":{"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}},"area":{"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"},"contains":{"$ref":"#/$defs/imageLayer"},"minContains":0,"maxContains":64},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}}}};
+const schema140 = {"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"},"contains":{"$ref":"#/$defs/imageLayer"},"minContains":0,"maxContains":64},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}};
 const schema147 = {"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}};
 const schema148 = {"type":"object","additionalProperties":false,"required":["width","height","aspect"],"properties":{"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"aspect":{"type":"number","exclusiveMinimum":0}}};
 const schema149 = {"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string"},"opacity":{"type":"number","minimum":0,"maximum":1}}};
 const schema150 = {"type":"object","additionalProperties":false,"required":["physicalWidthMm","physicalHeightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"physicalWidthMm":{"type":"number","exclusiveMinimum":0},"physicalHeightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","items":{"type":"string","minLength":1,"not":{"const":"white_underbase"}}}}};
 const schema151 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
 const schema152 = {"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}};
-const schema235 = {"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}};
+const schema233 = {"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}};
 const schema143 = {"type":"number"};
 const schema141 = {"type":"object","additionalProperties":false,"required":["mode","axis","origin","radius","wrap","offset","planarBox"],"properties":{"mode":{"enum":["cylindrical","planar"]},"axis":{"$ref":"#/$defs/vector3"},"origin":{"$ref":"#/$defs/vector3"},"radius":{"type":"number","exclusiveMinimum":0},"wrap":{"type":"number","exclusiveMinimum":0},"offset":{"$ref":"#/$defs/finiteNumber"},"mirrorU":{"type":"boolean"},"planarBox":{"type":"object","additionalProperties":false,"required":["min","max"],"properties":{"min":{"$ref":"#/$defs/vector3"},"max":{"$ref":"#/$defs/vector3"}}}}};
 const schema142 = {"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":3,"maxItems":3};
@@ -12260,7 +12260,7 @@ return errors === 0;
 }
 validate87.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema196 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"$ref":"#/$defs/finiteNumber"},"naturalHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]};
+const schema196 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"type":"number","minimum":1,"maximum":8192},"naturalHeight":{"type":"number","minimum":1,"maximum":8192},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]};
 
 function validate102(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -12516,8 +12516,9 @@ errors++;
 }
 if(data.naturalWidth !== undefined){
 let data4 = data.naturalWidth;
-if(!((typeof data4 == "number") && (isFinite(data4)))){
-const err22 = {instancePath:instancePath+"/naturalWidth",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if((typeof data4 == "number") && (isFinite(data4))){
+if(data4 > 8192 || isNaN(data4)){
+const err22 = {instancePath:instancePath+"/naturalWidth",schemaPath:"#/allOf/1/properties/naturalWidth/maximum",keyword:"maximum",params:{comparison: "<=", limit: 8192},message:"must be <= 8192"};
 if(vErrors === null){
 vErrors = [err22];
 }
@@ -12526,11 +12527,8 @@ vErrors.push(err22);
 }
 errors++;
 }
-}
-if(data.naturalHeight !== undefined){
-let data5 = data.naturalHeight;
-if(!((typeof data5 == "number") && (isFinite(data5)))){
-const err23 = {instancePath:instancePath+"/naturalHeight",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data4 < 1 || isNaN(data4)){
+const err23 = {instancePath:instancePath+"/naturalWidth",schemaPath:"#/allOf/1/properties/naturalWidth/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
 if(vErrors === null){
 vErrors = [err23];
 }
@@ -12540,10 +12538,8 @@ vErrors.push(err23);
 errors++;
 }
 }
-if(data.width !== undefined){
-let data6 = data.width;
-if(!((typeof data6 == "number") && (isFinite(data6)))){
-const err24 = {instancePath:instancePath+"/width",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+else {
+const err24 = {instancePath:instancePath+"/naturalWidth",schemaPath:"#/allOf/1/properties/naturalWidth/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err24];
 }
@@ -12553,10 +12549,11 @@ vErrors.push(err24);
 errors++;
 }
 }
-if(data.height !== undefined){
-let data7 = data.height;
-if(!((typeof data7 == "number") && (isFinite(data7)))){
-const err25 = {instancePath:instancePath+"/height",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.naturalHeight !== undefined){
+let data5 = data.naturalHeight;
+if((typeof data5 == "number") && (isFinite(data5))){
+if(data5 > 8192 || isNaN(data5)){
+const err25 = {instancePath:instancePath+"/naturalHeight",schemaPath:"#/allOf/1/properties/naturalHeight/maximum",keyword:"maximum",params:{comparison: "<=", limit: 8192},message:"must be <= 8192"};
 if(vErrors === null){
 vErrors = [err25];
 }
@@ -12565,11 +12562,8 @@ vErrors.push(err25);
 }
 errors++;
 }
-}
-if(data.x !== undefined){
-let data8 = data.x;
-if(!((typeof data8 == "number") && (isFinite(data8)))){
-const err26 = {instancePath:instancePath+"/x",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data5 < 1 || isNaN(data5)){
+const err26 = {instancePath:instancePath+"/naturalHeight",schemaPath:"#/allOf/1/properties/naturalHeight/minimum",keyword:"minimum",params:{comparison: ">=", limit: 1},message:"must be >= 1"};
 if(vErrors === null){
 vErrors = [err26];
 }
@@ -12579,10 +12573,8 @@ vErrors.push(err26);
 errors++;
 }
 }
-if(data.y !== undefined){
-let data9 = data.y;
-if(!((typeof data9 == "number") && (isFinite(data9)))){
-const err27 = {instancePath:instancePath+"/y",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+else {
+const err27 = {instancePath:instancePath+"/naturalHeight",schemaPath:"#/allOf/1/properties/naturalHeight/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err27];
 }
@@ -12592,10 +12584,10 @@ vErrors.push(err27);
 errors++;
 }
 }
-if(data.rotation !== undefined){
-let data10 = data.rotation;
-if(!((typeof data10 == "number") && (isFinite(data10)))){
-const err28 = {instancePath:instancePath+"/rotation",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.width !== undefined){
+let data6 = data.width;
+if(!((typeof data6 == "number") && (isFinite(data6)))){
+const err28 = {instancePath:instancePath+"/width",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err28];
 }
@@ -12605,10 +12597,10 @@ vErrors.push(err28);
 errors++;
 }
 }
-if(data.opacity !== undefined){
-let data11 = data.opacity;
-if(!((typeof data11 == "number") && (isFinite(data11)))){
-const err29 = {instancePath:instancePath+"/opacity",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.height !== undefined){
+let data7 = data.height;
+if(!((typeof data7 == "number") && (isFinite(data7)))){
+const err29 = {instancePath:instancePath+"/height",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err29];
 }
@@ -12618,9 +12610,10 @@ vErrors.push(err29);
 errors++;
 }
 }
-if(data.visible !== undefined){
-if(typeof data.visible !== "boolean"){
-const err30 = {instancePath:instancePath+"/visible",schemaPath:"#/allOf/1/properties/visible/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(data.x !== undefined){
+let data8 = data.x;
+if(!((typeof data8 == "number") && (isFinite(data8)))){
+const err30 = {instancePath:instancePath+"/x",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err30];
 }
@@ -12630,9 +12623,10 @@ vErrors.push(err30);
 errors++;
 }
 }
-if(data.locked !== undefined){
-if(typeof data.locked !== "boolean"){
-const err31 = {instancePath:instancePath+"/locked",schemaPath:"#/allOf/1/properties/locked/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(data.y !== undefined){
+let data9 = data.y;
+if(!((typeof data9 == "number") && (isFinite(data9)))){
+const err31 = {instancePath:instancePath+"/y",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err31];
 }
@@ -12642,15 +12636,65 @@ vErrors.push(err31);
 errors++;
 }
 }
-if(data.zIndex !== undefined){
-let data14 = data.zIndex;
-if(!((typeof data14 == "number") && (isFinite(data14)))){
-const err32 = {instancePath:instancePath+"/zIndex",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.rotation !== undefined){
+let data10 = data.rotation;
+if(!((typeof data10 == "number") && (isFinite(data10)))){
+const err32 = {instancePath:instancePath+"/rotation",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err32];
 }
 else {
 vErrors.push(err32);
+}
+errors++;
+}
+}
+if(data.opacity !== undefined){
+let data11 = data.opacity;
+if(!((typeof data11 == "number") && (isFinite(data11)))){
+const err33 = {instancePath:instancePath+"/opacity",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err33];
+}
+else {
+vErrors.push(err33);
+}
+errors++;
+}
+}
+if(data.visible !== undefined){
+if(typeof data.visible !== "boolean"){
+const err34 = {instancePath:instancePath+"/visible",schemaPath:"#/allOf/1/properties/visible/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err34];
+}
+else {
+vErrors.push(err34);
+}
+errors++;
+}
+}
+if(data.locked !== undefined){
+if(typeof data.locked !== "boolean"){
+const err35 = {instancePath:instancePath+"/locked",schemaPath:"#/allOf/1/properties/locked/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+if(vErrors === null){
+vErrors = [err35];
+}
+else {
+vErrors.push(err35);
+}
+errors++;
+}
+}
+if(data.zIndex !== undefined){
+let data14 = data.zIndex;
+if(!((typeof data14 == "number") && (isFinite(data14)))){
+const err36 = {instancePath:instancePath+"/zIndex",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(vErrors === null){
+vErrors = [err36];
+}
+else {
+vErrors.push(err36);
 }
 errors++;
 }
@@ -12671,60 +12715,7 @@ if(data.processes !== undefined){
 let data17 = data.processes;
 if(Array.isArray(data17)){
 if(data17.length > 32){
-const err33 = {instancePath:instancePath+"/processes",schemaPath:"#/allOf/1/properties/processes/maxItems",keyword:"maxItems",params:{limit: 32},message:"must NOT have more than 32 items"};
-if(vErrors === null){
-vErrors = [err33];
-}
-else {
-vErrors.push(err33);
-}
-errors++;
-}
-const len0 = data17.length;
-for(let i0=0; i0<len0; i0++){
-let data18 = data17[i0];
-if(data18 && typeof data18 == "object" && !Array.isArray(data18)){
-if(data18.process === undefined){
-const err34 = {instancePath:instancePath+"/processes/" + i0,schemaPath:"#/$defs/process/required",keyword:"required",params:{missingProperty: "process"},message:"must have required property '"+"process"+"'"};
-if(vErrors === null){
-vErrors = [err34];
-}
-else {
-vErrors.push(err34);
-}
-errors++;
-}
-for(const key1 in data18){
-if(!(((key1 === "process") || (key1 === "spotName")) || (key1 === "requiredMask"))){
-const err35 = {instancePath:instancePath+"/processes/" + i0,schemaPath:"#/$defs/process/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
-if(vErrors === null){
-vErrors = [err35];
-}
-else {
-vErrors.push(err35);
-}
-errors++;
-}
-}
-if(data18.process !== undefined){
-let data19 = data18.process;
-if(!(((((((((((data19 === "screen_print") || (data19 === "pad_print")) || (data19 === "digital_print")) || (data19 === "offset_print")) || (data19 === "white_underbase")) || (data19 === "varnish")) || (data19 === "hot_stamp_foil")) || (data19 === "emboss")) || (data19 === "deboss")) || (data19 === "in_mold")) || (data19 === "batch_code"))){
-const err36 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema184.properties.process.enum},message:"must be equal to one of the allowed values"};
-if(vErrors === null){
-vErrors = [err36];
-}
-else {
-vErrors.push(err36);
-}
-errors++;
-}
-}
-if(data18.spotName !== undefined){
-let data20 = data18.spotName;
-const _errs52 = errors;
-const _errs53 = errors;
-if("white_underbase" !== data20){
-const err37 = {};
+const err37 = {instancePath:instancePath+"/processes",schemaPath:"#/allOf/1/properties/processes/maxItems",keyword:"maxItems",params:{limit: 32},message:"must NOT have more than 32 items"};
 if(vErrors === null){
 vErrors = [err37];
 }
@@ -12733,9 +12724,12 @@ vErrors.push(err37);
 }
 errors++;
 }
-var valid15 = _errs53 === errors;
-if(valid15){
-const err38 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/not",keyword:"not",params:{},message:"must NOT be valid"};
+const len0 = data17.length;
+for(let i0=0; i0<len0; i0++){
+let data18 = data17[i0];
+if(data18 && typeof data18 == "object" && !Array.isArray(data18)){
+if(data18.process === undefined){
+const err38 = {instancePath:instancePath+"/processes/" + i0,schemaPath:"#/$defs/process/required",keyword:"required",params:{missingProperty: "process"},message:"must have required property '"+"process"+"'"};
 if(vErrors === null){
 vErrors = [err38];
 }
@@ -12744,20 +12738,9 @@ vErrors.push(err38);
 }
 errors++;
 }
-else {
-errors = _errs52;
-if(vErrors !== null){
-if(_errs52){
-vErrors.length = _errs52;
-}
-else {
-vErrors = null;
-}
-}
-}
-if(typeof data20 === "string"){
-if(func1(data20) > 128){
-const err39 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+for(const key1 in data18){
+if(!(((key1 === "process") || (key1 === "spotName")) || (key1 === "requiredMask"))){
+const err39 = {instancePath:instancePath+"/processes/" + i0,schemaPath:"#/$defs/process/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err39];
 }
@@ -12766,8 +12749,11 @@ vErrors.push(err39);
 }
 errors++;
 }
-if(func1(data20) < 1){
-const err40 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+}
+if(data18.process !== undefined){
+let data19 = data18.process;
+if(!(((((((((((data19 === "screen_print") || (data19 === "pad_print")) || (data19 === "digital_print")) || (data19 === "offset_print")) || (data19 === "white_underbase")) || (data19 === "varnish")) || (data19 === "hot_stamp_foil")) || (data19 === "emboss")) || (data19 === "deboss")) || (data19 === "in_mold")) || (data19 === "batch_code"))){
+const err40 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema184.properties.process.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err40];
 }
@@ -12777,8 +12763,12 @@ vErrors.push(err40);
 errors++;
 }
 }
-else {
-const err41 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data18.spotName !== undefined){
+let data20 = data18.spotName;
+const _errs50 = errors;
+const _errs51 = errors;
+if("white_underbase" !== data20){
+const err41 = {};
 if(vErrors === null){
 vErrors = [err41];
 }
@@ -12787,11 +12777,9 @@ vErrors.push(err41);
 }
 errors++;
 }
-}
-if(data18.requiredMask !== undefined){
-let data21 = data18.requiredMask;
-if(!(((((data21 === "color") || (data21 === "metalness")) || (data21 === "roughness")) || (data21 === "bump")) || (data21 === "white_underbase"))){
-const err42 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema184.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+var valid13 = _errs51 === errors;
+if(valid13){
+const err42 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/not",keyword:"not",params:{},message:"must NOT be valid"};
 if(vErrors === null){
 vErrors = [err42];
 }
@@ -12800,10 +12788,20 @@ vErrors.push(err42);
 }
 errors++;
 }
-}
+else {
+errors = _errs50;
+if(vErrors !== null){
+if(_errs50){
+vErrors.length = _errs50;
 }
 else {
-const err43 = {instancePath:instancePath+"/processes/" + i0,schemaPath:"#/$defs/process/type",keyword:"type",params:{type: "object"},message:"must be object"};
+vErrors = null;
+}
+}
+}
+if(typeof data20 === "string"){
+if(func1(data20) > 128){
+const err43 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
 if(vErrors === null){
 vErrors = [err43];
 }
@@ -12812,10 +12810,8 @@ vErrors.push(err43);
 }
 errors++;
 }
-}
-}
-else {
-const err44 = {instancePath:instancePath+"/processes",schemaPath:"#/allOf/1/properties/processes/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(func1(data20) < 1){
+const err44 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err44];
 }
@@ -12825,9 +12821,8 @@ vErrors.push(err44);
 errors++;
 }
 }
-}
 else {
-const err45 = {instancePath,schemaPath:"#/allOf/1/type",keyword:"type",params:{type: "object"},message:"must be object"};
+const err45 = {instancePath:instancePath+"/processes/" + i0+"/spotName",schemaPath:"#/$defs/process/properties/spotName/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err45];
 }
@@ -12836,13 +12831,62 @@ vErrors.push(err45);
 }
 errors++;
 }
+}
+if(data18.requiredMask !== undefined){
+let data21 = data18.requiredMask;
+if(!(((((data21 === "color") || (data21 === "metalness")) || (data21 === "roughness")) || (data21 === "bump")) || (data21 === "white_underbase"))){
+const err46 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema184.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+if(vErrors === null){
+vErrors = [err46];
+}
+else {
+vErrors.push(err46);
+}
+errors++;
+}
+}
+}
+else {
+const err47 = {instancePath:instancePath+"/processes/" + i0,schemaPath:"#/$defs/process/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err47];
+}
+else {
+vErrors.push(err47);
+}
+errors++;
+}
+}
+}
+else {
+const err48 = {instancePath:instancePath+"/processes",schemaPath:"#/allOf/1/properties/processes/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(vErrors === null){
+vErrors = [err48];
+}
+else {
+vErrors.push(err48);
+}
+errors++;
+}
+}
+}
+else {
+const err49 = {instancePath,schemaPath:"#/allOf/1/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err49];
+}
+else {
+vErrors.push(err49);
+}
+errors++;
+}
 validate102.errors = vErrors;
 return errors === 0;
 }
 validate102.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema207 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]};
-const schema208 = {"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}};
+const schema205 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]};
+const schema206 = {"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}};
 
 function validate109(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -12856,7 +12900,7 @@ evaluated0.items = undefined;
 }
 if(data && typeof data == "object" && !Array.isArray(data)){
 for(const key0 in data){
-if(!(func23.call(schema208.properties, key0))){
+if(!(func23.call(schema206.properties, key0))){
 const err0 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err0];
@@ -13335,7 +13379,7 @@ vErrors.push(err21);
 errors++;
 }
 for(const key0 in data){
-if(!(func23.call(schema207.allOf[1].properties, key0))){
+if(!(func23.call(schema205.allOf[1].properties, key0))){
 const err22 = {instancePath,schemaPath:"#/allOf/1/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err22];
@@ -13386,7 +13430,7 @@ errors++;
 if(data.shape !== undefined){
 let data3 = data.shape;
 if(!((((((((((((((data3 === "rectangle") || (data3 === "ellipse")) || (data3 === "triangle")) || (data3 === "diamond")) || (data3 === "polygon")) || (data3 === "star")) || (data3 === "line")) || (data3 === "wave")) || (data3 === "burst")) || (data3 === "cross")) || (data3 === "bracket")) || (data3 === "dot-grid")) || (data3 === "frame")) || (data3 === "path"))){
-const err26 = {instancePath:instancePath+"/shape",schemaPath:"#/allOf/1/properties/shape/enum",keyword:"enum",params:{allowedValues: schema207.allOf[1].properties.shape.enum},message:"must be equal to one of the allowed values"};
+const err26 = {instancePath:instancePath+"/shape",schemaPath:"#/allOf/1/properties/shape/enum",keyword:"enum",params:{allowedValues: schema205.allOf[1].properties.shape.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err26];
 }
@@ -13661,7 +13705,7 @@ errors++;
 if(data.fillRule !== undefined){
 let data17 = data.fillRule;
 if(!((data17 === "nonzero") || (data17 === "evenodd"))){
-const err48 = {instancePath:instancePath+"/fillRule",schemaPath:"#/allOf/1/properties/fillRule/enum",keyword:"enum",params:{allowedValues: schema207.allOf[1].properties.fillRule.enum},message:"must be equal to one of the allowed values"};
+const err48 = {instancePath:instancePath+"/fillRule",schemaPath:"#/allOf/1/properties/fillRule/enum",keyword:"enum",params:{allowedValues: schema205.allOf[1].properties.fillRule.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err48];
 }
@@ -15405,9 +15449,32 @@ vErrors = vErrors === null ? validate86.errors : vErrors.concat(validate86.error
 errors = vErrors.length;
 }
 }
+const _errs91 = errors;
+const len2 = data40.length;
+let valid21 = true;
+if(data40.length > 0){
+let count0 = 0;
+for(let i2=0; i2<len2; i2++){
+const _errs92 = errors;
+if(!(validate102(data40[i2], {instancePath:instancePath+"/layers/" + i2,parentData:data40,parentDataProperty:i2,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate102.errors : vErrors.concat(validate102.errors);
+errors = vErrors.length;
 }
-else {
-const err111 = {instancePath:instancePath+"/layers",schemaPath:"#/properties/layers/type",keyword:"type",params:{type: "array"},message:"must be array"};
+var _valid1 = _errs92 === errors;
+if(_valid1){
+count0++;
+if(count0 > 64){
+valid21 = false;
+break;
+}
+if(count0 >= 0){
+valid21 = true;
+}
+}
+}
+}
+if(!valid21){
+const err111 = {instancePath:instancePath+"/layers",schemaPath:"#/properties/layers/contains",keyword:"contains",params:{minContains: 0, maxContains: 64},message:"must contain at least 0 and no more than 64 valid item(s)"};
 if(vErrors === null){
 vErrors = [err111];
 }
@@ -15416,12 +15483,20 @@ vErrors.push(err111);
 }
 errors++;
 }
+else {
+errors = _errs91;
+if(vErrors !== null){
+if(_errs91){
+vErrors.length = _errs91;
 }
-if(data.globalCraft !== undefined){
-let data42 = data.globalCraft;
-if(data42 && typeof data42 == "object" && !Array.isArray(data42)){
-if(data42.craft === undefined){
-const err112 = {instancePath:instancePath+"/globalCraft",schemaPath:"#/properties/globalCraft/required",keyword:"required",params:{missingProperty: "craft"},message:"must have required property '"+"craft"+"'"};
+else {
+vErrors = null;
+}
+}
+}
+}
+else {
+const err112 = {instancePath:instancePath+"/layers",schemaPath:"#/properties/layers/type",keyword:"type",params:{type: "array"},message:"must be array"};
 if(vErrors === null){
 vErrors = [err112];
 }
@@ -15430,9 +15505,12 @@ vErrors.push(err112);
 }
 errors++;
 }
-for(const key6 in data42){
-if(!(key6 === "craft")){
-const err113 = {instancePath:instancePath+"/globalCraft",schemaPath:"#/properties/globalCraft/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key6},message:"must NOT have additional properties"};
+}
+if(data.globalCraft !== undefined){
+let data43 = data.globalCraft;
+if(data43 && typeof data43 == "object" && !Array.isArray(data43)){
+if(data43.craft === undefined){
+const err113 = {instancePath:instancePath+"/globalCraft",schemaPath:"#/properties/globalCraft/required",keyword:"required",params:{missingProperty: "craft"},message:"must have required property '"+"craft"+"'"};
 if(vErrors === null){
 vErrors = [err113];
 }
@@ -15441,16 +15519,9 @@ vErrors.push(err113);
 }
 errors++;
 }
-}
-if(data42.craft !== undefined){
-if(!(validate89(data42.craft, {instancePath:instancePath+"/globalCraft/craft",parentData:data42,parentDataProperty:"craft",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
-errors = vErrors.length;
-}
-}
-}
-else {
-const err114 = {instancePath:instancePath+"/globalCraft",schemaPath:"#/properties/globalCraft/type",keyword:"type",params:{type: "object"},message:"must be object"};
+for(const key6 in data43){
+if(!(key6 === "craft")){
+const err114 = {instancePath:instancePath+"/globalCraft",schemaPath:"#/properties/globalCraft/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key6},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err114];
 }
@@ -15460,15 +15531,15 @@ vErrors.push(err114);
 errors++;
 }
 }
-if(data.fonts !== undefined){
-let data44 = data.fonts;
-if(Array.isArray(data44)){
-const len2 = data44.length;
-for(let i2=0; i2<len2; i2++){
-let data45 = data44[i2];
-if(data45 && typeof data45 == "object" && !Array.isArray(data45)){
-if(data45.name === undefined){
-const err115 = {instancePath:instancePath+"/fonts/" + i2,schemaPath:"#/$defs/font/required",keyword:"required",params:{missingProperty: "name"},message:"must have required property '"+"name"+"'"};
+if(data43.craft !== undefined){
+if(!(validate89(data43.craft, {instancePath:instancePath+"/globalCraft/craft",parentData:data43,parentDataProperty:"craft",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
+errors = vErrors.length;
+}
+}
+}
+else {
+const err115 = {instancePath:instancePath+"/globalCraft",schemaPath:"#/properties/globalCraft/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err115];
 }
@@ -15477,8 +15548,16 @@ vErrors.push(err115);
 }
 errors++;
 }
-if(data45.dataUrl === undefined){
-const err116 = {instancePath:instancePath+"/fonts/" + i2,schemaPath:"#/$defs/font/required",keyword:"required",params:{missingProperty: "dataUrl"},message:"must have required property '"+"dataUrl"+"'"};
+}
+if(data.fonts !== undefined){
+let data45 = data.fonts;
+if(Array.isArray(data45)){
+const len3 = data45.length;
+for(let i3=0; i3<len3; i3++){
+let data46 = data45[i3];
+if(data46 && typeof data46 == "object" && !Array.isArray(data46)){
+if(data46.name === undefined){
+const err116 = {instancePath:instancePath+"/fonts/" + i3,schemaPath:"#/$defs/font/required",keyword:"required",params:{missingProperty: "name"},message:"must have required property '"+"name"+"'"};
 if(vErrors === null){
 vErrors = [err116];
 }
@@ -15487,9 +15566,8 @@ vErrors.push(err116);
 }
 errors++;
 }
-for(const key7 in data45){
-if(!((key7 === "name") || (key7 === "dataUrl"))){
-const err117 = {instancePath:instancePath+"/fonts/" + i2,schemaPath:"#/$defs/font/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key7},message:"must NOT have additional properties"};
+if(data46.dataUrl === undefined){
+const err117 = {instancePath:instancePath+"/fonts/" + i3,schemaPath:"#/$defs/font/required",keyword:"required",params:{missingProperty: "dataUrl"},message:"must have required property '"+"dataUrl"+"'"};
 if(vErrors === null){
 vErrors = [err117];
 }
@@ -15498,12 +15576,9 @@ vErrors.push(err117);
 }
 errors++;
 }
-}
-if(data45.name !== undefined){
-let data46 = data45.name;
-if(typeof data46 === "string"){
-if(func1(data46) < 1){
-const err118 = {instancePath:instancePath+"/fonts/" + i2+"/name",schemaPath:"#/$defs/font/properties/name/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+for(const key7 in data46){
+if(!((key7 === "name") || (key7 === "dataUrl"))){
+const err118 = {instancePath:instancePath+"/fonts/" + i3,schemaPath:"#/$defs/font/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key7},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err118];
 }
@@ -15513,8 +15588,11 @@ vErrors.push(err118);
 errors++;
 }
 }
-else {
-const err119 = {instancePath:instancePath+"/fonts/" + i2+"/name",schemaPath:"#/$defs/font/properties/name/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data46.name !== undefined){
+let data47 = data46.name;
+if(typeof data47 === "string"){
+if(func1(data47) < 1){
+const err119 = {instancePath:instancePath+"/fonts/" + i3+"/name",schemaPath:"#/$defs/font/properties/name/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err119];
 }
@@ -15524,11 +15602,8 @@ vErrors.push(err119);
 errors++;
 }
 }
-if(data45.dataUrl !== undefined){
-let data47 = data45.dataUrl;
-if(typeof data47 === "string"){
-if(func1(data47) < 1){
-const err120 = {instancePath:instancePath+"/fonts/" + i2+"/dataUrl",schemaPath:"#/$defs/font/properties/dataUrl/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+else {
+const err120 = {instancePath:instancePath+"/fonts/" + i3+"/name",schemaPath:"#/$defs/font/properties/name/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err120];
 }
@@ -15538,8 +15613,11 @@ vErrors.push(err120);
 errors++;
 }
 }
-else {
-const err121 = {instancePath:instancePath+"/fonts/" + i2+"/dataUrl",schemaPath:"#/$defs/font/properties/dataUrl/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data46.dataUrl !== undefined){
+let data48 = data46.dataUrl;
+if(typeof data48 === "string"){
+if(func1(data48) < 1){
+const err121 = {instancePath:instancePath+"/fonts/" + i3+"/dataUrl",schemaPath:"#/$defs/font/properties/dataUrl/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err121];
 }
@@ -15549,9 +15627,8 @@ vErrors.push(err121);
 errors++;
 }
 }
-}
 else {
-const err122 = {instancePath:instancePath+"/fonts/" + i2,schemaPath:"#/$defs/font/type",keyword:"type",params:{type: "object"},message:"must be object"};
+const err122 = {instancePath:instancePath+"/fonts/" + i3+"/dataUrl",schemaPath:"#/$defs/font/properties/dataUrl/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err122];
 }
@@ -15563,7 +15640,7 @@ errors++;
 }
 }
 else {
-const err123 = {instancePath:instancePath+"/fonts",schemaPath:"#/properties/fonts/type",keyword:"type",params:{type: "array"},message:"must be array"};
+const err123 = {instancePath:instancePath+"/fonts/" + i3,schemaPath:"#/$defs/font/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err123];
 }
@@ -15573,9 +15650,9 @@ vErrors.push(err123);
 errors++;
 }
 }
-if(data.referenceVisible !== undefined){
-if(typeof data.referenceVisible !== "boolean"){
-const err124 = {instancePath:instancePath+"/referenceVisible",schemaPath:"#/properties/referenceVisible/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
+}
+else {
+const err124 = {instancePath:instancePath+"/fonts",schemaPath:"#/properties/fonts/type",keyword:"type",params:{type: "array"},message:"must be array"};
 if(vErrors === null){
 vErrors = [err124];
 }
@@ -15585,10 +15662,9 @@ vErrors.push(err124);
 errors++;
 }
 }
-if(data.axisMin !== undefined){
-let data49 = data.axisMin;
-if(!((typeof data49 == "number") && (isFinite(data49)))){
-const err125 = {instancePath:instancePath+"/axisMin",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data.referenceVisible !== undefined){
+if(typeof data.referenceVisible !== "boolean"){
+const err125 = {instancePath:instancePath+"/referenceVisible",schemaPath:"#/properties/referenceVisible/type",keyword:"type",params:{type: "boolean"},message:"must be boolean"};
 if(vErrors === null){
 vErrors = [err125];
 }
@@ -15598,10 +15674,10 @@ vErrors.push(err125);
 errors++;
 }
 }
-if(data.axisMax !== undefined){
-let data50 = data.axisMax;
+if(data.axisMin !== undefined){
+let data50 = data.axisMin;
 if(!((typeof data50 == "number") && (isFinite(data50)))){
-const err126 = {instancePath:instancePath+"/axisMax",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
+const err126 = {instancePath:instancePath+"/axisMin",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err126];
 }
@@ -15611,14 +15687,27 @@ vErrors.push(err126);
 errors++;
 }
 }
-}
-else {
-const err127 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.axisMax !== undefined){
+let data51 = data.axisMax;
+if(!((typeof data51 == "number") && (isFinite(data51)))){
+const err127 = {instancePath:instancePath+"/axisMax",schemaPath:"#/$defs/finiteNumber/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err127];
 }
 else {
 vErrors.push(err127);
+}
+errors++;
+}
+}
+}
+else {
+const err128 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err128];
+}
+else {
+vErrors.push(err128);
 }
 errors++;
 }

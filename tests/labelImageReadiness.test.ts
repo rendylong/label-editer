@@ -337,4 +337,38 @@ describe('LabelCanvas image readiness ownership', () => {
     await act(async () => { await exportPng() })
     expect(useLabelStore.getState().bakeMap[config.id]?.whiteUnderbase).toBeDefined()
   })
+
+  it('retains every image receipt while multi-area waitForBakes-style activation visits each area', async () => {
+    const first = area('multi-first.png')
+    const second = area('multi-second.png')
+    useLabelStore.getState().addArea(first)
+    await act(async () => root.render(createElement(LabelCanvas, { displayWidth: 400 })))
+    await act(async () => {
+      DeferredImage.instances[0].resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      vi.advanceTimersByTime(300)
+    })
+    await act(async () => frames.splice(0).forEach((callback) => callback(300)))
+    const firstBake = useLabelStore.getState().bakeMap[first.id]
+    expect(isBakeAssetReadyForArea(useLabelStore.getState().areas[0], firstBake)).toBe(true)
+
+    await act(async () => useLabelStore.getState().addArea(second))
+    expect(DeferredImage.instances).toHaveLength(2)
+    await act(async () => {
+      DeferredImage.instances[1].resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      vi.advanceTimersByTime(300)
+    })
+    await act(async () => frames.splice(0).forEach((callback) => callback(600)))
+
+    const state = useLabelStore.getState()
+    expect(isBakeAssetReadyForArea(state.areas[0], state.bakeMap[first.id])).toBe(true)
+    expect(isBakeAssetReadyForArea(state.areas[1], state.bakeMap[second.id])).toBe(true)
+
+    await act(async () => useLabelStore.getState().activateArea(first.id))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(DeferredImage.instances).toHaveLength(2)
+  })
 })

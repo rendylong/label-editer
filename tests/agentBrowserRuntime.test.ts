@@ -9,7 +9,7 @@ import { registerAgentPreviewCapture } from '../src/agent/previewCapture'
 import type { QcCameraMetadata, ReviewEvidenceRequest, ReviewViewRequest } from '../src/agent/contracts'
 import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
-import { designAssetReadinessKey, designFontReadinessKey } from '../src/label/exportReadiness'
+import { designAssetReadinessKey, designFontReadinessKey, isBakeAssetReadyForArea } from '../src/label/exportReadiness'
 import { beginImageAssetLoad, bindImageAssetReceipt } from '../src/label/imageAssetReceipt'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
@@ -285,6 +285,7 @@ describe('browser Agent QC runtime', () => {
   afterEach(() => {
     disposeCapture?.()
     disposeCapture = undefined
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -420,6 +421,59 @@ describe('browser Agent QC runtime', () => {
     expect(result).toMatchObject({ ok: true, operation: 'render_qc_evidence' })
     expect(capturedBakes.length).toBeGreaterThan(0)
     expect(capturedBakes.every((captured) => captured === replacement)).toBe(true)
+  })
+
+  it('waitForBakes keeps both image-area receipts ready while it activates multiple areas', async () => {
+    const makeImageArea = (id: string, src: string): LabelAreaConfig => ({
+      ...area(), id, name: id, layers: [{
+        id: `image-${id}`, kind: 'image', src, naturalWidth: 2, naturalHeight: 1,
+        width: 1, height: 1, x: 1, y: 1, rotation: 0, opacity: 1,
+        visible: true, locked: false, zIndex: 0, craft: [],
+        processes: [{ process: 'screen_print' }],
+      }], undoStack: [], redoStack: [],
+    })
+    const first = makeImageArea('image-front', '/front.png')
+    const second = makeImageArea('image-back', '/back.png')
+    const receiptFor = (owner: LabelAreaConfig) => ({ [owner.layers[0].id]: `receipt-${owner.id}` })
+    useLabelStore.setState({
+      ...useLabelStore.getInitialState(), areas: [first, second], activeAreaId: null, activeArea: null,
+      bakeMap: {
+        [first.id]: bake(first, channelCanvas(255, 42), receiptFor(first)),
+        [second.id]: bake(second, channelCanvas(255, 42), receiptFor(second)),
+      },
+    }, true)
+    for (const owner of [first, second]) {
+      const layer = owner.layers[0]
+      if (layer.kind !== 'image') throw new Error('fixture must remain an image')
+      bindImageAssetReceipt(owner.id, layer.id, layer.src, layer.naturalWidth, layer.naturalHeight, receiptFor(owner)[layer.id])
+    }
+    const originalActivateArea = useLabelStore.getState().activateArea
+    let version = 10
+    useLabelStore.setState({
+      activateArea: (id) => {
+        originalActivateArea(id)
+        if (id === null) return
+        const owner = useLabelStore.getState().areas.find((candidate) => candidate.id === id)!
+        useLabelStore.getState().setBake(id, {
+          ...bake(owner, channelCanvas(255, 42), receiptFor(owner)), version: version++,
+        })
+      },
+    })
+    let frameTime = 0
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frameTime += 120
+      queueMicrotask(() => callback(frameTime))
+      return frameTime
+    })
+    vi.spyOn(performance, 'now').mockImplementation(() => frameTime)
+
+    const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .waitForReady({ timeoutMs: 2_000 })
+
+    expect(result).toMatchObject({ ok: true, operation: 'wait_for_ready', data: { imagesReady: true, bakesReady: true } })
+    const state = useLabelStore.getState()
+    expect(isBakeAssetReadyForArea(state.areas[0], state.bakeMap[first.id])).toBe(true)
+    expect(isBakeAssetReadyForArea(state.areas[1], state.bakeMap[second.id])).toBe(true)
   })
 
   it('returns a structured issue when a required craft channel has no contribution', async () => {
@@ -764,6 +818,8 @@ describe('browser Agent clean production review runtime', () => {
     failStageAt?: number
     onCommit?: () => void
     onAbort?: () => void
+    onFinalize?: () => void
+    finalizeResponse?: (url: URL, batchId: string, generation: number) => Response | Promise<Response>
   } = {}) {
     const staged = new Map<string, { bytes: Uint8Array; resultId: string; descriptor: Record<string, unknown> }>()
     const leases = new Map<string, { leaseToken: string; generation: number; expiresAt: number }>()
@@ -803,7 +859,9 @@ describe('browser Agent clean production review runtime', () => {
       if (init?.method === 'POST' && id === 'finalize') {
         const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
         const lease = leases.get(batchId)!
-        return jsonAt(url, 200, { ok: true, batchId, generation: lease.generation, finalized: true })
+        options.onFinalize?.()
+        return options.finalizeResponse?.(url, batchId, lease.generation)
+          ?? jsonAt(url, 200, { ok: true, batchId, generation: lease.generation, finalized: true })
       }
       if (init?.method === 'GET') {
         options.onReadback?.()
@@ -886,6 +944,39 @@ describe('browser Agent clean production review runtime', () => {
       .filter(([, init]) => init?.method === 'PUT')
       .map(([input]) => new URL(String(input), window.location.origin).pathname)
     expect(new Set(putPaths).size).toBe(10)
+  })
+
+  it('returns success after the final live barrier without awaiting an irreversible finalize acknowledgement', async () => {
+    const { request } = reviewFixture()
+    registerReviewCapture()
+    let releaseFinalize: (() => void) | undefined
+    const readbacksComplete = deferred()
+    let readbackCount = 0
+    let finalizeCalls = 0
+    acceptUploads([], {
+      onReadback: () => {
+        readbackCount += 1
+        if (readbackCount === 5) readbacksComplete.resolve()
+      },
+      onFinalize: () => { finalizeCalls += 1 },
+      finalizeResponse: (url, batchId, generation) => new Promise<Response>((resolve) => {
+        releaseFinalize = () => resolve(jsonAt(url, 200, { ok: true, batchId, generation, finalized: true }))
+      }),
+    })
+
+    const rendering = createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)
+    await readbacksComplete.promise
+    const completion = await Promise.race([
+      rendering.then(() => 'returned' as const),
+      new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 30)),
+    ])
+    releaseFinalize?.()
+    const result = await rendering
+
+    expect(completion).toBe('returned')
+    expect(finalizeCalls).toBe(0)
+    expect(result).toMatchObject({ ok: true, operation: 'render_review_evidence' })
   })
 
   it('fails a competing server lease without staging or aborting another runtime transaction', async () => {
