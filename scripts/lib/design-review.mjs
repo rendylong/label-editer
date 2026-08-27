@@ -240,7 +240,7 @@ function renderLayer(layer, area, options) {
   const anchorY = bounds.y + (layer.anchor === 'center' ? bounds.height / 2 : 0)
   const resolved = resolvePortableLayerTransform({ x: anchorX, y: anchorY, rotation: layer.rotation, width: renderWidth, height: renderHeight, anchor: layer.anchor, baselineFromTop })
   const transform = layer.rotation ? `rotate(${cssNumber(layer.rotation)}deg)` : ''
-  const style = `left:${cssNumber(resolved.origin.x + resolved.box.x)}px;top:${cssNumber(resolved.origin.y + resolved.box.y)}px;width:${cssNumber(renderWidth)}px;height:${cssNumber(renderHeight)}px;opacity:${cssNumber(layer.opacity)};z-index:${layer.zIndex};transform-origin:${cssNumber(-resolved.box.x)}px ${cssNumber(-resolved.box.y)}px;${transform ? `transform:${transform};` : ''}`
+  const style = `left:${cssNumber(resolved.origin.x + resolved.box.x)}px;top:${cssNumber(resolved.origin.y + resolved.box.y)}px;width:${cssNumber(renderWidth)}px;height:${cssNumber(renderHeight)}px;opacity:${cssNumber(layer.opacity)};transform-origin:${cssNumber(-resolved.box.x)}px ${cssNumber(-resolved.box.y)}px;${transform ? `transform:${transform};` : ''}`
   let content = ''
   if (layer.kind === 'text') {
     const fontFamily = layer.fontAsset ? `"review-font-${layer.fontAsset}"` : cssFontStack(layer.fontStack)
@@ -282,7 +282,9 @@ function renderArea(area, options) {
       : filmSubstrate
         ? `<div class="carrier-film-extent" style="opacity:${cssNumber(area.substrate.opacity)};${boundaryStyle(area, options.pxPerMm)}"></div>`
         : ''
-  const layers = area.carrier === 'bare' ? '' : orderedPortableLayers(area.layers).map((layer) => renderLayer(layer, area, options)).join('')
+  const layers = area.carrier === 'bare'
+    ? ''
+    : `<div class="artwork-stack">${orderedPortableLayers(area.layers).map((layer) => renderLayer(layer, area, options)).join('')}</div>`
   const selectiveUnderbase = area.carrier === 'clear_label' && area.layers.some((layer) => layer.processes.some((process) => process.process === 'white_underbase' || process.requiredMask === 'white_underbase'))
   return `<div class="area-artboard carrier-${attr(area.carrier)}" data-area-id="${attr(area.id)}" data-carrier="${attr(area.carrier)}" data-selective-underbase="${selectiveUnderbase}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px">${substrate}${layers}</div>`
 }
@@ -315,7 +317,7 @@ export function renderBlueprintHtml(blueprint, options) {
   }).join('')
   const renderOptions = { ...options, geometry: prepared.geometry, capturePlan }
   return `<!doctype html><html lang="en" data-blueprint-revision="${revision}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Label design review ${revision}</title><style>
-${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:${PACKAGE_TOP_INSET}px ${PACKAGE_HORIZONTAL_INSET}px ${PACKAGE_BOTTOM_INSET}px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:absolute;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.text-geometry::after{content:'\\200b'}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
+${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:${PACKAGE_TOP_INSET}px ${PACKAGE_HORIZONTAL_INSET}px ${PACKAGE_BOTTOM_INSET}px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:absolute;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.artwork-stack{position:absolute;inset:0;isolation:isolate}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.text-geometry::after{content:'\\200b'}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
 </style></head><body>${renderView('front', front, renderOptions, validated.revision)}${renderView('back', back, renderOptions, validated.revision)}</body></html>`
 }
 

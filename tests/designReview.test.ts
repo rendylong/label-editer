@@ -110,6 +110,53 @@ function fakeCapture(overrides: Record<string, unknown> = {}) {
   }))
 }
 
+async function inspectChromiumAreaStack(
+  html: string,
+  points: Array<{ name: string; x: number; y: number }>,
+): Promise<Record<string, { pixel: number[]; stack: string[] }>> {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 640, height: 480 }, deviceScaleFactor: 1 })
+    await page.setContent(html, { waitUntil: 'domcontentloaded' })
+    const area = page.locator('[data-area-id="front"]')
+    const screenshot = await area.screenshot({ type: 'png', animations: 'disabled' })
+    const pixels = await page.evaluate(async ({ png, samplePoints }) => {
+      const image = new Image()
+      image.src = `data:image/png;base64,${png}`
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = image.naturalWidth
+      canvas.height = image.naturalHeight
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      if (!context) throw new Error('Canvas context is unavailable')
+      context.drawImage(image, 0, 0)
+      return Object.fromEntries(samplePoints.map(({ name, x, y }) => [
+        name,
+        [...context.getImageData(x, y, 1, 1).data],
+      ]))
+    }, { png: screenshot.toString('base64'), samplePoints: points })
+    const stacks = await area.evaluate((element, samplePoints) => {
+      const bounds = element.getBoundingClientRect()
+      return Object.fromEntries(samplePoints.map(({ name, x, y }) => {
+        const seen = new Set<Element>()
+        const stack = document.elementsFromPoint(bounds.left + x, bounds.top + y).flatMap((candidate) => {
+          const owner = candidate.closest('.art-layer,.carrier-panel,.carrier-film-extent,.carrier-boundary-path')
+          if (!owner || seen.has(owner)) return []
+          seen.add(owner)
+          if (owner.classList.contains('art-layer')) return [`layer:${owner.getAttribute('data-layer-id')}`]
+          if (owner.classList.contains('carrier-panel')) return ['carrier:opaque']
+          if (owner.classList.contains('carrier-film-extent')) return ['carrier:film']
+          return ['carrier:boundary']
+        })
+        return [name, stack]
+      }))
+    }, points)
+    return Object.fromEntries(points.map(({ name }) => [name, { pixel: pixels[name], stack: stacks[name] }]))
+  } finally {
+    await browser.close()
+  }
+}
+
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
@@ -165,6 +212,58 @@ describe('blueprint-derived design review', () => {
     }
 
     expect(html.indexOf('data-layer-id="I"')).toBeLessThan(html.indexOf('data-layer-id="i"'))
+  })
+
+  it('keeps a negative-z artwork layer above an opaque carrier in real Chromium without leaking raw z CSS', async () => {
+    const source = blueprint()
+    const base = structuredClone(source.areas[0].layers[1])
+    source.areas[0].carrier = 'applied_label'
+    source.areas[0].substrate = { kind: 'opaque', color: '#ffffff', opacity: 1, boundary: { shape: 'rectangle' } }
+    source.areas[0].layers = [{
+      ...base, id: 'negative-red', zIndex: -32768, boundsMm: { x: 0, y: 0, width: 40, height: 60 },
+      shape: 'rectangle', fill: '#ff0000', stroke: 'transparent', strokeWidthMm: 0, processes: [],
+      pathData: undefined, pathViewBox: undefined, fillRule: undefined,
+    }]
+
+    const html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
+    const layerTag = html.match(/<div class="art-layer" data-layer-id="negative-red"[^>]+>/)?.[0] ?? ''
+    const result = await inspectChromiumAreaStack(html, [{ name: 'center', x: 100, y: 150 }])
+
+    expect(html).not.toContain('<script')
+    expect(result.center.pixel).toEqual([255, 0, 0, 255])
+    expect(result.center.stack.slice(0, 2)).toEqual(['layer:negative-red', 'carrier:opaque'])
+    expect(layerTag).not.toContain('z-index:')
+  })
+
+  it('matches canonical mixed negative/positive editor order above the carrier in real Chromium', async () => {
+    const source = blueprint()
+    const base = structuredClone(source.areas[0].layers[1])
+    source.areas[0].carrier = 'applied_label'
+    source.areas[0].substrate = { kind: 'opaque', color: '#ffffff', opacity: 1, boundary: { shape: 'rectangle' } }
+    source.areas[0].layers = [{
+      ...base, id: 'positive-blue', zIndex: 32767, boundsMm: { x: 20, y: 0, width: 20, height: 60 },
+      shape: 'rectangle', fill: '#0000ff', stroke: 'transparent', strokeWidthMm: 0, processes: [],
+      pathData: undefined, pathViewBox: undefined, fillRule: undefined,
+    }, {
+      ...base, id: 'negative-red', zIndex: -32768, boundsMm: { x: 0, y: 0, width: 40, height: 60 },
+      shape: 'rectangle', fill: '#ff0000', stroke: 'transparent', strokeWidthMm: 0, processes: [],
+      pathData: undefined, pathViewBox: undefined, fillRule: undefined,
+    }]
+
+    const html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
+    const layerTags = [...html.matchAll(/<div class="art-layer"[^>]+>/g)].map((match) => match[0])
+    const result = await inspectChromiumAreaStack(html, [
+      { name: 'negativeOnly', x: 50, y: 150 },
+      { name: 'overlap', x: 150, y: 150 },
+    ])
+
+    expect(html).not.toContain('<script')
+    expect(result.negativeOnly).toEqual({ pixel: [255, 0, 0, 255], stack: ['layer:negative-red', 'carrier:opaque'] })
+    expect(result.overlap).toEqual({
+      pixel: [0, 0, 255, 255],
+      stack: ['layer:positive-blue', 'layer:negative-red', 'carrier:opaque'],
+    })
+    expect(layerTags.every((tag) => !tag.includes('z-index:'))).toBe(true)
   })
 
   it.each([

@@ -232,3 +232,36 @@
 - If a requested unlocked ordering has no representable finite Float64 rank between fixed locked barriers, the mutation fails closed and leaves the document unchanged. Ordinary equal-z and mixed-tie segments, including locked tie barriers, are covered by exact regressions.
 - The optional headful live-preview E2E remains environment-gated. The installed-like browser E2E and realistic CLI Chromium render passed.
 - Caller-supplied model inspection and Task 10 published PNG-byte validation remain outside this fix round; their prior ownership is unchanged.
+
+## Fix round 5 — isolated canonical HTML artwork stacking
+
+### RED reproduction
+
+- Command: `pnpm vitest run tests/designReview.test.ts -t "negative-z|mixed negative/positive" --reporter=verbose --testTimeout=180000`
+- Before the production change, both real-Chromium regressions failed. An opaque applied-label carrier painted over a full-area layer at `zIndex: -32768`: the sampled center pixel was `[255,255,255,255]` instead of red, and Chromium reported `carrier:opaque` above `layer:negative-red`.
+- The mixed boundary case likewise painted its negative layer below the carrier, while a `zIndex: 32767` layer remained above it. The emitted `.art-layer` tags also exposed the raw positive and negative `z-index` values despite their already-canonical DOM order.
+- The production mutation caught by these tests is restoring raw per-layer CSS z-index or failing to keep the canonical artwork group above the carrier substrate/boundary.
+
+### Change and stacking contract
+
+- `renderLayer()` no longer projects the blueprint's raw z value into CSS. The value remains approval-bearing input and drives the shared `(zIndex,id)` canonical sort, but it is not allowed to cross the design-review renderer's carrier/package stacking groups.
+- `renderArea()` places the canonically sorted layers inside one `.artwork-stack` emitted after the carrier substrate or boundary. The stack fills the area and establishes an isolated stacking context; its positioned children use canonical DOM paint order.
+- The resulting group order is package decoration, then area substrate/boundary, then every artwork layer from canonical bottom to top. Equal, minimum negative, mixed negative/positive, and maximum positive blueprint ranks therefore match Konva/mask order without allowing negative CSS stacking to hide artwork behind its carrier.
+- Added two real Chromium tests that decode an actual area screenshot back to RGBA pixels and independently inspect `document.elementsFromPoint()` order. They also prove the final HTML is script-free and that no `.art-layer` tag leaks a raw `z-index` declaration.
+
+### GREEN verification
+
+- Complete design-review suite: 1 file, 78 tests passed, including the two new Chromium pixel/order cases.
+- Affected approval/compiler/import/fidelity/carrier/mask/editor/browser/publication matrix: 14 files, 520 tests passed.
+- Full suite: 77 files passed; 1,284 tests passed and 1 environment-gated headful test skipped.
+- Production build: `pnpm build` passed; TypeScript completed and Vite transformed 225 modules. Only the existing Node externalization, mixed GLTFLoader import, and bundle-size warnings remain non-failing.
+- Packaged plugin E2E: the installed-like front/back apply/export and atomic publication flow passed in 101.38 seconds; 1 passed and 1 environment-gated headful test skipped.
+- Real CLI/Chromium fixture passed at 1600 x 1200 with 210 x 340 and 200 x 320 area captures. HTML SHA-256 is `97494a48d496f283eb147d6c7b7bab4e6a1c796bde384e2ce2fb9739bd933b57`; front is `4f14635a7ad08998d393247ecc2f2f53de0f9b88b61d28e21c65d23d5a982cdc`; back is `e06f241bdd125fc793772d34e6fbaf0781297611a9cebddfb7e7942dc46939d0`; front area is `2d2baf3c8b9e3725d0ae89910069e6ab868d08cc9a1f05f15edf38b462f608a5`; back area is `553846db90dc70bc8e2efdf16d5bb4307a6b96a945fd333f0651cc1626f79a04`; manifest is `1f96ac98da338efd06551bae73973eb60c2caf1d3eb3f7009a13da333e0077b4`.
+- The front/back PNGs were visually inspected: layout and exact placeholder copy remain visible, direct print has no invented paper panel, clear film has no opaque panel or diagnostic boundary, and diagnostic UI is absent. The generated HTML scan found no script tag, event attribute, external/file URL, host path, press-ready wording, or production-certification claim; its artwork tags contain no z-index declaration. Re-running without force returned one structured `OUTPUT_CONFLICT` envelope and exit code 9.
+- `git diff --check` passed before the report update; it is rerun immediately before commit.
+
+### Final-round residuals
+
+- The review renderer intentionally represents artwork rank through validated canonical DOM order rather than CSS z values. Future carrier or package decoration must remain outside and before `.artwork-stack`; a regression in either pixel output or hit-test order is covered by the new browser tests.
+- The optional headful live-preview E2E remains environment-gated. The installed-like browser E2E and realistic CLI Chromium render both passed.
+- Caller-supplied model inspection and Task 10 published PNG-byte validation remain outside this fix round under their previously documented owners. No load-bearing residual is known for the round-4 HTML stacking finding.
