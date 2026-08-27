@@ -15,10 +15,20 @@ const temporaryDirectories: string[] = []
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 const PNG_SHA256 = createHash('sha256').update(PNG).digest('hex')
 
+function pngCrc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff
+  for (const byte of bytes) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
 function pngWithDimensions(width: number, height: number): Buffer {
   const bytes = Buffer.from(PNG)
   bytes.writeUInt32BE(width, 16)
   bytes.writeUInt32BE(height, 20)
+  bytes.writeUInt32BE(pngCrc32(bytes.subarray(12, 29)), 29)
   return bytes
 }
 
@@ -203,6 +213,48 @@ describe('blueprint-derived design review', () => {
     expect(layerMarkup).toContain(`left:${css(editor.origin.x + editor.box.x)}px;top:${css(editor.origin.y + editor.box.y)}px`)
     expect(layerMarkup).toContain(`transform-origin:${css(-editor.box.x)}px ${css(-editor.box.y)}px`)
     expect(layerMarkup).toContain(`transform:rotate(${rotation}deg)`)
+  })
+
+  it('persists browser-resolved Arial and exact-WOFF2 text boxes for single-line center and wrapped baseline rotation', async () => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    Object.assign(source.areas[0].layers[0], { anchor: 'center', rotation: 27, fontStack: ['Arial', 'sans-serif'] })
+    const woff2 = await readFile(path.resolve('public/fonts/inter/400-normal.woff2'))
+    source.assets.push({ id: 'exact-inter', path: 'assets/exact-inter.woff2', sha256: createHash('sha256').update(woff2).digest('hex'), mimeType: 'font/woff2' })
+    Object.assign(source.areas[1].layers[0], {
+      anchor: 'baseline_center', rotation: -33, boundsMm: { x: 11, y: 12, width: 16, height: 14 },
+      text: 'wrapped exact font text across several approved lines', wrapPolicy: 'word', maxLines: 2,
+      fontStack: undefined, fontAsset: 'exact-inter',
+    })
+    const blueprintPath = await writeFixture(root, source)
+    await writeFile(path.join(root, 'assets/exact-inter.woff2'), woff2)
+
+    const result = await renderDesignReview({ blueprintPath, outputDir: path.join(root, 'resolved-text'), width: 640, height: 480, pxPerMm: 5 })
+    expect(result.html).not.toContain('<script')
+
+    for (const expected of [
+      { id: 'front-copy', anchor: 'center', anchorX: 100, anchorY: 50, rotation: 27, width: 160, lines: 1, lineHeight: 22 },
+      { id: 'back-copy', anchor: 'baseline_center', anchorX: 95, anchorY: 60, rotation: -33, width: 80, lines: 2, lineHeight: 15 },
+    ] as const) {
+      const tag = result.html.match(new RegExp(`<div class="art-layer" data-layer-id="${expected.id}"[^>]+>`))?.[0] ?? ''
+      const metric = (name: string) => Number(tag.match(new RegExp(`data-resolved-${name}="([^"]+)"`))?.[1])
+      const styleNumber = (name: string) => Number(tag.match(new RegExp(`${name}:([-0-9.]+)px`))?.[1])
+      const width = metric('text-width'); const height = metric('text-height'); const baselineFromTop = metric('baseline-from-top')
+      const resolved = resolveLayerRenderTransform({
+        x: expected.anchorX, y: expected.anchorY, rotation: expected.rotation, width, height,
+        anchor: expected.anchor, baselineFromTop,
+      })
+
+      expect(width).toBeCloseTo(expected.width, 4)
+      expect(height).toBeCloseTo(expected.lines * expected.lineHeight, 4)
+      expect(metric('line-count')).toBe(expected.lines)
+      expect(baselineFromTop).toBeGreaterThan(0)
+      expect(styleNumber('left')).toBeCloseTo(resolved.origin.x + resolved.box.x, 4)
+      expect(styleNumber('top')).toBeCloseTo(resolved.origin.y + resolved.box.y, 4)
+      const origin = tag.match(/transform-origin:([-0-9.]+)px ([-0-9.]+)px/)
+      expect(Number(origin?.[1])).toBeCloseTo(-resolved.box.x, 4)
+      expect(Number(origin?.[2])).toBeCloseTo(-resolved.box.y, 4)
+    }
   })
 
   it('applies the authoritative blueprint schema even on direct HTML rendering', () => {
@@ -397,6 +449,7 @@ describe('blueprint-derived design review', () => {
 
     expect(html).toContain('data-selective-underbase="true"')
     expect(html).toContain('selective white underbase declared')
+    expect(html).toContain('.capture-clean .carrier-film-extent{display:none}')
     expect(html).not.toContain('background:#fff')
   })
 

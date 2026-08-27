@@ -3,6 +3,7 @@ import labelSpecV2Schema from './label-spec-v2.schema.json'
 import validateV2 from './generated/labelSpecV2Validator'
 import type { CarrierMode, ProcessIntent } from './designContracts'
 import type { DesignBinding, LayerDesignMetrics, PhysicalArtboard, SubstrateSpec, TargetAspectPolicy } from '../label/types'
+import { canonicalFontStack } from '../label/fontStack'
 import { validateVectorPath } from '../label/vectorPathValidation'
 
 type UnknownRecord = Record<string, unknown>
@@ -183,6 +184,11 @@ export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
   const vectorIssues: LabelSpecIssue[] = []
   for (const [areaIndex, area] of normalized.areas.entries()) {
     for (const [layerIndex, layer] of area.layers.entries()) {
+      if (layer.type === 'text' && Array.isArray(layer.fontStack)) {
+        const fontStack = canonicalFontStack(layer.fontStack as string[])
+        layer.fontStack = fontStack
+        layer.fontFamily = fontStack[0]
+      }
       if (layer.type !== 'shape' || layer.shape !== 'path') continue
       const issue = validateVectorPath(layer.pathData, layer.pathViewBox, layer.width as number, layer.height as number)
       if (!issue) continue

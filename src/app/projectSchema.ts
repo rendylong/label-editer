@@ -3,7 +3,7 @@
 import { legacyFontId } from '../label/fontCatalog'
 import { hasValidLegacyPaperCarrierProvenance, resolveLabelPaper } from '../label/paper'
 import { validateVectorPath } from '../label/vectorPathValidation'
-import { validateFontStack } from '../label/fontStack'
+import { canonicalFontStack, validateFontStack } from '../label/fontStack'
 import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
@@ -339,9 +339,11 @@ function normalizeLayer(raw: unknown): LabelLayer {
     if (raw.writingDirection !== undefined && raw.writingDirection !== 'auto' && raw.writingDirection !== 'ltr' && raw.writingDirection !== 'rtl') layerError('writingDirection 无效')
     if (raw.language !== undefined && typeof raw.language !== 'string') layerError('language 必须是字符串')
     const layer = cloneValue(raw) as unknown as TextLayer
+    const fontStack = raw.fontStack === undefined ? undefined : canonicalFontStack(raw.fontStack as string[])
     return {
       ...layer,
-      fontFamily: legacyFontId(fontFamily),
+      fontFamily: fontStack?.[0] ?? legacyFontId(fontFamily),
+      ...(fontStack ? { fontStack } : {}),
       ...(raw.designMetrics === undefined ? {} : { designMetrics: normalizeDesignMetrics(raw.designMetrics) }),
       ...(raw.processes === undefined ? {} : { processes: normalizeProcesses(raw.processes) }),
     }

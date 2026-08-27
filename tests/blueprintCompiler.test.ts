@@ -194,6 +194,14 @@ describe('blueprint compiler', () => {
     })
   })
 
+  it('canonicalizes every approved font stack alias before editable serialization', () => {
+    const blueprint = laviraBlueprint()
+    blueprint.areas[0].layers[0].fontStack = ['Arial', 'sans-serif']
+    const layer = compileBlueprintToSpecAreas(blueprint)[0].layers[0]
+
+    expect(layer).toMatchObject({ fontFamily: 'arial', fontStack: ['arial', 'sans-serif'] })
+  })
+
   it('round-trips rgba, named, and transparent colors without rewriting source strings', () => {
     const blueprint = laviraBlueprint()
     blueprint.areas[0].layers[0].color = 'rgba(125, 63, 42, 0.72)'

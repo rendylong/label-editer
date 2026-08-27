@@ -11,6 +11,10 @@ import { CssColorField } from '../CssColorField'
 import { FontBrowser, fontVariantSupport } from '../FontBrowser'
 import { InspectorSection } from '../InspectorSection'
 
+export function selectedFontPatch(fontFamily: string): Partial<TextLayer> {
+  return { fontFamily, fontStack: undefined }
+}
+
 export function commitFreshUploadedFont(
   areaId: string,
   layerId: string,
@@ -23,7 +27,7 @@ export function commitFreshUploadedFont(
     return {
       ...config,
       fonts: [...config.fonts.filter((item) => item.name !== font.name), { name: font.name, dataUrl: font.dataUrl }],
-      layers: config.layers.map((item) => item.id === layerId ? { ...target, fontFamily: uploadedFontId(font.name) } : item),
+      layers: config.layers.map((item) => item.id === layerId ? { ...target, ...selectedFontPatch(uploadedFontId(font.name)) } : item),
     }
   })
 }
@@ -57,7 +61,7 @@ export function TextInspector({ area, layer, patch, uploadFont = uploadFontFile,
             italic={layer.italic}
             sampleText={layer.text}
             uploadedFonts={area.fonts}
-            onSelect={(fontFamily) => patch({ fontFamily })}
+            onSelect={(fontFamily) => patch(selectedFontPatch(fontFamily))}
             uploadFont={uploadFont}
             onUploadCommit={(font) => {
               commitUploadedFont(font)

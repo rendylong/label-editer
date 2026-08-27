@@ -11,7 +11,9 @@ import { validatedSvgGeometry } from './svg-path-core.mjs'
 import { resolveCustomCarrierBoundary } from './carrier-boundary-core.mjs'
 import { resolvePortableLayerTransform, fallbackTextBaselineFromTop } from './layer-transform-core.mjs'
 import { resolvePortableTextDirection } from './text-direction-core.mjs'
-import { portableFontStackCss, validatePortableFontStack } from './font-stack-core.mjs'
+import { canonicalPortableFontStack, portableFontStackCss, validatePortableFontStack } from './font-stack-core.mjs'
+import { portablePngDimensions } from './png-core.mjs'
+import { resolvePortableTextLayoutMetric } from './text-layout-core.mjs'
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024
 
@@ -162,6 +164,9 @@ function validateBlueprintSemantics(blueprint, pxPerMm = 1, geometry = { layers:
 function prepareLayoutBlueprint(blueprint, pxPerMm = 1) {
   if (!validateBlueprintSchema(blueprint)) throw schemaError('INVALID_LAYOUT_BLUEPRINT', 'Layout blueprint', validateBlueprintSchema)
   const validated = structuredClone(blueprint)
+  for (const area of validated.areas) for (const layer of area.layers) {
+    if (layer.kind === 'text' && layer.fontStack) layer.fontStack = canonicalPortableFontStack(layer.fontStack)
+  }
   const geometry = { layers: new Map(), boundaries: new Map() }
   validateBlueprintSemantics(validated, pxPerMm, geometry)
   return { blueprint: validated, geometry }
@@ -219,12 +224,15 @@ function renderShape(layer, bounds, pxPerMm, preparedGeometry) {
 function renderLayer(layer, area, options) {
   if (!layer.visible || layer.opacity <= 0) return ''
   const bounds = layerBounds(layer, area, options.pxPerMm)
-  const baselineFromTop = layer.kind === 'text' ? fallbackTextBaselineFromTop(layer.fontSizeMm * options.pxPerMm, layer.lineHeight) : bounds.height / 2
+  const textMetric = layer.kind === 'text' ? options.textMetrics?.get(layer.id) : undefined
+  const renderWidth = textMetric?.width ?? bounds.width
+  const renderHeight = textMetric?.height ?? bounds.height
+  const baselineFromTop = textMetric?.baselineFromTop ?? (layer.kind === 'text' ? fallbackTextBaselineFromTop(layer.fontSizeMm * options.pxPerMm, layer.lineHeight) : renderHeight / 2)
   const anchorX = bounds.x + (layer.anchor === 'top_center' || layer.anchor === 'center' || layer.anchor === 'baseline_center' ? bounds.width / 2 : 0)
   const anchorY = bounds.y + (layer.anchor === 'center' ? bounds.height / 2 : 0)
-  const resolved = resolvePortableLayerTransform({ x: anchorX, y: anchorY, rotation: layer.rotation, width: bounds.width, height: bounds.height, anchor: layer.anchor, baselineFromTop })
+  const resolved = resolvePortableLayerTransform({ x: anchorX, y: anchorY, rotation: layer.rotation, width: renderWidth, height: renderHeight, anchor: layer.anchor, baselineFromTop })
   const transform = layer.rotation ? `rotate(${cssNumber(layer.rotation)}deg)` : ''
-  const style = `left:${cssNumber(resolved.origin.x + resolved.box.x)}px;top:${cssNumber(resolved.origin.y + resolved.box.y)}px;width:${cssNumber(bounds.width)}px;height:${cssNumber(bounds.height)}px;opacity:${cssNumber(layer.opacity)};z-index:${layer.zIndex};transform-origin:${cssNumber(-resolved.box.x)}px ${cssNumber(-resolved.box.y)}px;${transform ? `transform:${transform};` : ''}`
+  const style = `left:${cssNumber(resolved.origin.x + resolved.box.x)}px;top:${cssNumber(resolved.origin.y + resolved.box.y)}px;width:${cssNumber(renderWidth)}px;height:${cssNumber(renderHeight)}px;opacity:${cssNumber(layer.opacity)};z-index:${layer.zIndex};transform-origin:${cssNumber(-resolved.box.x)}px ${cssNumber(-resolved.box.y)}px;${transform ? `transform:${transform};` : ''}`
   let content = ''
   if (layer.kind === 'text') {
     const fontFamily = layer.fontAsset ? `"review-font-${layer.fontAsset}"` : cssFontStack(layer.fontStack)
@@ -240,7 +248,8 @@ function renderLayer(layer, area, options) {
     const objectFit = layer.fit === 'stretch' ? 'fill' : (layer.fit ?? 'contain')
     content = asset ? `<img alt="" src="${attr(asset.dataUrl)}" style="object-fit:${objectFit}">` : ''
   } else content = renderShape(layer, bounds, options.pxPerMm, options.geometry.layers.get(layer.id))
-  return `<div class="art-layer" data-layer-id="${attr(layer.id)}" data-kind="${layer.kind}" style="${attr(style)}">${content}</div>`
+  const resolvedMetric = textMetric ? ` data-resolved-text-width="${cssNumber(textMetric.width)}" data-resolved-text-height="${cssNumber(textMetric.height)}" data-resolved-baseline-from-top="${cssNumber(textMetric.baselineFromTop)}" data-resolved-line-count="${textMetric.lineCount}"` : ''
+  return `<div class="art-layer" data-layer-id="${attr(layer.id)}" data-kind="${layer.kind}"${resolvedMetric} style="${attr(style)}">${content}</div>`
 }
 
 function boundaryStyle(area, pxPerMm) {
@@ -258,7 +267,7 @@ function renderArea(area, options) {
   const opaqueSubstrate = area.substrate?.kind === 'opaque'
   const filmSubstrate = area.substrate?.kind === 'transparent'
   const substrate = customBoundary
-    ? (() => { const geometry = options.geometry.boundaries.get(area.id); if (!geometry) return ''; return `<svg class="carrier-boundary-path" viewBox="${attr(geometry.viewBox.join(' '))}" preserveAspectRatio="none"><path d="${attr(geometry.pathData)}" fill="${opaqueSubstrate ? attr(area.substrate.color ?? '#ffffff') : 'transparent'}" fill-opacity="${cssNumber(area.substrate.opacity)}"${filmSubstrate ? ' stroke="rgba(70,110,130,.35)"' : ''}/></svg>` })()
+    ? (() => { const geometry = options.geometry.boundaries.get(area.id); if (!geometry) return ''; return `<svg class="carrier-boundary-path"${filmSubstrate ? ' data-diagnostic-film="true"' : ''} viewBox="${attr(geometry.viewBox.join(' '))}" preserveAspectRatio="none"><path d="${attr(geometry.pathData)}" fill="${opaqueSubstrate ? attr(area.substrate.color ?? '#ffffff') : 'transparent'}" fill-opacity="${cssNumber(area.substrate.opacity)}"${filmSubstrate ? ' stroke="rgba(70,110,130,.35)"' : ''}/></svg>` })()
     : opaqueSubstrate
       ? `<div class="carrier-panel carrier-panel--opaque" style="background:${attr(area.substrate.color ?? '#ffffff')};opacity:${cssNumber(area.substrate.opacity)};${boundaryStyle(area, options.pxPerMm)}"></div>`
       : filmSubstrate
@@ -295,7 +304,7 @@ export function renderBlueprintHtml(blueprint, options) {
   }).join('')
   const renderOptions = { ...options, geometry: prepared.geometry }
   return `<!doctype html><html lang="en" data-blueprint-revision="${revision}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Label design review ${revision}</title><style>
-${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry,.text-geometry{display:block;width:100%;height:100%}.text-geometry{overflow:hidden}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{border-color:rgba(70,110,130,.18)}
+${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:36px 56px 24px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:relative;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
 </style></head><body>${renderView('front', front, renderOptions, validated.revision)}${renderView('back', back, renderOptions, validated.revision)}</body></html>`
 }
 
@@ -313,11 +322,7 @@ function safeRelativePath(value, label) {
 }
 
 function pngDimensions(bytes) {
-  const data = Buffer.from(bytes)
-  if (data.length < 24 || !data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-    || data.readUInt32BE(8) !== 13 || data.subarray(12, 16).toString('ascii') !== 'IHDR') return undefined
-  const width = data.readUInt32BE(16); const height = data.readUInt32BE(20)
-  return width > 0 && height > 0 ? { width, height } : undefined
+  return portablePngDimensions(bytes)
 }
 
 function jpegDimensions(bytes) {
@@ -439,7 +444,7 @@ function assertCapture(entry, width, height, label) {
   }
 }
 
-export async function captureDesignReview({ html, blueprint, width, height, pxPerMm }) {
+export async function captureDesignReview({ html, blueprint, width, height, pxPerMm, resolveHtml }) {
   let browser
   try {
     browser = await chromium.launch({ headless: true })
@@ -454,23 +459,48 @@ export async function captureDesignReview({ html, blueprint, width, height, pxPe
     const errors = []
     page.on('console', (message) => { if (message.type() === 'error') errors.push(`console: ${message.text()}`) })
     page.on('pageerror', (error) => errors.push(`page: ${error.message}`))
+    const waitForReady = async () => {
+      await page.waitForFunction((revision) => document.documentElement.dataset.blueprintRevision === revision, blueprint.revision, { timeout: 30_000 })
+      await page.evaluate(async () => {
+        await document.fonts.ready
+        await Promise.all([...document.images].map(async (image) => {
+          if (!image.complete || image.naturalWidth === 0) await image.decode()
+          if (image.naturalWidth === 0) throw new Error('Image decode produced zero dimensions')
+        }))
+        for (const text of document.querySelectorAll('[data-font-family]')) {
+          const family = text.getAttribute('data-font-family')
+          const matchingFaces = [...document.fonts].filter((face) => face.family.replace(/^['"]|['"]$/g, '') === family)
+          if (!family || matchingFaces.length === 0 || matchingFaces.some((face) => face.status !== 'loaded')
+            || !document.fonts.check(`12px "${family}"`)) throw new Error(`Declared font failed to load: ${family ?? 'unknown'}`)
+        }
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      })
+    }
     await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-    await page.waitForFunction((revision) => document.documentElement.dataset.blueprintRevision === revision, blueprint.revision, { timeout: 30_000 })
-    await page.evaluate(async () => {
-      await document.fonts.ready
-      await Promise.all([...document.images].map(async (image) => {
-        if (!image.complete || image.naturalWidth === 0) await image.decode()
-        if (image.naturalWidth === 0) throw new Error('Image decode produced zero dimensions')
-      }))
-      for (const text of document.querySelectorAll('[data-font-family]')) {
-        const family = text.getAttribute('data-font-family')
-        const matchingFaces = [...document.fonts].filter((face) => face.family.replace(/^['"]|['"]$/g, '') === family)
-        if (!family || matchingFaces.length === 0 || matchingFaces.some((face) => face.status !== 'loaded')
-          || !document.fonts.check(`12px "${family}"`)) throw new Error(`Declared font failed to load: ${family ?? 'unknown'}`)
+    await waitForReady()
+    const rawTextMetrics = await page.evaluate(() => [...document.querySelectorAll('.art-layer[data-kind="text"]')].map((layer) => {
+      const text = layer.querySelector('.text-geometry')
+      if (!(text instanceof HTMLElement)) throw new Error('Text geometry is missing')
+      const style = getComputedStyle(text)
+      const fontSize = Number.parseFloat(style.fontSize); const lineHeight = Number.parseFloat(style.lineHeight)
+      const canvas = document.createElement('canvas'); const context = canvas.getContext('2d')
+      if (!context || !(fontSize > 0) || !(lineHeight > 0)) throw new Error('Text metrics are unavailable')
+      context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+      const reference = context.measureText('Mg')
+      return {
+        id: layer.getAttribute('data-layer-id'), width: Number.parseFloat(getComputedStyle(layer).width),
+        fontSize, lineHeight: lineHeight / fontSize, lineCount: Math.max(1, Math.round(text.scrollHeight / lineHeight)),
+        maxLines: Number(text.getAttribute('data-max-lines')),
+        ascent: reference.actualBoundingBoxAscent, descent: reference.actualBoundingBoxDescent,
       }
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
-      document.body.classList.add('capture-clean')
-    })
+    }))
+    const textMetrics = new Map(rawTextMetrics.map((metric) => [metric.id, resolvePortableTextLayoutMetric(metric)]))
+    const resolvedHtml = typeof resolveHtml === 'function' ? resolveHtml(textMetrics) : html
+    if (resolvedHtml !== html) {
+      await page.setContent(resolvedHtml, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+      await waitForReady()
+    }
+    await page.evaluate(() => { document.body.classList.add('capture-clean') })
     if (externalRequests.length > 0) throw new DesignReviewError('BROWSER_NOT_READY', `External network request blocked: ${externalRequests[0]}`)
     const capture = { areas: {} }
     for (const side of ['front', 'back']) {
@@ -489,7 +519,7 @@ export async function captureDesignReview({ html, blueprint, width, height, pxPe
     }
     if (errors.length > 0) throw new DesignReviewError('BROWSER_NOT_READY', `Browser rendering failed: ${errors.join('; ')}`)
     await context.close()
-    return capture
+    return { ...capture, resolvedHtml }
   } catch (error) {
     if (error?.code) throw error
     throw new DesignReviewError('BROWSER_NOT_READY', `Playwright design review capture failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -535,9 +565,13 @@ export async function renderDesignReview({
     throw new DesignReviewError('OUTPUT_CONFLICT', `Output already exists: ${resolvedOutputDir}`)
   }
   const { assets, references } = await resolveLocalFiles(blueprint, resolvedBlueprintPath, referencePaths)
-  const html = renderBlueprintHtml(blueprint, { width, height, pxPerMm, assets })
+  const provisionalHtml = renderBlueprintHtml(blueprint, { width, height, pxPerMm, assets })
+  const captureResult = await capture({
+    html: provisionalHtml, blueprint, areas: blueprint.areas, width, height, pxPerMm,
+    resolveHtml: (textMetrics) => renderBlueprintHtml(blueprint, { width, height, pxPerMm, assets, textMetrics }),
+  })
+  const html = capture === captureDesignReview && typeof captureResult.resolvedHtml === 'string' ? captureResult.resolvedHtml : provisionalHtml
   const htmlBytes = Buffer.from(html)
-  const captureResult = await capture({ html, blueprint, areas: blueprint.areas, width, height, pxPerMm })
   assertCapture(captureResult.front, width, height, 'front')
   assertCapture(captureResult.back, width, height, 'back')
 

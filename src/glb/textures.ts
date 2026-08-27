@@ -4,6 +4,8 @@
  */
 
 /** PNG 颜色贴图保留透明背景，GLB 材质必须使用 alpha 混合。 */
+import { parsePortablePng } from '../../scripts/lib/png-core.mjs'
+
 export function configureTransparentLabelExport(material: { setAlphaMode(mode: 'BLEND'): unknown }): void {
   material.setAlphaMode('BLEND')
 }
@@ -18,11 +20,7 @@ export function canvasToPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array>
       try {
         void blob.arrayBuffer().then((buffer) => {
           const bytes = new Uint8Array(buffer)
-          const signature = [137, 80, 78, 71, 13, 10, 26, 10]
-          if (bytes.length < signature.length || signature.some((value, index) => bytes[index] !== value)) {
-            rej(new Error('PNG 编码返回了无效数据'))
-            return
-          }
+          try { parsePortablePng(bytes) } catch (error) { rej(new Error(`PNG 编码返回了无效数据：${error instanceof Error ? error.message : String(error)}`)); return }
           res(bytes)
         }, rej)
       } catch (error) {

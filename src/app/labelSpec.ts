@@ -16,6 +16,7 @@ import type {
 } from '../label/types'
 import { validateLabelSpec } from '../agent/labelSpecSchema'
 import { assertPhysicalAreaPlacement, resolvePhysicalLayer } from './physicalLayout'
+import { canonicalFontStack } from '../label/fontStack'
 import { validateVectorPath } from '../label/vectorPathValidation'
 
 type UnknownRecord = Record<string, unknown>
@@ -121,10 +122,11 @@ function mapLayer(raw: unknown, area: LabelAreaConfig, index: number): LabelLaye
   const fontWeight = typeof input.fontWeight === 'number' || input.fontWeight === 'normal' || input.fontWeight === 'bold'
     ? input.fontWeight
     : 400
+  const fontStack = Array.isArray(input.fontStack) ? canonicalFontStack(input.fontStack as string[]) : undefined
   return {
     ...common, kind: 'text', text: typeof input.text === 'string' ? input.text : '',
-    fontFamily: typeof input.fontFamily === 'string' ? input.fontFamily : prefersArabicFont ? 'noto-sans-arabic' : 'system-sans',
-    ...(Array.isArray(input.fontStack) ? { fontStack: structuredClone(input.fontStack) as string[] } : {}),
+    fontFamily: fontStack?.[0] ?? (typeof input.fontFamily === 'string' ? input.fontFamily : prefersArabicFont ? 'noto-sans-arabic' : 'system-sans'),
+    ...(fontStack ? { fontStack } : {}),
     fontSize: Math.max(8, finite(input.fontSize, 64)), fontWeight,
     letterSpacing: finite(input.letterSpacing, 0), lineHeight: Math.max(0.5, finite(input.lineHeight, 1.2)),
     width: Math.max(8, ratio(input.width, 0.7) * area.canvas.width), color: typeof input.color === 'string' ? input.color : '#111111',

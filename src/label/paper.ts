@@ -44,6 +44,15 @@ export interface CarrierBoundaryResolution {
   invalidField?: 'substrate.boundary.pathData'
 }
 
+export interface ClearFilmDiagnosticSpec extends CarrierBoundary { nonExport: true }
+
+/** Visible editor evidence only; never substrate, color export, or PBR content. */
+export function clearFilmDiagnosticSpec(area: Pick<LabelAreaConfig, 'carrier' | 'substrate'>): ClearFilmDiagnosticSpec | undefined {
+  if (area.carrier !== 'clear_label' || area.substrate?.kind !== 'transparent' || !(area.substrate.opacity < 1)) return undefined
+  const boundary = resolveCarrierBoundary(area).boundary
+  return boundary ? { ...boundary, nonExport: true } : undefined
+}
+
 type CarrierSurfaceInput = Pick<LabelAreaConfig, 'carrier' | 'substrate' | 'paper' | 'legacyPaperCarrier'>
 
 export function hasValidLegacyPaperCarrierProvenance(area: CarrierSurfaceInput): boolean {

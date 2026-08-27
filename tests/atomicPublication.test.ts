@@ -12,10 +12,20 @@ import { renderDesignReview } from '../scripts/lib/design-review.mjs'
 const temporaryDirectories: string[] = []
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
 
+function pngCrc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff
+  for (const byte of bytes) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
 function dimensionedPng(width: number, height: number): Buffer {
   const bytes = Buffer.from(PNG)
   bytes.writeUInt32BE(width, 16)
   bytes.writeUInt32BE(height, 20)
+  bytes.writeUInt32BE(pngCrc32(bytes.subarray(12, 29)), 29)
   return bytes
 }
 

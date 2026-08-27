@@ -1,6 +1,7 @@
 import type { LayoutBlueprintArea, LayoutBlueprintLayer, LayoutBlueprintV1, PhysicalBounds } from './designContracts'
 import { craftEffectsForProcessIntents } from './blueprintCompiler'
 import type { CraftEffect, LabelAreaConfig, LabelLayer, LayerDesignMetrics } from '../label/types'
+import { canonicalFontStack } from '../label/fontStack'
 
 export type FidelityIssueCode =
   | 'LAYER_SET_MISMATCH' | 'LAYER_ORDER_MISMATCH' | 'VISIBILITY_MISMATCH'
@@ -133,16 +134,18 @@ function sameBounds(expected: LayoutBlueprintLayer, actual: EditableLayerProject
 }
 
 function expectedFont(blueprint: LayoutBlueprintV1, layer: LayoutBlueprintLayer): string | undefined {
-  if (layer.fontStack) return layer.fontStack[0]
+  if (layer.fontStack) return canonicalFontStack(layer.fontStack)[0]
   return blueprint.assets.find((asset) => asset.id === layer.fontAsset)?.path
 }
 
 function typographyMatches(blueprint: LayoutBlueprintV1, expected: LayoutBlueprintLayer, actual: EditableLayerProjection): boolean {
   if (expected.kind !== 'text' || actual.kind !== 'text') return expected.kind === actual.kind
+  const expectedStack = expected.fontStack ? canonicalFontStack(expected.fontStack) : undefined
+  const actualStack = actual.fontStack ? canonicalFontStack(actual.fontStack) : undefined
   return actual.language === expected.language
     && actual.writingDirection === expected.writingDirection
-    && actual.fontFamily === expectedFont(blueprint, expected)
-    && same(actual.fontStack, expected.fontStack)
+    && (expectedStack ? true : actual.fontFamily === expectedFont(blueprint, expected))
+    && same(actualStack, expectedStack)
     && actual.fontWeight === expected.fontWeight
     && actual.align === expected.alignment
     && actual.designMetrics?.fontSizeMm === expected.fontSizeMm

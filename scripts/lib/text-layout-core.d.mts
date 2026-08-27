@@ -1,0 +1,1 @@
+export function resolvePortableTextLayoutMetric(input: { width:number; fontSize:number; lineHeight:number; lineCount:number; maxLines?:number; ascent?:number; descent?:number }): Readonly<{ width:number; height:number; lineCount:number; totalLineCount:number; baselineFromTop:number }>

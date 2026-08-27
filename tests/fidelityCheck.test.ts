@@ -73,6 +73,13 @@ describe('blueprint structural fidelity', () => {
     if (expectedCode !== 'ARTBOARD_ASPECT_MISMATCH') expect(issue).toMatchObject({ layerId: expect.any(String) })
   })
 
+  it('ignores redundant fontFamily aliases when the canonical approved stack is unchanged', () => {
+    const areas = editableAreas()
+    if (areas[0].layers[0].kind === 'text') areas[0].layers[0].fontFamily = 'Arial'
+
+    expect(compareBlueprintFidelity({ blueprint, editableAreas: areas })).toEqual({ pass: true, issues: [] })
+  })
+
   it('does not allow a perceptual warning to hide a structural failure', () => {
     const areas = editableAreas()
     if (areas[0].layers[0].kind === 'text') areas[0].layers[0].text = 'ASH'

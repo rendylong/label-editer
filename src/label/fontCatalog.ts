@@ -1,3 +1,5 @@
+import { canonicalPortableFontFamily } from '../../scripts/lib/font-stack-core.mjs'
+
 export type FontCategory = 'chinese' | 'arabic' | 'sans' | 'serif' | 'display' | 'handwriting' | 'mono'
 
 export interface FontCatalogEntry {
@@ -118,26 +120,9 @@ export const FONT_CATALOG: FontCatalogEntry[] = [
 ]
 
 const entriesById = new Map(FONT_CATALOG.map((entry) => [entry.id, entry]))
-const catalogNames = new Map(FONT_CATALOG.map((entry) => [entry.name.toLocaleLowerCase(), entry.id]))
-
-const LEGACY_FONT_IDS: Record<string, string> = {
-  '系统默认': 'system-sans',
-  'pingfang sc': 'pingfang-sc',
-  'microsoft yahei': 'microsoft-yahei',
-  'noto sans cjk': 'noto-sans-sc',
-  '宋体 (serif)': 'system-serif',
-  '黑体 (hei)': 'system-hei',
-  times: 'times',
-  georgia: 'georgia',
-  arial: 'arial',
-  impact: 'impact',
-  courier: 'courier-new',
-}
-
 /** Map a legacy display name to its stable reference; unknown names survive. */
 export function legacyFontId(name: string): string {
-  const normalized = name.trim().toLocaleLowerCase()
-  return catalogNames.get(normalized) ?? LEGACY_FONT_IDS[normalized] ?? name
+  return canonicalPortableFontFamily(name)
 }
 
 export function fontEntry(id: string): FontCatalogEntry | null {

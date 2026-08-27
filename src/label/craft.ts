@@ -8,6 +8,7 @@ import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
 import { resolveCarrierSurface } from './paper'
 import { resolvePortableLayerTransform } from '../../scripts/lib/layer-transform-core.mjs'
+import { resolvePortableTextLayoutMetric } from '../../scripts/lib/text-layout-core.mjs'
 import {
   canRenderMaskLayer,
   isRenderableWhiteUnderbaseLayer,
@@ -502,8 +503,6 @@ export function measureTextLayerLayout(
   const hiddenLineCount = allLines.length - lines.length
   const horizontalOverflow = explicitWidth !== null && allLines.some((line) => lineWidth(line) > explicitWidth)
   const width = explicitWidth ?? Math.max(1, ...lines.map(lineWidth))
-  const lineHeight = layer.fontSize * (layer.lineHeight || 1.2)
-  const height = Math.max(1, layer.fontSize * (layer.lineHeight || 1.2) * lines.length)
   const referenceMetrics = measureLine('Mg')
   const ascent = typeof referenceMetrics === 'number'
     ? layer.fontSize * 0.8
@@ -511,15 +510,19 @@ export function measureTextLayerLayout(
   const descent = typeof referenceMetrics === 'number'
     ? layer.fontSize * 0.2
     : referenceMetrics.actualBoundingBoxDescent ?? layer.fontSize * 0.2
+  const metric = resolvePortableTextLayoutMetric({
+    width, fontSize: layer.fontSize, lineHeight: layer.lineHeight || 1.2, lineCount: allLines.length,
+    maxLines: maximumLines, ascent, descent,
+  })
   return {
-    width,
-    height,
+    width: metric.width,
+    height: metric.height,
     rotation: layer.rotation + (layer.direction === 'vertical' ? 90 : 0),
     lines,
     totalLineCount: allLines.length,
     hiddenLineCount,
     overflow: hiddenLineCount > 0 || horizontalOverflow,
-    baselineFromTop: Math.max(0, (lineHeight - ascent - descent) / 2 + ascent),
+    baselineFromTop: metric.baselineFromTop,
   }
 }
 

@@ -1,6 +1,7 @@
 import { uploadedFontRecord } from './fontRuntime'
 import { resolveCarrierSurface } from './paper'
 import type { LabelAreaConfig, LabelLayer } from './types'
+import { canonicalFontStack } from './fontStack'
 
 const MAX_SCAN_PIXELS_PER_CHUNK = 256 * 1024
 
@@ -85,11 +86,12 @@ function contributorProjection(layer: LabelLayer): unknown {
     whiteProcesses: whiteProcessProjection(layer),
   }
   if (layer.kind === 'text') {
+    const fontStack = layer.fontStack ? canonicalFontStack(layer.fontStack) : undefined
     return {
       ...common,
       text: layer.text,
-      fontFamily: layer.fontFamily,
-      fontStack: layer.fontStack,
+      fontFamily: fontStack ? undefined : layer.fontFamily,
+      fontStack,
       fontSize: layer.fontSize,
       fontWeight: layer.fontWeight,
       letterSpacing: layer.letterSpacing,
@@ -138,7 +140,7 @@ export function whiteUnderbaseIntentKey(area: WhiteUnderbaseIntentArea): string 
   const usedFonts = new Map<string, { name: string; dataUrl: string }>()
   for (const layer of area.layers) {
     if (layer.kind !== 'text' || !isRenderableWhiteUnderbaseLayer(layer)) continue
-    const record = uploadedFontRecord(layer.fontFamily, area.fonts)
+    const record = layer.fontStack ? undefined : uploadedFontRecord(layer.fontFamily, area.fonts)
     if (record) usedFonts.set(`${record.name}\u0000${record.dataUrl}`, { name: record.name, dataUrl: record.dataUrl })
   }
   const surface = resolveCarrierSurface(area)

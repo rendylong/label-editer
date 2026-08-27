@@ -310,6 +310,44 @@ describe('canonical carrier rendering and readiness', () => {
     }))
   })
 
+  it.each([
+    'M0 0H10V10H0Z L20 20',
+    'M0 0 M10 10 Z',
+    'M0 0Z M100 100',
+    'M0 0L10 10Z',
+  ])('rejects custom boundary topology without a wholly closed drawable contour: %s', (pathData) => {
+    const area = carrierArea('applied_label', {
+      substrate: { kind: 'opaque', color: '#fff', opacity: 1, boundary: { shape: 'custom', pathData } },
+    })
+    expect(resolveCarrierSurface(area)).toMatchObject({ substrateVisible: false, boundaryVisible: false })
+    expect(validatePrintReadiness(area)).toContainEqual(expect.objectContaining({ code: 'invalid-custom-boundary' }))
+  })
+
+  it.each([
+    'M0 0C0 10 10 10 10 0C10 -10 0 -10 0 0Z',
+    'M0 0H10V10H0Z M20 20H30V30H20Z',
+  ])('accepts closed curved and compound custom boundary topology: %s', (pathData) => {
+    const area = carrierArea('applied_label', {
+      substrate: { kind: 'opaque', color: '#fff', opacity: 1, boundary: { shape: 'custom', pathData } },
+    })
+    expect(resolveCarrierSurface(area)).toMatchObject({ substrateVisible: true, boundaryVisible: true })
+  })
+
+  it.each([
+    ['rectangle', undefined],
+    ['ellipse', undefined],
+    ['custom', 'M0 0H10V20H0Z'],
+  ] as const)('exposes %s clear-film extent only as a non-export diagnostic', async (shape, pathData) => {
+    const paper = await import('../src/label/paper') as typeof import('../src/label/paper') & {
+      clearFilmDiagnosticSpec?: (area: LabelAreaConfig) => { nonExport: boolean; shape: string } | undefined
+    }
+    const area = carrierArea('clear_label', {
+      substrate: { kind: 'transparent', opacity: 0.08, boundary: { shape, ...(pathData ? { pathData } : {}) } },
+    })
+    expect(paper.clearFilmDiagnosticSpec?.(area)).toMatchObject({ nonExport: true, shape })
+    expect(resolveCarrierSurface(area)).toMatchObject({ substrateVisible: false, diagnosticFilmExtent: true })
+  })
+
   it('rejects an opaque applied substrate with zero opacity', () => {
     const area = carrierArea('applied_label', {
       substrate: { ...appliedSubstrate, opacity: 0 },

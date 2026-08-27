@@ -150,6 +150,20 @@ describe('Label Spec v2', () => {
     expect(validateLabelSpec(existingPerfumeFixture).ok).toBe(true)
   })
 
+  it('canonicalizes catalog aliases in a declared font stack at the Label Spec boundary', () => {
+    const result = validateLabelSpec({
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{ id: 'copy', type: 'text', text: 'Copy', x: 0.5, y: 0.5, fontFamily: 'ignored', fontStack: ['Inter', 'Arial', 'sans-serif'] }],
+      }],
+    })
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.spec.areas[0].layers[0]).toMatchObject({ fontFamily: 'inter', fontStack: ['inter', 'arial', 'sans-serif'] })
+  })
+
   it('accepts optional physical, process, vector, and design-binding metadata', () => {
     const physicalSpec = {
       version: 2,

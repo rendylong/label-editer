@@ -54,7 +54,7 @@ describe('project font stack contract', () => {
   it('preserves a bounded safe stack and rejects CSS-bearing or oversized families', () => {
     const project = projectWithLayers([makeTextLayer()])
     expect(parseLabelProject(project).areas[0].layers[0]).toMatchObject({
-      kind: 'text', fontFamily: 'arial', fontStack: ['Arial', 'Helvetica', 'sans-serif'],
+      kind: 'text', fontFamily: 'arial', fontStack: ['arial', 'Helvetica', 'sans-serif'],
     })
 
     ;((project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>)[0].fontStack = ['Arial;url(https://evil.example)']

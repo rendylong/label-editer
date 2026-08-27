@@ -26,6 +26,7 @@ import { prepareAllAreas } from '../src/app/areaExporter'
 import { createAreaChannelArtifacts, createChannelArtifact, createExportBundle } from '../src/agent/artifactExport'
 import { renderCarrierMasks } from '../src/label/craft'
 import { buildPrintManifest } from '../src/label/printReadiness'
+import { whiteUnderbaseIntentKey } from '../src/label/whiteUnderbase'
 
 class NeutralContext {
   fillStyle: string | CanvasGradient | CanvasPattern = '#000000'
@@ -681,6 +682,18 @@ describe('carrier-aware channel export', () => {
     expect(buildPrintManifest(usedChanged, bake).separations).toEqual([])
     expect((await createAreaChannelArtifacts([contentChanged], { front: bake })).map((artifact) => artifact.channel)).toEqual(['color'])
     expect(buildPrintManifest(contentChanged, bake).separations).toEqual([])
+  })
+
+  it('does not invalidate a stacked white-text proof for a redundant fontFamily alias', () => {
+    const text = {
+      ...whiteLayer(), kind: 'text', text: 'WHITE', fontFamily: 'arial', fontStack: ['arial', 'sans-serif'],
+      fontSize: 12, fontWeight: 400, letterSpacing: 0, lineHeight: 1.2, width: 40,
+      color: '#fff', align: 'left', italic: false,
+    } as LabelLayer
+    const rendered = area('clear_label', [text])
+    const aliasOnly = { ...rendered, layers: [{ ...text, fontFamily: 'Arial' } as LabelLayer] }
+
+    expect(whiteUnderbaseIntentKey(aliasOnly)).toBe(whiteUnderbaseIntentKey(rendered))
   })
 
   it.each([

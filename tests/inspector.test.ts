@@ -651,7 +651,7 @@ describe('font browser boundaries', () => {
       ) => void
     }
     expect(module.commitFreshUploadedFont).toBeTypeOf('function')
-    let current = area([textLayer('text-a', 10)])
+    let current = area([{ ...textLayer('text-a', 10), fontStack: ['Arial', 'sans-serif'] }])
     const applyAreaOp = vi.fn((_areaId: string, updater: (area: LabelAreaConfig) => LabelAreaConfig) => {
       current = updater(current)
     })
@@ -664,6 +664,14 @@ describe('font browser boundaries', () => {
     expect(applyAreaOp).toHaveBeenCalledOnce()
     expect(current.fonts).toEqual([{ name: 'Brand', dataUrl: font.dataUrl }])
     expect(current.layers[0]).toMatchObject({ id: 'text-a', fontFamily: 'upload:brand' })
+    expect((current.layers[0] as TextLayer).fontStack).toBeUndefined()
+  })
+
+  it('replaces an approved stack when the Inspector selects a catalog family', async () => {
+    const module = await import('../src/ui/inspectors/TextInspector') as typeof import('../src/ui/inspectors/TextInspector') & {
+      selectedFontPatch?: (fontFamily: string) => Partial<TextLayer>
+    }
+    expect(module.selectedFontPatch?.('inter')).toEqual({ fontFamily: 'inter', fontStack: undefined })
   })
 })
 

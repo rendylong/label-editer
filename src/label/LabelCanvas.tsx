@@ -30,7 +30,7 @@ import {
   type MaskDrawMode,
   type TextMeasureMetrics,
 } from './craft'
-import { fitCarrierBoundaryToCanvas, resolveCarrierSurface, resolveLabelPaper } from './paper'
+import { clearFilmDiagnosticSpec, fitCarrierBoundaryToCanvas, resolveCarrierSurface, resolveLabelPaper } from './paper'
 import { normalizeShapeLayer } from './shapeGeometry'
 import { commitLayerGesture, nextLayerSelection, type LayerNodeTransform } from './selection'
 import { useFlushableDebouncedBake } from './useFlushableDebouncedBake'
@@ -445,6 +445,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
   const sorted = [...layers].sort((a, b) => a.zIndex - b.zIndex)
   const carrierSurface = resolveCarrierSurface(config)
   const substrateBoundary = carrierSurface.boundary
+  const filmDiagnostic = clearFilmDiagnosticSpec(config)
   const customBoundaryTransform = substrateBoundary?.shape === 'custom'
     ? fitCarrierBoundaryToCanvas(substrateBoundary, spec)
     : undefined
@@ -675,6 +676,17 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
               )
             })}
           </Layer>
+          {filmDiagnostic ? (
+            <Layer name="non-export" scaleX={contentScale} scaleY={contentScale} listening={false}>
+              {filmDiagnostic.shape === 'ellipse' ? (
+                <KEllipse x={spec.width / 2} y={spec.height / 2} radiusX={spec.width / 2} radiusY={spec.height / 2} stroke="rgba(70,110,130,.65)" strokeWidth={1.5} dash={[6, 4]} />
+              ) : filmDiagnostic.shape === 'custom' && filmDiagnostic.pathData ? (
+                <KPath data={filmDiagnostic.pathData} x={customBoundaryTransform?.x} y={customBoundaryTransform?.y} scaleX={customBoundaryTransform?.scaleX} scaleY={customBoundaryTransform?.scaleY} stroke="rgba(70,110,130,.65)" strokeWidth={1.5} dash={[6, 4]} />
+              ) : (
+                <KRect width={spec.width} height={spec.height} stroke="rgba(70,110,130,.65)" strokeWidth={1.5} dash={[6, 4]} cornerRadius={filmDiagnostic.shape === 'rounded_rectangle' ? Math.max(0, (filmDiagnostic.radiusMm ?? 0) * spec.width / Math.max(config.artboard?.widthMm ?? spec.width, 1)) : 0} />
+              )}
+            </Layer>
+          ) : null}
           {/* 选中 Transform（屏幕坐标层，绑定画布坐标节点） */}
           {transformableLayerIds.length > 0 && (
             <Layer name="non-export">
