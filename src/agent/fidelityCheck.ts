@@ -2,7 +2,7 @@ import type { LayoutBlueprintArea, LayoutBlueprintLayer, LayoutBlueprintV1, Phys
 import { craftEffectsForProcessIntents } from './blueprintCompiler'
 import type { CraftEffect, LabelAreaConfig, LabelLayer, LayerDesignMetrics } from '../label/types'
 import { canonicalFontStack } from '../label/fontStack'
-import { compareLayerZOrder } from '../label/layerOrder'
+import { canonicalLayerOrder, compareOrdinalText } from '../label/layerOrder'
 
 export type FidelityIssueCode =
   | 'LAYER_SET_MISMATCH' | 'LAYER_ORDER_MISMATCH' | 'VISIBILITY_MISMATCH'
@@ -100,7 +100,7 @@ function canonical(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
       .filter(([, nested]) => nested !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => compareOrdinalText(left, right))
       .map(([key, nested]) => [key, canonical(nested)]),
   )
 }
@@ -244,10 +244,10 @@ export function compareBlueprintFidelity(input: {
     if (projected.artboard?.background !== expectedArea.artboard.background) {
       issue(issues, 'COLOR_MISMATCH', expectedArea.id, 'Artboard background changed.', undefined, expectedArea.artboard.background, projected.artboard?.background)
     }
-    const expectedIds = expectedArea.layers.slice().sort(compareLayerZOrder).map((layer) => layer.id)
+    const expectedIds = canonicalLayerOrder(expectedArea.layers).map((layer) => layer.id)
     const actualIds = projected.layers.map((layer) => layer.id)
     if (!same([...expectedIds].sort(), [...actualIds].sort())) issue(issues, 'LAYER_SET_MISMATCH', expectedArea.id, 'Layer ids changed.', undefined, expectedIds, actualIds)
-    const actualOrder = [...projected.layers].sort(compareLayerZOrder).map((layer) => layer.id)
+    const actualOrder = canonicalLayerOrder(projected.layers).map((layer) => layer.id)
     if (!same(actualOrder, expectedIds)) issue(issues, 'LAYER_ORDER_MISMATCH', expectedArea.id, 'Layer z-order changed.', actualOrder.find((id, index) => id !== expectedIds[index]), expectedIds, actualOrder)
     const expectedAspect = expectedArea.artboard.widthMm / expectedArea.artboard.heightMm
     const actualAspect = projected.artboard ? projected.artboard.widthMm / projected.artboard.heightMm : undefined

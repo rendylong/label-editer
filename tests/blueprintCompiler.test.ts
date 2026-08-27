@@ -110,6 +110,28 @@ describe('blueprint compiler', () => {
     expect(compileBlueprintToSpecAreas(blueprint)[0].layers.map((layer) => layer.id)).toEqual(['brand', 'product-cn'])
   })
 
+  it('compiles I/i ties by code-unit order even when localeCompare is reversed', () => {
+    const blueprint = laviraBlueprint()
+    const [first, second] = blueprint.areas[0].layers
+    first.id = 'I'
+    second.id = 'i'
+    first.zIndex = 4
+    second.zIndex = 4
+    blueprint.areas[0].layers = [second, first]
+    const original = String.prototype.localeCompare
+    let ids: string[] = []
+    try {
+      String.prototype.localeCompare = function (other: string): number {
+        return String(this) < other ? 1 : String(this) > other ? -1 : 0
+      }
+      ids = compileBlueprintToSpecAreas(blueprint)[0].layers.map((layer) => layer.id)
+    } finally {
+      String.prototype.localeCompare = original
+    }
+
+    expect(ids).toEqual(['I', 'i'])
+  })
+
   it('resolves blueprint asset ids into an applicable image spec', () => {
     const blueprint = laviraBlueprint()
     blueprint.assets.push({

@@ -17,6 +17,24 @@ const baseArea: LabelAreaConfig = {
 }
 
 describe('Label Spec v2', () => {
+  it('rejects duplicate layer ids before structured apply reaches the renderer', () => {
+    const mark = { id: 'mark', type: 'shape', shape: 'rectangle', x: 0.5, y: 0.5, width: 0.4, height: 0.4 }
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [mark, { ...mark, x: 0.6 }],
+      }],
+    }
+
+    expect(validateLabelSpec(spec)).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ keyword: 'duplicate-layer-id', path: '/areas/0/layers/1/id' })],
+    })
+    expect(() => applyStructuredLabelSpec(baseArea, spec)).toThrow(/duplicate layer id.*mark/i)
+  })
+
   it.each([
     [['   '], 'space-only'], [['\t'], 'tab-only'], [['\u00a0'], 'NBSP-only'], [['Arial', '   '], 'mixed valid and blank'],
   ] as const)('rejects a %s font stack without throwing or producing an empty family', (fontStack, _label) => {

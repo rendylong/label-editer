@@ -14,6 +14,7 @@ import { resolvePortableTextDirection } from './text-direction-core.mjs'
 import { canonicalPortableFontStack, portableFontStackCss, validatePortableFontStack } from './font-stack-core.mjs'
 import { portablePngDimensions } from './png-core.mjs'
 import { resolvePortableTextLayoutMetric } from './text-layout-core.mjs'
+import { orderedPortableLayers } from './layer-order-core.mjs'
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024
 const MAX_DECODED_IMAGE_PIXELS = 16 * 1024 * 1024
@@ -281,7 +282,7 @@ function renderArea(area, options) {
       : filmSubstrate
         ? `<div class="carrier-film-extent" style="opacity:${cssNumber(area.substrate.opacity)};${boundaryStyle(area, options.pxPerMm)}"></div>`
         : ''
-  const layers = area.carrier === 'bare' ? '' : area.layers.slice().sort((a, b) => a.zIndex - b.zIndex || a.id.localeCompare(b.id)).map((layer) => renderLayer(layer, area, options)).join('')
+  const layers = area.carrier === 'bare' ? '' : orderedPortableLayers(area.layers).map((layer) => renderLayer(layer, area, options)).join('')
   const selectiveUnderbase = area.carrier === 'clear_label' && area.layers.some((layer) => layer.processes.some((process) => process.process === 'white_underbase' || process.requiredMask === 'white_underbase'))
   return `<div class="area-artboard carrier-${attr(area.carrier)}" data-area-id="${attr(area.id)}" data-carrier="${attr(area.carrier)}" data-selective-underbase="${selectiveUnderbase}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px">${substrate}${layers}</div>`
 }

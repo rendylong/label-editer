@@ -34,6 +34,13 @@ function byId(layers: LabelLayer[], id: string): LabelLayer {
   return layer
 }
 
+function canonicalLayerIds(layers: LabelLayer[]): string[] {
+  return [...layers].sort((left, right) => {
+    if (left.zIndex !== right.zIndex) return left.zIndex < right.zIndex ? -1 : 1
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  }).map((layer) => layer.id)
+}
+
 function area(id = 'area-a', layers: LabelLayer[] = [shape('a', 10, 20), shape('locked', 40, 50, true), shape('b', 70, 80)]): LabelAreaConfig {
   return {
     id,
@@ -269,6 +276,75 @@ describe('locked-safe legacy layer mutations', () => {
     expect([...reordered].sort((a, b) => b.zIndex - a.zIndex).map((layer) => layer.id)).toEqual(['bottom', 'top', 'middle'])
   })
 
+  it('encodes an up/down move when every layer starts on the same z-index tie', () => {
+    const layers: LabelLayer[] = [
+      { ...shape('c', 0, 0), zIndex: 0 },
+      { ...shape('b', 0, 0), zIndex: 0 },
+      { ...shape('a', 0, 0), zIndex: 0 },
+    ]
+    const original = structuredClone(layers)
+
+    const moved = moveUnlockedLayer(layers, 'a', 1)
+
+    expect(canonicalLayerIds(moved)).toEqual(['b', 'a', 'c'])
+    expect(new Set(moved.map((layer) => layer.zIndex)).size).toBe(3)
+    expect(moved.every((layer) => Number.isFinite(layer.zIndex))).toBe(true)
+    expect(layers).toEqual(original)
+  })
+
+  it('encodes a move inside a tie while preserving the surrounding mixed-z order', () => {
+    const layers: LabelLayer[] = [
+      { ...shape('d', 0, 0), zIndex: 1 },
+      { ...shape('b', 0, 0), zIndex: 0 },
+      { ...shape('c', 0, 0), zIndex: 1 },
+      { ...shape('a', 0, 0), zIndex: 0 },
+    ]
+
+    const moved = moveUnlockedLayer(layers, 'a', 1)
+
+    expect(canonicalLayerIds(moved)).toEqual(['b', 'a', 'c', 'd'])
+  })
+
+  it('renumbers an equal-z unlocked segment without changing its locked barrier', () => {
+    const locked = { ...shape('m', 0, 0, true), zIndex: 0 }
+    const layers: LabelLayer[] = [
+      locked,
+      { ...shape('b', 0, 0), zIndex: 0 },
+      { ...shape('a', 0, 0), zIndex: 0 },
+    ]
+
+    const moved = moveUnlockedLayer(layers, 'a', 1)
+
+    expect(canonicalLayerIds(moved)).toEqual(['b', 'a', 'm'])
+    expect(byId(moved, 'm')).toBe(locked)
+    expect(byId(moved, 'm').zIndex).toBe(0)
+  })
+
+  it('encodes an all-equal drag placement instead of relying on storage order', () => {
+    const layers: LabelLayer[] = [
+      { ...shape('c', 0, 0), zIndex: 0 },
+      { ...shape('a', 0, 0), zIndex: 0 },
+      { ...shape('b', 0, 0), zIndex: 0 },
+    ]
+
+    const reordered = reorderUnlockedLayer(layers, 'a', 'c', 'before')
+
+    expect(canonicalLayerIds(reordered)).toEqual(['b', 'c', 'a'])
+  })
+
+  it('encodes a mixed-tie drag placement with the requested top-to-bottom result', () => {
+    const layers: LabelLayer[] = [
+      { ...shape('a', 0, 0), zIndex: 0 },
+      { ...shape('d', 0, 0), zIndex: 1 },
+      { ...shape('b', 0, 0), zIndex: 0 },
+      { ...shape('c', 0, 0), zIndex: 1 },
+    ]
+
+    const reordered = reorderUnlockedLayer(layers, 'a', 'd', 'before')
+
+    expect(canonicalLayerIds(reordered)).toEqual(['b', 'c', 'd', 'a'])
+  })
+
   it('does not allow a dragged layer to cross a locked layer barrier', () => {
     const locked = { ...shape('locked', 0, 0, true), zIndex: 1 }
     const layers: LabelLayer[] = [
@@ -328,6 +404,33 @@ describe('label selection store', () => {
 
     expect(byId(useLabelStore.getState().activeArea!.layers, 'locked').opacity).toBe(1)
     expect(useLabelStore.getState().activeArea!.undoStack).toHaveLength(0)
+  })
+
+  it('records one reorder history entry and preserves selection through equal-z move undo/redo', () => {
+    const layers: LabelLayer[] = [
+      { ...shape('c', 0, 0), zIndex: 0 },
+      { ...shape('b', 0, 0), zIndex: 0 },
+      { ...shape('a', 0, 0), zIndex: 0 },
+    ]
+    useLabelStore.getState().addArea(area('area-a', layers))
+    useLabelStore.getState().selectLayers(['a'])
+
+    useLabelStore.getState().applyAreaOp('area-a', (current) => ({
+      ...current,
+      layers: moveUnlockedLayer(current.layers, 'a', 1),
+    }))
+
+    expect(canonicalLayerIds(useLabelStore.getState().activeArea!.layers)).toEqual(['b', 'a', 'c'])
+    expect(useLabelStore.getState().activeArea!.undoStack).toHaveLength(1)
+    expect(useLabelStore.getState().selectedLayerIds).toEqual(['a'])
+
+    useLabelStore.getState().undo()
+    expect(canonicalLayerIds(useLabelStore.getState().activeArea!.layers)).toEqual(['a', 'b', 'c'])
+    expect(useLabelStore.getState().selectedLayerIds).toEqual(['a'])
+
+    useLabelStore.getState().redo()
+    expect(canonicalLayerIds(useLabelStore.getState().activeArea!.layers)).toEqual(['b', 'a', 'c'])
+    expect(useLabelStore.getState().selectedLayerIds).toEqual(['a'])
   })
 
   it('clears ids from the removed active area when removeArea activates a fallback', () => {

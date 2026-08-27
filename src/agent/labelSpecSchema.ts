@@ -181,9 +181,18 @@ export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
     }
   }
   const normalized = structuredClone(migrated.spec) as LabelSpecV2
-  const vectorIssues: LabelSpecIssue[] = []
+  const semanticIssues: LabelSpecIssue[] = []
   for (const [areaIndex, area] of normalized.areas.entries()) {
+    const layerIds = new Set<string>()
     for (const [layerIndex, layer] of area.layers.entries()) {
+      if (layerIds.has(layer.id)) {
+        semanticIssues.push({
+          path: `/areas/${areaIndex}/layers/${layerIndex}/id`,
+          message: `Duplicate layer id: ${layer.id}`,
+          keyword: 'duplicate-layer-id',
+        })
+      }
+      layerIds.add(layer.id)
       if (layer.type === 'text' && Array.isArray(layer.fontStack)) {
         const fontStack = canonicalFontStack(layer.fontStack as string[])
         layer.fontStack = fontStack
@@ -192,14 +201,14 @@ export function validateLabelSpec(raw: unknown): LabelSpecValidationResult {
       if (layer.type !== 'shape' || layer.shape !== 'path') continue
       const issue = validateVectorPath(layer.pathData, layer.pathViewBox, layer.width as number, layer.height as number)
       if (!issue) continue
-      vectorIssues.push({
+      semanticIssues.push({
         path: `/areas/${areaIndex}/layers/${layerIndex}/${issue.field}`,
         message: issue.message,
         keyword: 'invalid-vector-path',
       })
     }
   }
-  if (vectorIssues.length > 0) return { ok: false, issues: vectorIssues, warnings: migrated.warnings }
+  if (semanticIssues.length > 0) return { ok: false, issues: semanticIssues, warnings: migrated.warnings }
   for (const area of normalized.areas) {
     if (area.carrier === undefined && isRecord(area.paper) && area.paper.enabled === true) {
       area.carrier = 'applied_label'

@@ -5,6 +5,7 @@ import { resolveCarrierBoundary, resolveCarrierSurface } from './paper'
 import { isRenderableWhiteUnderbaseLayer } from './whiteUnderbase'
 import { validateVectorPath } from './vectorPathValidation'
 import { isRendererProvenWhiteUnderbase } from './craft'
+import { canonicalLayerOrder } from './layerOrder'
 
 export type CarrierInvariantIssueCode =
   | 'carrier-forbidden-substrate'
@@ -109,7 +110,8 @@ function carrierInvariantIssues(area: LabelAreaConfig): PrintReadinessIssue[] {
 
 export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIssue[] {
   const spec = area.printSpec
-  const vectorIssues = area.layers.flatMap((layer): PrintReadinessIssue[] => {
+  const orderedLayers = canonicalLayerOrder(area.layers)
+  const vectorIssues = orderedLayers.flatMap((layer): PrintReadinessIssue[] => {
     if (layer.kind !== 'shape' || layer.shape !== 'path') return []
     const vectorIssue = validateVectorPath(layer.pathData, layer.pathViewBox, layer.width, layer.height)
     return vectorIssue ? [{
@@ -138,7 +140,7 @@ export function validatePrintReadiness(area: LabelAreaConfig): PrintReadinessIss
     })
   }
   const mmPerPixel = spec ? spec.physicalHeightMm / Math.max(area.canvas.height, 1) : null
-  for (const layer of area.layers) {
+  for (const layer of orderedLayers) {
     if (spec && mmPerPixel !== null && layer.kind === 'text' && layer.visible && layer.fontSize * mmPerPixel < spec.minTextHeightMm) {
       issues.push({ code: 'text-below-minimum-height', layerId: layer.id, message: `文字「${layer.text.slice(0, 24)}」低于 ${spec.minTextHeightMm} mm 最小字高。` })
     }
@@ -157,16 +159,17 @@ export function buildPrintManifest(
 ): PrintManifest {
   if (!area.printSpec && !area.carrier) throw new Error(`贴标区域「${area.name}」尚未设置印刷规格`)
   const spec = area.printSpec
+  const orderedLayers = canonicalLayerOrder(area.layers)
   const userSeparation = (value: string | undefined): string[] => value && value !== 'white_underbase' ? [value] : []
-  const foilNames = area.layers.flatMap((layer) => layer.craft.flatMap((effect) => (
+  const foilNames = orderedLayers.flatMap((layer) => layer.craft.flatMap((effect) => (
     effect.type === 'foil' ? userSeparation(effect.params.foilSpotName) : []
   )))
-  const declaresWhiteUnderbase = area.layers.some((layer) => (layer.processes ?? []).some((process) => (
+  const declaresWhiteUnderbase = orderedLayers.some((layer) => (layer.processes ?? []).some((process) => (
     process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
   )))
   const rendererProvesCurrentWhiteUnderbase = declaresWhiteUnderbase
     && isRendererProvenWhiteUnderbase(area, bake)
-  const declaredSeparations = area.layers.flatMap((layer) => (layer.processes ?? []).flatMap((process) => {
+  const declaredSeparations = orderedLayers.flatMap((layer) => (layer.processes ?? []).flatMap((process) => {
     const whiteUnderbase = process.process === 'white_underbase' || process.requiredMask === 'white_underbase'
     if (whiteUnderbase && (
       !rendererProvesCurrentWhiteUnderbase

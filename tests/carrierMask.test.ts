@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createChannelArtifact } from '../src/agent/artifactExport'
-import { genericShapePaintProps, renderCarrierMasks, shapeUsesOpenStroke } from '../src/label/craft'
+import { genericShapePaintProps, renderCarrierMasks, renderMasks, shapeUsesOpenStroke } from '../src/label/craft'
 import { buildPrintManifest, validatePrintReadiness } from '../src/label/printReadiness'
 import type { LabelAreaConfig, LabelLayer } from '../src/label/types'
 import { useLabelStore } from '../src/state/stores'
@@ -63,14 +63,14 @@ function layer(overrides: Partial<LabelLayer> = {}): LabelLayer {
   } as LabelLayer
 }
 
-function area(carrier: LabelAreaConfig['carrier'], mark: LabelLayer): LabelAreaConfig {
+function area(carrier: LabelAreaConfig['carrier'], mark: LabelLayer | LabelLayer[]): LabelAreaConfig {
   return {
     id: 'area', name: 'Area', meshIndex: 0, nodeName: 'Bottle', carrier,
     remap: { mode: 'planar', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0, planarBox: { min: [0, 0, 0], max: [1, 1, 1] } },
     range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 }, canvas: { width: 2, height: 2, aspect: 1 },
     ...(carrier === 'applied_label' ? { substrate: { kind: 'opaque' as const, color: '#fff', opacity: 1, boundary: { shape: 'rectangle' as const } } } : {}),
     ...(carrier === 'clear_label' ? { substrate: { kind: 'transparent' as const, opacity: 0.1, boundary: { shape: 'rectangle' as const } } } : {}),
-    layers: [mark], globalCraft: { craft: [] }, fonts: [], referenceVisible: false, undoStack: [], redoStack: [],
+    layers: Array.isArray(mark) ? mark : [mark], globalCraft: { craft: [] }, fonts: [], referenceVisible: false, undoStack: [], redoStack: [],
   }
 }
 
@@ -113,6 +113,62 @@ describe('carrier mask raster production', () => {
     expect(pixel(masks.metalness, 0, 0)).toEqual([255, 255, 255])
     expect(pixel(masks.metalness, 1, 1)).toEqual([0, 0, 0])
     expect(pixel(masks.roughness, 1, 1)).toEqual([255, 255, 255])
+  })
+
+  it('uses the same non-mutating equal-z order for direct, substrate-backed, and carrier-free PBR masks', () => {
+    const codeUnitFirst = layer({ id: 'I', zIndex: 0, craft: [{ type: 'uv', params: { gloss: 0 } }] })
+    const codeUnitLast = layer({ id: 'i', zIndex: 0, craft: [{ type: 'uv', params: { gloss: 1 } }] })
+    const reversedStorage = [codeUnitLast, codeUnitFirst]
+    const originalIds = reversedStorage.map((item) => item.id)
+    const drawTone = (context: CanvasRenderingContext2D, _layer: LabelLayer, gray: number): void => {
+      context.fillStyle = `rgb(${gray},${gray},${gray})`
+      context.fillRect(0, 0, 1, 1)
+    }
+
+    const direct = renderMasks(2, 2, drawTone, reversedStorage, [])
+    const substrate = renderCarrierMasks(2, 2, drawTone, area('applied_label', reversedStorage))
+    const carrierFree = renderCarrierMasks(2, 2, drawTone, area('direct_surface_print', reversedStorage))
+
+    expect(pixel(direct.roughness, 0, 0)).toEqual([8, 8, 8])
+    expect(pixel(substrate.roughness, 0, 0)).toEqual([8, 8, 8])
+    expect(pixel(carrierFree.roughness, 0, 0)).toEqual([8, 8, 8])
+    expect(reversedStorage.map((item) => item.id)).toEqual(originalIds)
+  })
+
+  it.each(['applied_label', 'clear_label'] as const)(
+    'draws substrate and non-substrate white-underbase contributors in canonical order for %s',
+    (carrier) => {
+      const layers = [
+        layer({
+          id: 'i', zIndex: 0,
+          processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+        }),
+        layer({
+          id: 'I', zIndex: 0,
+          processes: [{ process: 'white_underbase', requiredMask: 'white_underbase' }],
+        }),
+      ]
+      const calls: string[] = []
+      const masks = renderCarrierMasks(2, 2, (context, current, gray) => {
+        calls.push(current.id)
+        context.fillStyle = `rgb(${gray},${gray},${gray})`
+        context.fillRect(0, 0, 1, 1)
+      }, area(carrier, layers))
+
+      expect(masks).toHaveProperty('whiteUnderbase')
+      expect(calls).toEqual(['I', 'i'])
+      expect(layers.map((item) => item.id)).toEqual(['i', 'I'])
+    },
+  )
+
+  it('emits process separations in the same canonical equal-z layer order', () => {
+    const target = area('direct_surface_print', [
+      layer({ id: 'i', zIndex: 0, processes: [{ process: 'screen_print', spotName: 'LOWERCASE' }] }),
+      layer({ id: 'I', zIndex: 0, processes: [{ process: 'screen_print', spotName: 'UPPERCASE' }] }),
+    ])
+
+    expect(buildPrintManifest(target).separations).toEqual(['UPPERCASE', 'LOWERCASE'])
+    expect(target.layers.map((item) => item.id)).toEqual(['i', 'I'])
   })
 
   it('bakes selective white underbase only from a declared layer process', () => {

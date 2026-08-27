@@ -8,7 +8,7 @@ import { parseLabelProject } from '../app/projectSchema'
 import { canonicalFontStack } from '../label/fontStack'
 import { uploadedFontRecord } from '../label/fontRuntime'
 import { normalizeShapeLayer } from '../label/shapeGeometry'
-import { compareLayerZOrder } from '../label/layerOrder'
+import { canonicalLayerOrder, compareOrdinalText } from '../label/layerOrder'
 import type { CraftEffect, LabelAreaConfig, LabelLayer } from '../label/types'
 
 type UnknownRecord = Record<string, unknown>
@@ -238,11 +238,11 @@ function assertUniqueRenderIdentity(area: LabelAreaConfig): void {
 
 function areaProjection(area: LabelAreaConfig, blueprint?: LayoutBlueprintV1): UnknownRecord {
   assertUniqueRenderIdentity(area)
-  const ordered = area.layers.slice().sort(compareLayerZOrder)
+  const ordered = canonicalLayerOrder(area.layers)
   const layers = ordered.map((layer) => layerProjection(layer, area, blueprint))
   const fontAssets = layers.flatMap((layer) => layer.kind === 'text' ? [layer.font] : [])
     .filter((value, index, values) => values.findIndex((candidate) => JSON.stringify(candidate) === JSON.stringify(value)) === index)
-    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+    .sort((left, right) => compareOrdinalText(JSON.stringify(left), JSON.stringify(right)))
   return {
     id: area.blueprintAreaId ?? area.id,
     side: area.side ?? null,
@@ -309,7 +309,7 @@ function projectAreas(document: UnknownRecord): LabelAreaConfig[] {
 
 function stableAreas(areas: LabelAreaConfig[], blueprint?: LayoutBlueprintV1): UnknownRecord[] {
   return areas.map((area) => areaProjection(area, blueprint))
-    .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+    .sort((left, right) => compareOrdinalText(String(left.id), String(right.id)))
 }
 
 export function canonicalDocumentDesignProjection(document: unknown, blueprint?: LayoutBlueprintV1): UnknownRecord {

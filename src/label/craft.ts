@@ -7,6 +7,7 @@ import type { CraftEffect, CraftType, ImageLayer, LabelAreaConfig, LabelLayer, S
 import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
 import { resolveCarrierSurface } from './paper'
+import { canonicalLayerOrder } from './layerOrder'
 import { resolvePortableLayerTransform } from '../../scripts/lib/layer-transform-core.mjs'
 import { resolvePortableTextLayoutMetric } from '../../scripts/lib/text-layout-core.mjs'
 import {
@@ -787,6 +788,7 @@ export function renderMasks(
   layers: LabelLayer[],
   globalCraft: CraftEffect[],
 ): { metalness: HTMLCanvasElement; roughness: HTMLCanvasElement; bump: HTMLCanvasElement } {
+  const orderedLayers = canonicalLayerOrder(layers)
   const mk = (fill: string): [HTMLCanvasElement, CanvasRenderingContext2D] => {
     const c = document.createElement('canvas')
     c.width = width
@@ -807,7 +809,7 @@ export function renderMasks(
   bctx.fillStyle = '#808080'
   bctx.fillRect(0, 0, width, height)
 
-  for (const layer of layers) {
+  for (const layer of orderedLayers) {
     if (!layer.visible) continue
     for (const contribution of layerMaskContributions(layer)) {
       const ctx = contribution.channel === 'metalness' ? mctx : contribution.channel === 'roughness' ? rctx : bctx
@@ -967,12 +969,13 @@ export function renderCarrierMasks(
       return false
     }
   }
+  const orderedLayers = canonicalLayerOrder(area.layers)
   const substrateBacked = surface.carrier === 'legacy' || surface.substrateVisible
   const result: CarrierMaskResult = substrateBacked
-    ? renderMasks(width, height, safeDrawLayer, area.layers, area.globalCraft.craft)
+    ? renderMasks(width, height, safeDrawLayer, orderedLayers, area.globalCraft.craft)
     : {}
   if (substrateBacked) {
-    const underbaseLayers = area.layers.filter(isRenderableWhiteUnderbaseLayer)
+    const underbaseLayers = orderedLayers.filter(isRenderableWhiteUnderbaseLayer)
     if (underbaseLayers.length > 0) {
       const whiteUnderbase = document.createElement('canvas')
       whiteUnderbase.width = width
@@ -994,7 +997,7 @@ export function renderCarrierMasks(
   }
 
   const required = new Set<keyof CarrierMaskResult>()
-  for (const layer of area.layers) {
+  for (const layer of orderedLayers) {
     if (!canRenderMaskLayer(layer)) continue
     for (const contribution of layerMaskContributions(layer)) required.add(contribution.channel)
     if (layer.craft.some((effect) => effect.type === 'matte')) {
@@ -1037,7 +1040,7 @@ export function renderCarrierMasks(
   }
 
   let whiteUnderbaseDrawFailed = false
-  for (const layer of area.layers) {
+  for (const layer of orderedLayers) {
     if (!canRenderMaskLayer(layer)) continue
     for (const process of layer.processes ?? []) {
       const channel = process.process === 'white_underbase' || process.requiredMask === 'white_underbase'

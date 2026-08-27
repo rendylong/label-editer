@@ -51,6 +51,28 @@ describe('blueprint structural fidelity', () => {
     expect(compareBlueprintFidelity({ blueprint, editableAreas: editableAreas() })).toEqual({ pass: true, issues: [] })
   })
 
+  it('reports I/i z-order drift against code-unit order even under a reversed ambient locale', () => {
+    const source = structuredClone(blueprint)
+    source.areas[0].layers[0].id = 'I'
+    source.areas[0].layers[1].id = 'i'
+    source.areas[0].layers.forEach((layer) => { layer.zIndex = 0 })
+    const areas = applyStructuredLabelSpec(shell, { version: 2, areas: compileBlueprintToSpecAreas(source) }).areas
+    areas[0].layers.find((layer) => layer.id === 'I')!.zIndex = 1
+    areas[0].layers.find((layer) => layer.id === 'i')!.zIndex = 0
+    const original = String.prototype.localeCompare
+    let codes: string[] = []
+    try {
+      String.prototype.localeCompare = function (other: string): number {
+        return String(this) < other ? 1 : String(this) > other ? -1 : 0
+      }
+      codes = compareBlueprintFidelity({ blueprint: source, editableAreas: areas }).issues.map((issue) => issue.code)
+    } finally {
+      String.prototype.localeCompare = original
+    }
+
+    expect(codes).toContain('LAYER_ORDER_MISMATCH')
+  })
+
   it.each([
     ['exact copy', (areas: LabelAreaConfig[]) => { if (areas[0].layers[0].kind === 'text') areas[0].layers[0].text = 'ASH' }, 'TEXT_MISMATCH'],
     ['z-index', (areas: LabelAreaConfig[]) => { areas[0].layers[0].zIndex = 2 }, 'LAYER_ORDER_MISMATCH'],

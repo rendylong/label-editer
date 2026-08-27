@@ -189,3 +189,46 @@
 - The stricter gate deliberately rejects raw editable proxy drift even when physical metadata would later resolve to the same value; this is required because Project/embedded `.lbl` first load renders those stored values directly.
 - The full-suite command retains the 10-second Chromium allowance documented in Fix round 2; all browser assertions are unchanged and the dedicated affected/browser and packaged-plugin runs passed.
 - The optional headful live-preview E2E, caller-supplied model inspection, and Task 10 published PNG-byte validation remain outside this fix round.
+
+## Fix round 4 — one canonical layer order and encodable equal-z controls
+
+### RED reproductions
+
+- Canonical order/mask/editor/gate/review matrix:
+  - `pnpm vitest run tests/layerOrder.test.ts tests/carrierMask.test.ts tests/selection.test.ts tests/blueprintCompiler.test.ts tests/designReview.test.ts tests/approvalWorkflow.test.ts tests/fidelityCheck.test.ts --reporter=dot --testTimeout=180000`
+  - Before implementation: 7 files ran, 14 tests failed and 283 passed.
+  - Direct `renderMasks()`, substrate-backed masks, carrier-free process masks, and both white-underbase paths painted same-z `I`/`i` layers in storage order; the approval gate, compiler, immutable review, and fidelity check changed behavior when ambient `localeCompare` was reversed; all-equal and mixed-tie move/drag requests were no-ops or produced the wrong visual order.
+- Import-boundary identity matrix:
+  - `pnpm vitest run tests/projectSchema.test.ts tests/labelSpecV2.test.ts -t "duplicate layer ids" --reporter=verbose`
+  - Before implementation: both new duplicate-id cases failed because direct Project v3 and Label Spec v2 imports accepted ambiguous layer identities.
+
+### Semantic decisions and implementation
+
+- Added a small browser/Node shared order core with one exact bottom-to-top comparator: finite numeric `zIndex`, then locale-independent UTF-16/code-unit ordinal `id`. Its canonicalizer returns a new array and rejects empty ids, non-finite z values, and duplicate ids. TypeScript runtime wrappers and the immutable Node review renderer import the same implementation; production order code no longer calls ambient `localeCompare`.
+- Routed blueprint compilation, design projection/contracts, approval comparison, fidelity comparison, Konva preview, PBR/craft masks, carrier masks, substrate and carrier-free white underbase, print separations/readiness, font-readiness identity, and both editor layer lists through the shared canonical order. Direct mask calls and both `renderCarrierMasks()` branches now canonicalize non-mutating inputs before every contribution/draw loop.
+- Move and drag/drop now operate on canonical visual order and encode the requested order into finite z values. Existing distinct z slots are reused when that preserves locked layers; otherwise each unlocked segment is assigned representable finite values between unchanged locked barriers and the candidate is accepted only when canonical re-sort proves the exact requested identity order. Store history and selection behavior remain unchanged.
+- Project v3 parsing and Label Spec v2 semantic validation now fail closed on duplicate layer ids, matching the already-strict blueprint and handoff boundaries.
+
+### Scope expansion
+
+- Added `scripts/lib/layer-order-core.mjs`, its TypeScript declaration, and `tests/layerOrder.test.ts`.
+- Updated the compiler/projection/contracts/fidelity/review, canvas/craft/underbase/readiness, layer mutations/UI, and Project/Label Spec import boundaries.
+- Added exact reversed-storage overlapping-pixel regressions with different UV tones, `I`/`i` locale-simulation vectors, non-finite/duplicate contract cases, canonical separation/callback order, and all-equal/mixed-tie move, drag, lock, history, undo/redo, and selection cases.
+
+### GREEN verification
+
+- Focused ordering/mask/interaction suite: 3 files, 63 tests passed.
+- Affected gate/compiler/contracts/review/fidelity/import/rendering/editor/publication suite: 20 files, 712 tests passed.
+- Duplicate Project/Label Spec import boundary suite: 2 tests passed.
+- TypeScript: `pnpm exec tsc -b --pretty false` exited 0 with no diagnostics.
+- Full suite: `pnpm test -- --reporter=dot --testTimeout=180000` passed all 77 files; 1,282 tests passed and 1 environment-gated test skipped.
+- Production build: `pnpm build` exited 0; Vite transformed 225 modules. Existing browser-externalization, mixed GLTFLoader import, and large-chunk warnings remain non-failing.
+- Packaged plugin E2E: `pnpm test:plugin-e2e` passed the installed-like front/back apply/export flow; 1 passed and 1 environment-gated headful test skipped.
+- Real CLI/Chromium fixture: the 1600 × 1200 front/back review completed with no warnings; area crops were 210 × 340 and 200 × 320. The repeated no-`--force` invocation returned one structured `OUTPUT_CONFLICT` and exit code 9.
+- `git diff --check` exited cleanly before the fix commit.
+
+### Residual risks
+
+- If a requested unlocked ordering has no representable finite Float64 rank between fixed locked barriers, the mutation fails closed and leaves the document unchanged. Ordinary equal-z and mixed-tie segments, including locked tie barriers, are covered by exact regressions.
+- The optional headful live-preview E2E remains environment-gated. The installed-like browser E2E and realistic CLI Chromium render passed.
+- Caller-supplied model inspection and Task 10 published PNG-byte validation remain outside this fix round; their prior ownership is unchanged.

@@ -1,4 +1,5 @@
 import { deriveDesignFontRequests } from './fontRuntime'
+import { canonicalLayerOrder } from './layerOrder'
 import type { LabelAreaConfig } from './types'
 
 export type CarrierReadinessCode =
@@ -84,7 +85,7 @@ export function carrierReadinessChecks(area: LabelAreaConfig): CarrierReadinessC
 /** Stable identity for the visible font assets a baked area was drawn with. */
 export function designFontReadinessKey(area: Pick<LabelAreaConfig, 'layers' | 'fonts'>): string {
   return deriveDesignFontRequests(
-    area.layers.filter((layer) => layer.visible),
+    canonicalLayerOrder(area.layers).filter((layer) => layer.visible),
     area.fonts,
   ).map((request) => request.key).join('|')
 }

@@ -146,6 +146,27 @@ describe('blueprint-derived design review', () => {
     expect(result.html).toContain('left:20px;top:30px;width:160px;height:40px')
   })
 
+  it('renders equal-z I/i layers in code-unit order without consulting localeCompare', () => {
+    const source = blueprint()
+    const base = source.areas[0].layers[0]
+    source.areas[0].layers = [
+      { ...structuredClone(base), id: 'i', text: 'LOWERCASE', zIndex: 0 },
+      { ...structuredClone(base), id: 'I', text: 'UPPERCASE', zIndex: 0 },
+    ]
+    const original = String.prototype.localeCompare
+    let html = ''
+    try {
+      String.prototype.localeCompare = function (other: string): number {
+        return String(this) < other ? 1 : String(this) > other ? -1 : 0
+      }
+      html = renderBlueprintHtml(source, { pxPerMm: 5, width: 640, height: 480, assets: new Map() })
+    } finally {
+      String.prototype.localeCompare = original
+    }
+
+    expect(html.indexOf('data-layer-id="I"')).toBeLessThan(html.indexOf('data-layer-id="i"'))
+  })
+
   it.each([
     'Arial" onmouseover="globalThis.injected=true',
     'Arial; background:url(https://evil.example/font)',

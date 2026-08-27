@@ -2,7 +2,7 @@ import { uploadedFontRecord } from './fontRuntime'
 import { resolveCarrierSurface } from './paper'
 import type { LabelAreaConfig, LabelLayer } from './types'
 import { canonicalFontStack } from './fontStack'
-import { compareLayerZOrder } from './layerOrder'
+import { canonicalLayerOrder, compareOrdinalText } from './layerOrder'
 
 const MAX_SCAN_PIXELS_PER_CHUNK = 256 * 1024
 
@@ -60,10 +60,6 @@ function stableText(value: unknown): string {
   return JSON.stringify(canonicalValue(value))
 }
 
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0
-}
-
 function whiteProcessProjection(layer: LabelLayer): unknown[] {
   return (layer.processes ?? [])
     .filter((process) => process.process === 'white_underbase' || process.requiredMask === 'white_underbase')
@@ -71,7 +67,7 @@ function whiteProcessProjection(layer: LabelLayer): unknown[] {
       process: process.process,
       requiredMask: process.requiredMask,
     }))
-    .sort((left, right) => compareText(stableText(left), stableText(right)))
+    .sort((left, right) => compareOrdinalText(stableText(left), stableText(right)))
 }
 
 function contributorProjection(layer: LabelLayer): unknown {
@@ -130,13 +126,8 @@ function contributorProjection(layer: LabelLayer): unknown {
 export function whiteUnderbaseIntentKey(area: WhiteUnderbaseIntentArea): string {
   const contributors = area.carrier === 'bare'
     ? []
-    : area.layers
-        .filter(isRenderableWhiteUnderbaseLayer)
+    : canonicalLayerOrder(area.layers.filter(isRenderableWhiteUnderbaseLayer))
         .map(contributorProjection)
-        .sort((left, right) => compareLayerZOrder(
-          left as { zIndex: number; id: string },
-          right as { zIndex: number; id: string },
-        ))
   const usedFonts = new Map<string, { name: string; dataUrl: string }>()
   for (const layer of area.layers) {
     if (layer.kind !== 'text' || !isRenderableWhiteUnderbaseLayer(layer)) continue
@@ -157,7 +148,7 @@ export function whiteUnderbaseIntentKey(area: WhiteUnderbaseIntentArea): string 
     },
     contributors,
     usedFonts: [...usedFonts.values()].sort((left, right) => (
-      compareText(left.name, right.name) || compareText(left.dataUrl, right.dataUrl)
+      compareOrdinalText(left.name, right.name) || compareOrdinalText(left.dataUrl, right.dataUrl)
     )),
   }))
 }

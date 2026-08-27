@@ -167,6 +167,13 @@ afterEach(() => {
 })
 
 describe('label project v3', () => {
+  it('rejects duplicate layer ids before canonical rendering becomes ambiguous', () => {
+    const first = makeArea().layers[0]
+    const project = projectWithLayers([first, { ...first, x: first.x + 20 }])
+
+    expect(() => parseLabelProject(project)).toThrow(/duplicate layer id.*s1/i)
+  })
+
   it.each([
     ['process spotName', (project: Record<string, unknown>) => {
       const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>

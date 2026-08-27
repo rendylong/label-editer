@@ -513,6 +513,12 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
   const canvas = normalizeCanvas(requiredAreaValue(raw, 'canvas', legacy, { width: 2048, height: 2048, aspect: 1 }))
   const layersValue = requiredAreaValue(raw, 'layers', legacy, [])
   if (!Array.isArray(layersValue)) areaError('layers', '必须是数组')
+  const layers = layersValue.map(normalizeLayer)
+  const layerIds = new Set<string>()
+  for (const [layerIndex, layer] of layers.entries()) {
+    if (layerIds.has(layer.id)) areaError(`layers[${layerIndex}].id`, `Duplicate layer id ${layer.id}`)
+    layerIds.add(layer.id)
+  }
   const globalCraft = normalizeGlobalCraft(requiredAreaValue(raw, 'globalCraft', legacy, { craft: [] }))
   const fonts = normalizeFonts(requiredAreaValue(raw, 'fonts', legacy, []))
 
@@ -563,7 +569,7 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     ...(raw.blueprintAreaId === undefined ? {} : { blueprintAreaId: raw.blueprintAreaId as string }),
     ...(raw.designBinding === undefined ? {} : { designBinding: normalizeDesignBinding(raw.designBinding) }),
     ...(raw.printSpec === undefined ? {} : { printSpec: normalizePrintSpec(raw.printSpec) }),
-    layers: layersValue.map(normalizeLayer),
+    layers,
     globalCraft,
     fonts,
     // Reference pixels are runtime data and cannot be restored from a .lbl file.

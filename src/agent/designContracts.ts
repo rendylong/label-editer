@@ -11,7 +11,7 @@ import { canonicalApprovedBlueprintDesignProjection, canonicalDocumentDesignProj
 import { WorkflowGateError, type WorkflowGateErrorCode } from './workflowGateError'
 import { isStrictRfc3339DateTime, validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
 import { validateFontStack } from '../label/fontStack'
-import { compareLayerZOrder } from '../label/layerOrder'
+import { canonicalLayerOrder, compareOrdinalText } from '../label/layerOrder'
 
 export { WorkflowGateError } from './workflowGateError'
 export type { WorkflowGateErrorCode } from './workflowGateError'
@@ -713,7 +713,7 @@ async function readDocumentEvidence(source: WorkflowJsonSource): Promise<Documen
 }
 
 function stableSortById<T extends { id: string }>(values: readonly T[]): T[] {
-  return [...values].sort((left, right) => left.id.localeCompare(right.id))
+  return [...values].sort((left, right) => compareOrdinalText(left.id, right.id))
 }
 
 function manifestAreaProjection(values: readonly ManifestArea[]): ManifestArea[] {
@@ -1173,7 +1173,7 @@ function designProjections(blueprint: LayoutBlueprintV1): Record<string, unknown
     'design:copy': sortedLayerProjection(blueprint, (_area, layer) => layer.kind === 'text' ? layer.text : null),
     'design:hierarchy': stableSortById(blueprint.areas).map((area) => ({
       areaId: area.id,
-      layers: area.layers.slice().sort(compareLayerZOrder)
+      layers: canonicalLayerOrder(area.layers)
         .map((layer) => ({ id: layer.id, kind: layer.kind, zIndex: layer.zIndex, visible: layer.visible })),
     })),
     'design:layout': {

@@ -9,7 +9,7 @@ import { CRAFT_LABELS, FONT_STACKS } from '../label/types'
 import { bytesToDataUrl } from '../label/imageSource'
 import { nextLayerSelection } from '../label/selection'
 import { duplicateUnlockedLayer, moveUnlockedLayer, removeUnlockedLayer } from '../label/layerMutations'
-import { compareLayerZOrder } from '../label/layerOrder'
+import { canonicalLayerOrder } from '../label/layerOrder'
 import { Icon } from './icons'
 
 // ── 部件树（含贴标区域分组）───────────────────────────────────────────
@@ -246,7 +246,7 @@ export function LayersPanel(): React.JSX.Element {
     applyAreaOp(area.id, (cfg) => ({ ...cfg, layers: cfg.layers.map((l) => (l.id === id ? ({ ...l, ...p } as LabelLayer) : l)) }))
   }
 
-  const sorted = [...layers].sort(compareLayerZOrder)
+  const sorted = canonicalLayerOrder(layers)
 
   return (
     <div className="panel">

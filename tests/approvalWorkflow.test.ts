@@ -362,6 +362,31 @@ describe('design approval gate', () => {
     await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true, status: 'approved' })
   })
 
+  it('rejects a Project order that only matches a reversed ambient locale instead of review code-unit order', async () => {
+    const sourceBlueprint = blueprint()
+    sourceBlueprint.areas[0].layers[0].id = 'I'
+    sourceBlueprint.areas[0].layers[1].id = 'i'
+    sourceBlueprint.areas[0].layers.forEach((layer) => { layer.zIndex = 0 })
+    const state = workflowFixture(sourceBlueprint)
+    state.document = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+    state.document.areas[0].layers.find((layer: any) => layer.id === 'I').zIndex = 1
+    state.document.areas[0].layers.find((layer: any) => layer.id === 'i').zIndex = 0
+    const original = String.prototype.localeCompare
+    let outcome: unknown
+    try {
+      String.prototype.localeCompare = function (other: string): number {
+        return String(this) < other ? 1 : String(this) > other ? -1 : 0
+      }
+      outcome = await verifyDesignGate(designGateInput(state)).catch((error: unknown) => error)
+    } finally {
+      String.prototype.localeCompare = original
+    }
+
+    expect(outcome).toMatchObject({
+      name: 'WorkflowGateError', code: 'STALE_APPROVAL', details: { field: 'currentDocument.design' },
+    })
+  })
+
   it('rejects a Project z-order change defined by the design-review comparator', async () => {
     const state = workflowFixture()
     const project = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
