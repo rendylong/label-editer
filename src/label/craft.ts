@@ -8,6 +8,7 @@ import { FOIL_COLORS } from './types'
 import { normalizeShapeLayer, shapeCommands, traceShapeCommands, type ShapeCommand, type ShapeDrawingContext } from './shapeGeometry'
 import { resolveCarrierSurface } from './paper'
 import { canonicalLayerOrder } from './layerOrder'
+import { assertRenderedImageFrame } from './imageResourceLimits'
 import { resolvePortableLayerTransform } from '../../scripts/lib/layer-transform-core.mjs'
 import { resolvePortableTextLayoutMetric } from '../../scripts/lib/text-layout-core.mjs'
 import {
@@ -685,8 +686,7 @@ export function drawImageMaskShape(
   image: CanvasImageSource,
   gray: number,
 ): void {
-  const width = Math.max(1, Math.round(layer.width))
-  const height = Math.max(1, Math.round(layer.height))
+  const { width, height } = assertRenderedImageFrame(layer)
   const temp = document.createElement('canvas')
   temp.width = width
   temp.height = height
@@ -714,8 +714,7 @@ export function drawImageMaskShape(
 
 /** 为图片预览生成烫金、描边、磨砂与 UV 的颜色结果；透明区域始终保持透明。 */
 export function renderCraftedImage(image: CanvasImageSource, layer: ImageLayer): HTMLCanvasElement {
-  const width = Math.max(1, Math.round(layer.width))
-  const height = Math.max(1, Math.round(layer.height))
+  const { width, height } = assertRenderedImageFrame(layer)
   const base = document.createElement('canvas')
   base.width = width
   base.height = height

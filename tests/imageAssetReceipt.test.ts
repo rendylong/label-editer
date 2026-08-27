@@ -57,12 +57,12 @@ class ImmediateImage {
 }
 
 afterEach(() => {
+  syncImageAssetProject([])
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   ImmediateImage.sources = []
   ImmediateImage.naturalWidth = 2
   ImmediateImage.naturalHeight = 1
-  syncImageAssetProject([])
 })
 
 describe('content-bound image receipts', () => {
@@ -188,6 +188,36 @@ describe('content-bound image receipts', () => {
 
     syncImageAssetProject([area])
     await loadAreaContentBoundImage('area', 3, visible)
+    expect(fetch).toHaveBeenCalledTimes(2)
+    syncImageAssetProject([])
+  })
+
+  it('keeps control-delimiter area/layer owner tuples distinct without cross-eviction', async () => {
+    const firstLayer = {
+      id: 'c', kind: 'image', src: '/first.png', naturalWidth: 2, naturalHeight: 1, visible: true,
+    } as ImageLayer
+    const secondLayer = {
+      id: 'b\u0000c', kind: 'image', src: '/second.png', naturalWidth: 2, naturalHeight: 1, visible: true,
+    } as ImageLayer
+    const areas = [
+      { id: 'a\u0000b', layers: [firstLayer] },
+      { id: 'a', layers: [secondLayer] },
+    ] as LabelAreaConfig[]
+    const bytes = pngBytes(2, 1)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array(bytes).buffer, {
+      status: 200, headers: { 'content-type': 'image/png', 'content-length': String(bytes.byteLength) },
+    })))
+    vi.stubGlobal('Image', ImmediateImage)
+    let objectIndex = 0
+    vi.stubGlobal('URL', { createObjectURL: vi.fn(() => `blob:tuple-${++objectIndex}`), revokeObjectURL: vi.fn() })
+    syncImageAssetProject(areas)
+
+    const first = await loadAreaContentBoundImage(areas[0].id, 1, firstLayer)
+    const second = await loadAreaContentBoundImage(areas[1].id, 1, secondLayer)
+    const firstAgain = await loadAreaContentBoundImage(areas[0].id, 2, firstLayer)
+
+    expect(firstAgain).toBe(first)
+    expect(second).not.toBe(first)
     expect(fetch).toHaveBeenCalledTimes(2)
     syncImageAssetProject([])
   })

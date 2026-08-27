@@ -140,6 +140,19 @@ describe('project image resource budget', () => {
     })))
     expect(() => parseLabelProject(aggregate)).toThrow(/aggregate.*pixel|image.*budget/i)
   })
+
+  it('bounds rendered image frames independently from natural pixels on import and serialization', () => {
+    const renderedTooWide = projectWithLayers([{
+      ...makeImageLayer(), naturalWidth: 1, naturalHeight: 1, width: 8193, height: 1,
+    }])
+    expect(() => parseLabelProject(renderedTooWide)).toThrow(/rendered|frame|image.*dimension/i)
+
+    const runtime = makeArea()
+    runtime.layers = [{
+      ...makeImageLayer(), naturalWidth: 1, naturalHeight: 1, width: 4097, height: 4096,
+    } as unknown as LabelAreaConfig['layers'][number]]
+    expect(() => serializeLabelProject('unsafe-runtime.glb', [runtime])).toThrow(/rendered|frame|image.*pixel/i)
+  })
 })
 
 function physicalProjectFixture(): Record<string, unknown> {

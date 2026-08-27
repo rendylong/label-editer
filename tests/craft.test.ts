@@ -262,6 +262,22 @@ describe('图片遮罩绘制', () => {
     globalThis.document = originalDocument
   })
 
+  it('rejects an oversized rendered image frame before allocating preview or mask canvases', () => {
+    const createElement = (() => {
+      throw new Error('canvas allocation must not occur')
+    })
+    globalThis.document = { createElement } as unknown as Document
+    const layer: ImageLayer = {
+      id: 'oversized-render-frame', kind: 'image', src: 'blob:test',
+      naturalWidth: 1, naturalHeight: 1, width: 8193, height: 1,
+      x: 0, y: 0, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 0, craft: [],
+    }
+
+    expect(() => craft.renderCraftedImage?.({} as CanvasImageSource, layer)).toThrow(/rendered|frame|image.*dimension/i)
+    expect(() => craft.drawImageMaskShape?.({} as CanvasRenderingContext2D, layer, {} as CanvasImageSource, 255))
+      .toThrow(/rendered|frame|image.*dimension/i)
+  })
+
   it('图片透明轮廓在 renderMasks 返回前同步绘制', () => {
     const operations: string[] = []
     const tempContext = {

@@ -77,9 +77,61 @@ async function readCommitted(url: string, lease: Lease): Promise<Response> {
   return fetch(url, { headers: leaseHeaders(lease), cache: 'no-store', redirect: 'error' })
 }
 
-async function verifyAndFinalize(base: string, auth: string, lease: Lease, artifacts: Array<{ url: string }>): Promise<Response> {
+async function acknowledgeReadback(
+  base: string,
+  auth: string,
+  lease: Lease,
+  artifacts: Array<{ id: string; resultId: string; sha256: string }>,
+): Promise<Response> {
+  return fetch(`${base}/stage/${lease.batchId}/receipt?${auth}`, {
+    method: 'POST',
+    headers: { ...leaseHeaders(lease), 'content-type': 'application/json' },
+    body: JSON.stringify({
+      leaseToken: lease.leaseToken,
+      generation: lease.generation,
+      artifacts: artifacts.map(({ id, resultId, sha256 }) => ({ id, resultId, sha256 })),
+    }),
+    redirect: 'error',
+  })
+}
+
+async function verifyAndFinalize(
+  base: string,
+  auth: string,
+  lease: Lease,
+  artifacts: Array<{ id: string; resultId: string; sha256: string; url: string }>,
+): Promise<Response> {
   for (const artifact of artifacts) expect((await readCommitted(artifact.url, lease)).status).toBe(200)
+  expect((await acknowledgeReadback(base, auth, lease, artifacts)).status).toBe(200)
   return finish(base, auth, lease, 'finalize')
+}
+
+function gatedBody(bytes: Uint8Array): {
+  body: ReadableStream<Uint8Array>
+  started: Promise<void>
+  release: () => void
+} {
+  let markStarted!: () => void
+  let release!: () => void
+  const started = new Promise<void>((resolve) => { markStarted = resolve })
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  let sent = false
+  return {
+    body: new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (!sent) {
+          sent = true
+          controller.enqueue(bytes)
+          markStarted()
+          return
+        }
+        await gate
+        controller.close()
+      },
+    }),
+    started,
+    release,
+  }
 }
 
 describe('review artifact lease transactions', () => {
@@ -87,8 +139,8 @@ describe('review artifact lease transactions', () => {
     const { server, session, base, auth } = await fixture()
     try {
       const first = await begin(base, auth, 'front-back')
-      const front1 = await stage(base, auth, first, 'first-front', 'front', 1) as { id: string; resultId: string; url: string }
-      const back1 = await stage(base, auth, first, 'first-back', 'back', 2) as { id: string; resultId: string; url: string }
+      const front1 = await stage(base, auth, first, 'first-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
+      const back1 = await stage(base, auth, first, 'first-back', 'back', 2) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, first, [front1, back1])).status).toBe(201)
       expect((await verifyAndFinalize(base, auth, first, [front1, back1])).status).toBe(200)
 
@@ -104,7 +156,7 @@ describe('review artifact lease transactions', () => {
       expect((await fetch(back1.url)).status).toBe(200)
 
       const third = await begin(base, auth, 'front-only-final')
-      const front3 = await stage(base, auth, third, 'third-front', 'front', 4) as { id: string; resultId: string; url: string }
+      const front3 = await stage(base, auth, third, 'third-front', 'front', 4) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, third, [front3])).status).toBe(201)
       expect((await verifyAndFinalize(base, auth, third, [front3])).status).toBe(200)
       expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'third-front' }])
@@ -124,17 +176,21 @@ describe('review artifact lease transactions', () => {
       expect(server.getArtifacts(session.id)).toEqual([])
       const firstAbort = await finish(base, auth, leaseB, 'abort')
       expect(firstAbort.status).toBe(200)
+      const firstAbortPayload = await firstAbort.json()
       const replayedAbort = await finish(base, auth, leaseB, 'abort')
       expect(replayedAbort.status).toBe(200)
-      expect(await replayedAbort.json()).toEqual(await firstAbort.json())
+      expect(await replayedAbort.json()).toEqual(firstAbortPayload)
 
       const leaseC = await begin(base, auth, 'attempt-c')
       expect(leaseC.generation).toBeGreaterThan(leaseB.generation)
-      const c = await stage(base, auth, leaseC, 'c-front', 'front', 8) as { id: string; resultId: string; url: string }
+      const c = await stage(base, auth, leaseC, 'c-front', 'front', 8) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, leaseC, [c])).status).toBe(201)
-      expect((await finish(base, auth, leaseB, 'abort')).status).toBe(409)
+      const oldAbortReplay = await finish(base, auth, leaseB, 'abort')
+      expect(oldAbortReplay.status).toBe(200)
+      expect(await oldAbortReplay.json()).toEqual(firstAbortPayload)
       expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'c-front' }])
       expect((await readCommitted(c.url, leaseC)).status).toBe(200)
+      expect((await acknowledgeReadback(base, auth, leaseC, [c])).status).toBe(200)
       const firstFinalize = await finish(base, auth, leaseC, 'finalize')
       expect(firstFinalize.status).toBe(200)
       const replayedFinalize = await finish(base, auth, leaseC, 'finalize')
@@ -147,7 +203,7 @@ describe('review artifact lease transactions', () => {
     const { server, session, base, auth } = await fixture({ reviewLeaseMs: 100 })
     try {
       const originalLease = await begin(base, auth, 'timer-original')
-      const original = await stage(base, auth, originalLease, 'timer-original-front', 'front', 1) as { id: string; resultId: string; url: string }
+      const original = await stage(base, auth, originalLease, 'timer-original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
       expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
 
@@ -186,7 +242,9 @@ describe('review artifact lease transactions', () => {
       expect((await finish(base, auth, second, 'abort')).status).toBe(200)
       const third = await begin(base, auth, 'deadline-third')
       now = 1_090
-      expect((await finish(base, auth, second, 'abort')).status).toBe(409)
+      // A bounded settlement replay is idempotent even after a newer lease, but
+      // it must not renew or otherwise mutate that newer transaction.
+      expect((await finish(base, auth, second, 'abort')).status).toBe(200)
       now = 1_100
       expect((await acquire(base, auth, 'deadline-fourth')).status).toBe(201)
       expect(third.generation).toBeGreaterThan(first.generation)
@@ -243,25 +301,165 @@ describe('review artifact lease transactions', () => {
     } finally { await server.close() }
   })
 
-  it('seals a fully read-back candidate on recovery and never lets a stale abort resurrect its prior generation', async () => {
+  it('serializes acquire after body reads so concurrent requests create exactly one lease', async () => {
+    const { server, base, auth } = await fixture()
+    try {
+      const firstBody = gatedBody(new TextEncoder().encode('{}'))
+      const secondBody = gatedBody(new TextEncoder().encode('{}'))
+      const request = (batchId: string, body: ReadableStream<Uint8Array>) => fetch(`${base}/stage/${batchId}/acquire?${auth}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body, redirect: 'error', duplex: 'half',
+      } as RequestInit & { duplex: 'half' })
+      const first = request('concurrent-acquire-a', firstBody.body)
+      const second = request('concurrent-acquire-b', secondBody.body)
+      await Promise.all([firstBody.started, secondBody.started])
+      firstBody.release()
+      secondBody.release()
+
+      const responses = await Promise.all([first, second])
+      expect(responses.map((response) => response.status).sort()).toEqual([201, 409])
+      const winner = responses.find((response) => response.status === 201)!
+      const lease = await winner.json() as Lease
+      expect((await finish(base, auth, lease, 'abort')).status).toBe(200)
+    } finally { await server.close() }
+  })
+
+  it('serializes stage acceptance after body reads so count and aggregate bytes cannot overrun', async () => {
+    const run = async (options: { maxReviewBatchArtifacts: number; maxReviewBatchBytes: number }, expectedError: RegExp) => {
+      const { server, base, auth } = await fixture(options)
+      try {
+        const lease = await begin(base, auth, `concurrent-stage-${options.maxReviewBatchArtifacts}-${options.maxReviewBatchBytes}`)
+        const firstBody = gatedBody(new Uint8Array([1]))
+        const secondBody = gatedBody(new Uint8Array([2]))
+        const request = (id: string, body: ReadableStream<Uint8Array>) => fetch(`${base}/stage/${lease.batchId}/${id}?${auth}`, {
+          method: 'PUT',
+          headers: {
+            ...leaseHeaders(lease), 'content-type': 'image/png',
+            'x-artifact-file-name': `${id}.png`, 'x-artifact-result-id': id,
+          },
+          body,
+          redirect: 'error',
+          duplex: 'half',
+        } as RequestInit & { duplex: 'half' })
+        const first = request('one', firstBody.body)
+        const second = request('two', secondBody.body)
+        await Promise.all([firstBody.started, secondBody.started])
+        firstBody.release()
+        secondBody.release()
+        const responses = await Promise.all([first, second])
+        expect(responses.map((response) => response.status).sort()).toEqual([201, 413])
+        const rejected = responses.find((response) => response.status === 413)!
+        expect((await rejected.json()).error).toMatch(expectedError)
+        expect((await finish(base, auth, lease, 'abort')).status).toBe(200)
+      } finally { await server.close() }
+    }
+
+    await run({ maxReviewBatchArtifacts: 1, maxReviewBatchBytes: 2 }, /count/i)
+    await run({ maxReviewBatchArtifacts: 2, maxReviewBatchBytes: 1 }, /bytes/i)
+  })
+
+  it('does not treat a GET or cancelled response body as post-download verification', async () => {
+    let now = 1_000
+    const { server, session, base, auth } = await fixture({ reviewLeaseMs: 100, now: () => now })
+    try {
+      const originalLease = await begin(base, auth, 'cancel-original')
+      const original = await stage(base, auth, originalLease, 'cancel-original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
+      expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
+      expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
+
+      const candidateLease = await begin(base, auth, 'cancel-candidate')
+      const candidate = await stage(base, auth, candidateLease, 'cancel-candidate-front', 'front', 2) as { id: string; resultId: string; sha256: string; url: string }
+      expect((await commit(base, auth, candidateLease, [candidate])).status).toBe(201)
+      const response = await readCommitted(candidate.url, candidateLease)
+      expect(response.status).toBe(200)
+      await response.body?.cancel()
+
+      now = 1_100
+      const recovered = await begin(base, auth, 'cancel-recovered')
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'cancel-original-front' }])
+      expect((await finish(base, auth, recovered, 'abort')).status).toBe(200)
+    } finally { await server.close() }
+  })
+
+  it('keeps a receipt-confirmed candidate recoverable until an explicit success signal or next consumer seals it', async () => {
     const { server, session, base, auth } = await fixture({ reviewLeaseMs: 100 })
     try {
       const originalLease = await begin(base, auth, 'verified-original')
-      const original = await stage(base, auth, originalLease, 'verified-original-front', 'front', 1) as { id: string; resultId: string; url: string }
+      const original = await stage(base, auth, originalLease, 'verified-original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
       expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
 
       const candidateLease = await begin(base, auth, 'verified-candidate')
-      const candidate = await stage(base, auth, candidateLease, 'verified-candidate-front', 'front', 2) as { id: string; resultId: string; url: string }
+      const candidate = await stage(base, auth, candidateLease, 'verified-candidate-front', 'front', 2) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, candidateLease, [candidate])).status).toBe(201)
       expect((await readCommitted(candidate.url, candidateLease)).status).toBe(200)
+      expect((await acknowledgeReadback(base, auth, candidateLease, [candidate])).status).toBe(200)
 
-      await new Promise((resolve) => setTimeout(resolve, 220))
+      // A failed final live barrier can still restore the prior complete set.
+      expect((await finish(base, auth, candidateLease, 'abort')).status).toBe(200)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-original-front' }])
+
+      const recoveredLease = await begin(base, auth, 'verified-recovered')
+      const recovered = await stage(base, auth, recoveredLease, 'verified-recovered-front', 'front', 3) as { id: string; resultId: string; sha256: string; url: string }
+      expect((await commit(base, auth, recoveredLease, [recovered])).status).toBe(201)
+      expect((await readCommitted(recovered.url, recoveredLease)).status).toBe(200)
+      expect((await acknowledgeReadback(base, auth, recoveredLease, [recovered])).status).toBe(200)
+
+      // The first consumer that follows a successful bridge result may seal by
+      // dereferencing its candidate locator without lease headers.
+      expect((await fetch(recovered.url)).status).toBe(200)
       const next = await begin(base, auth, 'verified-next')
-      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-candidate-front' }])
-      expect((await finish(base, auth, candidateLease, 'abort')).status).toBe(409)
-      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-candidate-front' }])
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-recovered-front' }])
+      expect((await finish(base, auth, recoveredLease, 'abort')).status).toBe(409)
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'verified-recovered-front' }])
       expect((await finish(base, auth, next, 'abort')).status).toBe(200)
+    } finally { await server.close() }
+  })
+
+  it('seals a receipt-confirmed candidate even when the success acknowledgement body is lost', async () => {
+    const { server, session, base, auth } = await fixture()
+    try {
+      const lease = await begin(base, auth, 'lost-success-ack')
+      const artifact = await stage(base, auth, lease, 'lost-success-front', 'front', 4) as { id: string; resultId: string; sha256: string; url: string }
+      expect((await commit(base, auth, lease, [artifact])).status).toBe(201)
+      expect((await readCommitted(artifact.url, lease)).status).toBe(200)
+      expect((await acknowledgeReadback(base, auth, lease, [artifact])).status).toBe(200)
+
+      const success = await finish(base, auth, lease, 'finalize')
+      expect(success.status).toBe(200)
+      await success.body?.cancel()
+      const later = await begin(base, auth, 'after-lost-success-ack')
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'lost-success-front' }])
+
+      const replay = await finish(base, auth, lease, 'finalize')
+      expect(replay.status).toBe(200)
+      expect(await replay.json()).toEqual({
+        ok: true, batchId: lease.batchId, generation: lease.generation, finalized: true,
+      })
+      expect((await finish(base, auth, later, 'abort')).status).toBe(200)
+    } finally { await server.close() }
+  })
+
+  it('rejects legacy writes that collide with current review internal or result ids without corrupting the index', async () => {
+    const { server, session, base, auth } = await fixture()
+    try {
+      const lease = await begin(base, auth, 'legacy-collision-review')
+      const artifact = await stage(base, auth, lease, 'private-review-front', 'front', 5) as { id: string; resultId: string; sha256: string; url: string }
+      expect((await commit(base, auth, lease, [artifact])).status).toBe(201)
+      expect((await verifyAndFinalize(base, auth, lease, [artifact])).status).toBe(200)
+
+      for (const id of ['private-review-front', 'front']) {
+        const collision = await fetch(`${base}/${id}?${auth}`, {
+          method: 'PUT', headers: { 'content-type': 'image/png' }, body: new Uint8Array([9]),
+        })
+        expect(collision.status).toBe(409)
+      }
+      expect(server.getArtifacts(session.id)).toMatchObject([{ id: 'front', internalId: 'private-review-front', sha256: artifact.sha256 }])
+
+      const legacy = await fetch(`${base}/legacy-preview?${auth}`, {
+        method: 'PUT', headers: { 'content-type': 'image/png' }, body: new Uint8Array([9]),
+      })
+      expect(legacy.status).toBe(201)
+      expect(server.getArtifacts(session.id).map((item: { id: string }) => item.id).sort()).toEqual(['front', 'legacy-preview'])
     } finally { await server.close() }
   })
 
@@ -270,7 +468,7 @@ describe('review artifact lease transactions', () => {
     const { server, session, base, auth } = await fixture({ reviewLeaseMs: 50, now: () => now })
     try {
       const originalLease = await begin(base, auth, 'original')
-      const original = await stage(base, auth, originalLease, 'original-front', 'front', 1) as { id: string; resultId: string; url: string }
+      const original = await stage(base, auth, originalLease, 'original-front', 'front', 1) as { id: string; resultId: string; sha256: string; url: string }
       expect((await commit(base, auth, originalLease, [original])).status).toBe(201)
       expect((await verifyAndFinalize(base, auth, originalLease, [original])).status).toBe(200)
 

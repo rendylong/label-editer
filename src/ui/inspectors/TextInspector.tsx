@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { fontEntry } from '../../label/fontCatalog'
-import { uploadedFontId } from '../../label/fontRuntime'
+import { uploadedFontId, uploadedFontReceipt } from '../../label/fontRuntime'
 import { uploadFontFile, type UploadedFont } from '../../label/fonts'
 import type { AreaMutationGateway } from '../../label/selection'
 import type { LabelAreaConfig, LabelLayer, TextLayer } from '../../label/types'
@@ -21,13 +21,16 @@ export function commitFreshUploadedFont(
   font: UploadedFont,
   applyAreaOp: AreaMutationGateway,
 ): void {
+  const runtimeId = uploadedFontId(font.name)
+  if (font.id !== runtimeId) throw new Error('Uploaded font runtime identity is invalid')
+  uploadedFontReceipt({ name: font.name, dataUrl: font.dataUrl })
   applyAreaOp(areaId, (config) => {
     const target = config.layers.find((item) => item.id === layerId)
     if (!target || target.kind !== 'text' || target.locked) return config
     return {
       ...config,
-      fonts: [...config.fonts.filter((item) => item.name !== font.name), { name: font.name, dataUrl: font.dataUrl }],
-      layers: config.layers.map((item) => item.id === layerId ? { ...target, ...selectedFontPatch(uploadedFontId(font.name)) } : item),
+      fonts: [...config.fonts.filter((item) => uploadedFontId(item.name) !== runtimeId), { name: font.name, dataUrl: font.dataUrl }],
+      layers: config.layers.map((item) => item.id === layerId ? { ...target, ...selectedFontPatch(runtimeId) } : item),
     }
   })
 }
@@ -36,7 +39,7 @@ export function TextInspector({ area, layer, patch, uploadFont = uploadFontFile,
   area: LabelAreaConfig
   layer: TextLayer
   patch: (patch: Partial<LabelLayer>) => void
-  uploadFont?: (file: File) => Promise<UploadedFont>
+  uploadFont?: (file: File, existingFonts: ReadonlyArray<LabelAreaConfig['fonts'][number]>) => Promise<UploadedFont>
   commitUploadedFont: (font: UploadedFont) => void
 }): React.JSX.Element {
   const requestedWeight = typeof layer.fontWeight === 'number' ? layer.fontWeight : layer.fontWeight === 'bold' ? 700 : 400

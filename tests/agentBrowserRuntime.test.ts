@@ -817,6 +817,7 @@ describe('browser Agent clean production review runtime', () => {
     stageValue?: (descriptor: Record<string, unknown>, index: number) => Record<string, unknown>
     failStageAt?: number
     onCommit?: () => void
+    onReceipt?: () => void
     onAbort?: () => void
     onFinalize?: () => void
     finalizeResponse?: (url: URL, batchId: string, generation: number) => Response | Promise<Response>
@@ -854,6 +855,21 @@ describe('browser Agent clean production review runtime', () => {
         options.onCommit?.()
         return jsonAt(url, 201, options.commitValue?.(body, batchId) ?? {
           ok: true, batchId, artifactIds: body.artifactIds, resultIds: body.resultIds, generation: body.generation,
+        })
+      }
+      if (init?.method === 'POST' && id === 'receipt') {
+        const body = JSON.parse(String(init.body)) as {
+          artifacts: Array<{ id: string; resultId: string; sha256: string }>
+          generation: number
+        }
+        const batchId = decodeURIComponent(url.pathname.split('/').at(-2)!)
+        options.onReceipt?.()
+        return jsonAt(url, 200, {
+          ok: true,
+          batchId,
+          generation: body.generation,
+          receipt: true,
+          artifactIds: body.artifacts.map((artifact) => artifact.id),
         })
       }
       if (init?.method === 'POST' && id === 'finalize') {
@@ -946,7 +962,7 @@ describe('browser Agent clean production review runtime', () => {
     expect(new Set(putPaths).size).toBe(10)
   })
 
-  it('returns success after the final live barrier without awaiting an irreversible finalize acknowledgement', async () => {
+  it('posts exact readback receipts, then returns after the final live barrier without awaiting the success acknowledgement', async () => {
     const { request } = reviewFixture()
     registerReviewCapture()
     let releaseFinalize: (() => void) | undefined
@@ -975,8 +991,28 @@ describe('browser Agent clean production review runtime', () => {
     const result = await rendering
 
     expect(completion).toBe('returned')
-    expect(finalizeCalls).toBe(0)
+    expect(finalizeCalls).toBe(1)
     expect(result).toMatchObject({ ok: true, operation: 'render_review_evidence' })
+  })
+
+  it('aborts a receipt-confirmed candidate when the final synchronous freshness barrier fails', async () => {
+    const { request, owner } = reviewFixture()
+    registerReviewCapture()
+    let aborted = false
+    acceptUploads([], {
+      onReceipt: () => useLabelStore.getState().applyAreaOp(owner.id, (current) => ({ ...current, name: 'mutated-after-receipt' })),
+      onAbort: () => { aborted = true },
+    })
+
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: false, operation: 'render_review_evidence', error: { code: 'BROWSER_NOT_READY' },
+    })
+    expect(aborted).toBe(true)
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([input, init]) => {
+      const url = new URL(String(input), window.location.origin)
+      return init?.method === 'POST' && url.pathname.endsWith('/finalize')
+    })).toBe(false)
   })
 
   it('fails a competing server lease without staging or aborting another runtime transaction', async () => {

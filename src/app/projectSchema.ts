@@ -5,7 +5,7 @@ import { hasValidLegacyPaperCarrierProvenance, resolveLabelPaper } from '../labe
 import { validateVectorPath } from '../label/vectorPathValidation'
 import { canonicalFontStack, validateFontStack } from '../label/fontStack'
 import { uploadedFontIdentity } from '../label/uploadedFontIdentity'
-import { imageResourceBudgetIssue } from '../label/imageResourceLimits'
+import { assertImageResourceBudget, imageResourceBudgetIssue } from '../label/imageResourceLimits'
 import layoutBlueprintV1Schema from '../agent/layout-blueprint-v1.schema.json'
 import type {
   CanvasSpec,
@@ -601,7 +601,7 @@ export function parseLabelProject(raw: unknown): LabelProjectV3 {
 }
 
 export function serializeLabelProject(modelFileName: string, areas: Array<LabelAreaConfig | SerializedArea>): LabelProjectV3 {
-  return {
+  const project: LabelProjectV3 = {
     version: PROJECT_VERSION,
     modelFileName,
     areas: areas.map((area, index) => {
@@ -623,4 +623,6 @@ export function serializeLabelProject(modelFileName: string, areas: Array<LabelA
       return preserveLegacyCarrier ? projectArea : { ...projectArea, ...(normalizedCarrier ? { carrier: normalizedCarrier } : {}) }
     }),
   }
+  assertImageResourceBudget(project.areas)
+  return project
 }

@@ -508,7 +508,7 @@ describe('font browser boundaries', () => {
       await chooseFreshUpload(dom, file)
       await act(async () => { await tick() })
 
-      expect(uploadFont).toHaveBeenCalledWith(file)
+      expect(uploadFont).toHaveBeenCalledWith(file, config.fonts)
       expect(commitUploadedFont).toHaveBeenCalledOnce()
       expect(commitUploadedFont).toHaveBeenCalledWith(uploaded)
       expect(patch).not.toHaveBeenCalled()
@@ -531,6 +531,7 @@ describe('font browser boundaries', () => {
       await openFontBrowser(dom, tick)
       await chooseFreshUpload(dom, new dom.window.File(['font'], 'slow.woff2') as unknown as File)
       expect(uploadFont).toHaveBeenCalledOnce()
+      expect(uploadFont).toHaveBeenCalledWith(expect.anything(), config.fonts)
       const arial = [...dom.window.document.querySelectorAll<HTMLButtonElement>('.font-browser-row.system .font-choice')]
         .find((button) => button.textContent?.includes('Arial'))!
       await act(async () => { arial.click() })
@@ -665,6 +666,30 @@ describe('font browser boundaries', () => {
     expect(current.fonts).toEqual([{ name: 'Brand', dataUrl: font.dataUrl }])
     expect(current.layers[0]).toMatchObject({ id: 'text-a', fontFamily: 'upload:brand' })
     expect((current.layers[0] as TextLayer).fontStack).toBeUndefined()
+  })
+
+  it('atomically replaces every normalized upload identity collision and selects the newly uploaded bytes', async () => {
+    const module = await import('../src/ui/inspectors/TextInspector') as typeof import('../src/ui/inspectors/TextInspector')
+    let current = area([{ ...textLayer('text-a', 10), fontFamily: 'upload:brand-font' }])
+    current = {
+      ...current,
+      fonts: [
+        { name: 'Brand Font', dataUrl: 'data:font/woff2;base64,T0xELUE=' },
+        { name: 'brand_font', dataUrl: 'data:font/woff2;base64,T0xELUI=' },
+      ],
+    }
+    const applyAreaOp = vi.fn((_areaId: string, updater: (area: LabelAreaConfig) => LabelAreaConfig) => {
+      current = updater(current)
+    })
+    const fresh: UploadedFont = {
+      id: 'upload:brand-font', name: 'brand-font', css: '"__upload_brand_font_new", sans-serif',
+      dataUrl: 'data:font/woff2;base64,TkVXLUJZVEVT',
+    }
+
+    module.commitFreshUploadedFont(current.id, 'text-a', fresh, applyAreaOp)
+
+    expect(current.fonts).toEqual([{ name: 'brand-font', dataUrl: fresh.dataUrl }])
+    expect(current.layers[0]).toMatchObject({ fontFamily: 'upload:brand-font' })
   })
 
   it('replaces an approved stack when the Inspector selects a catalog family', async () => {

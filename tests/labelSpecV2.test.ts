@@ -41,6 +41,24 @@ describe('Label Spec v2', () => {
     })
   })
 
+  it('revalidates rendered image dimensions after normalized spec coordinates map to the target canvas', () => {
+    const spec = {
+      version: 2,
+      areas: [{
+        id: 'front', name: 'Front', target: { meshIndex: 0 }, surfaceMode: 'overlay',
+        range: { uStart: 0, uWidth: 1, vStart: 0, vHeight: 1 },
+        layers: [{
+          id: 'mapped-image', type: 'image', asset: 'tiny.png', x: 0.5, y: 0.5,
+          width: 4, height: 1, naturalWidth: 1, naturalHeight: 1,
+        }],
+      }],
+    }
+    const largeCanvas = { ...baseArea, canvas: { width: 4096, height: 4096, aspect: 1 } }
+
+    expect(validateLabelSpec(spec).ok).toBe(true)
+    expect(() => applyStructuredLabelSpec(largeCanvas, spec)).toThrow(/rendered|frame|image.*dimension/i)
+  })
+
   it('rejects duplicate layer ids before structured apply reaches the renderer', () => {
     const mark = { id: 'mark', type: 'shape', shape: 'rectangle', x: 0.5, y: 0.5, width: 0.4, height: 0.4 }
     const spec = {

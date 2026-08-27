@@ -179,6 +179,7 @@ describe('LabelCanvas image readiness ownership', () => {
   let dom: JSDOM
   let root: ReturnType<typeof createRoot>
   let frames: FrameRequestCallback[]
+  let mounted: boolean
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -219,10 +220,11 @@ describe('LabelCanvas image readiness ownership', () => {
     }))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     root = createRoot(dom.window.document.querySelector('#root')!)
+    mounted = true
   })
 
   afterEach(async () => {
-    await act(async () => root.unmount())
+    if (mounted) await act(async () => root.unmount())
     dom.window.close()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -370,5 +372,53 @@ describe('LabelCanvas image readiness ownership', () => {
     await act(async () => useLabelStore.getState().activateArea(first.id))
     await act(async () => { await Promise.resolve(); await Promise.resolve() })
     expect(DeferredImage.instances).toHaveLength(2)
+  })
+
+  it('evicts hidden image pixels and reloads exact bytes when the same layer becomes visible again', async () => {
+    const config = area('visibility-cycle.png')
+    useLabelStore.getState().addArea(config)
+    await act(async () => root.render(createElement(LabelCanvas, { displayWidth: 400 })))
+    await act(async () => {
+      DeferredImage.instances[0].resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(dom.window.document.querySelector('[data-image-preview]')).not.toBeNull()
+    expect(fetch).toHaveBeenCalledTimes(1)
+
+    await act(async () => useLabelStore.getState().applyAreaOp(config.id, (current) => ({
+      ...current,
+      layers: current.layers.map((layer) => layer.kind === 'image' ? { ...layer, visible: false } : layer),
+    })))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(dom.window.document.querySelector('[data-image-preview]')).toBeNull()
+    expect(DeferredImage.instances[0].src).toBe('')
+
+    await act(async () => useLabelStore.getState().applyAreaOp(config.id, (current) => ({
+      ...current,
+      layers: current.layers.map((layer) => layer.kind === 'image' ? { ...layer, visible: true } : layer),
+    })))
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(DeferredImage.instances).toHaveLength(2)
+    await act(async () => {
+      DeferredImage.instances[1].resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(dom.window.document.querySelector('[data-image-preview]')).not.toBeNull()
+  })
+
+  it('aborts and releases project image resources on actual LabelCanvas component unmount', async () => {
+    const config = area('component-unmount.png')
+    useLabelStore.getState().addArea(config)
+    await act(async () => root.render(createElement(LabelCanvas, { displayWidth: 400 })))
+    expect(DeferredImage.instances).toHaveLength(1)
+    expect(DeferredImage.instances[0].src).not.toBe('')
+
+    await act(async () => root.unmount())
+    mounted = false
+
+    expect(DeferredImage.instances[0].src).toBe('')
   })
 })

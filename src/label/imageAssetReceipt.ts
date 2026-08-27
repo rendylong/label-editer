@@ -25,26 +25,35 @@ export interface ContentBoundImage {
 }
 
 interface CurrentImageReceipt {
-  sourceIdentity: string
+  sourceIdentity: ImageSourceIdentity
   receiptKey: string
 }
 
 const currentReceipts = new Map<string, Map<string, CurrentImageReceipt>>()
+interface ImageSourceIdentity {
+  src: string
+  width: number
+  height: number
+}
 interface AreaImageLoad {
-  identity: string
-  sourceIdentity: string
+  sourceIdentity: ImageSourceIdentity
   controller: AbortController
   load: Promise<ContentBoundImage>
   resource?: ContentBoundImage
 }
-const areaImageLoads = new Map<string, AreaImageLoad>()
+const areaImageLoads = new Map<string, Map<string, AreaImageLoad>>()
 let activeImageLoads = 0
 let reservedImageBytes = 0
 let retainedDecodedPixels = 0
 const imageLoadQueue: Array<{ signal?: AbortSignal; resolve: (release: () => void) => void; reject: (error: Error) => void }> = []
 
-function sourceIdentity(src: string, width: number, height: number): string {
-  return `${src}\u0000${width}\u0000${height}`
+function sourceIdentity(src: string, width: number, height: number): ImageSourceIdentity {
+  return { src, width, height }
+}
+
+function sameSourceIdentity(left: ImageSourceIdentity | undefined, right: ImageSourceIdentity | undefined): boolean {
+  return left !== undefined && right !== undefined
+    && left.src === right.src && left.width === right.width && left.height === right.height
 }
 
 /** Invalidate the previous successful payload before an activation begins refetching it. */
@@ -73,7 +82,7 @@ export function currentImageAssetReceipt(
   height: number,
 ): string | undefined {
   const receipt = currentReceipts.get(areaId)?.get(layerId)
-  return receipt?.sourceIdentity === sourceIdentity(src, width, height) ? receipt.receiptKey : undefined
+  return sameSourceIdentity(receipt?.sourceIdentity, sourceIdentity(src, width, height)) ? receipt?.receiptKey : undefined
 }
 
 function abortError(): Error {
@@ -314,7 +323,10 @@ export async function loadContentBoundImage(
   expectedHeight: number,
   options: { signal?: AbortSignal } = {},
 ): Promise<ContentBoundImage> {
-  if (!Number.isInteger(expectedWidth) || !Number.isInteger(expectedHeight) || expectedWidth < 1 || expectedHeight < 1) {
+  if (!Number.isInteger(expectedWidth) || !Number.isInteger(expectedHeight)
+    || expectedWidth < 1 || expectedHeight < 1
+    || expectedWidth > MAX_IMAGE_DIMENSION || expectedHeight > MAX_IMAGE_DIMENSION
+    || expectedWidth > MAX_IMAGE_PIXELS_PER_LAYER / expectedHeight) {
     throw new Error('Declared image dimensions are invalid')
   }
   const releaseSlot = await acquireImageLoadSlot(options.signal)
@@ -386,46 +398,58 @@ export function loadAreaContentBoundImage(
   _activationRevision: number,
   layer: ImageLayer,
 ): Promise<ContentBoundImage> {
-  const owner = `${areaId}\u0000${layer.id}`
   const source = sourceIdentity(layer.src, layer.naturalWidth, layer.naturalHeight)
-  const identity = source
-  const cached = areaImageLoads.get(owner)
-  if (cached?.identity === identity) return cached.load
-  if (cached) evictAreaImageOwner(owner, cached)
+  const areaLoads = areaImageLoads.get(areaId) ?? new Map<string, AreaImageLoad>()
+  const cached = areaLoads.get(layer.id)
+  if (sameSourceIdentity(cached?.sourceIdentity, source)) return cached!.load
+  if (cached) evictAreaImageOwner(areaId, layer.id, cached)
   beginImageAssetLoad(areaId, layer.id)
   const controller = new AbortController()
   const load = loadContentBoundImage(layer.src, layer.naturalWidth, layer.naturalHeight, { signal: controller.signal })
-  const entry: AreaImageLoad = { identity, sourceIdentity: source, controller, load }
-  areaImageLoads.set(owner, entry)
+  const entry: AreaImageLoad = { sourceIdentity: source, controller, load }
+  const currentAreaLoads = areaImageLoads.get(areaId) ?? new Map<string, AreaImageLoad>()
+  currentAreaLoads.set(layer.id, entry)
+  areaImageLoads.set(areaId, currentAreaLoads)
   void load.then((resource) => {
-    if (areaImageLoads.get(owner) === entry) entry.resource = resource
+    if (areaImageLoads.get(areaId)?.get(layer.id) === entry) entry.resource = resource
     else resource.release()
   }, () => {
-    if (areaImageLoads.get(owner) === entry) areaImageLoads.delete(owner)
+    if (areaImageLoads.get(areaId)?.get(layer.id) === entry) deleteAreaImageOwner(areaId, layer.id)
   })
   return load
 }
 
-function evictAreaImageOwner(owner: string, entry: AreaImageLoad): void {
+function deleteAreaImageOwner(areaId: string, layerId: string): void {
+  const loads = areaImageLoads.get(areaId)
+  loads?.delete(layerId)
+  if (loads?.size === 0) areaImageLoads.delete(areaId)
+}
+
+function evictAreaImageOwner(areaId: string, layerId: string, entry: AreaImageLoad): void {
   entry.controller.abort()
   entry.resource?.release()
-  if (areaImageLoads.get(owner) === entry) areaImageLoads.delete(owner)
-  const separator = owner.indexOf('\u0000')
-  if (separator >= 0) currentReceipts.get(owner.slice(0, separator))?.delete(owner.slice(separator + 1))
+  if (areaImageLoads.get(areaId)?.get(layerId) === entry) deleteAreaImageOwner(areaId, layerId)
+  currentReceipts.get(areaId)?.delete(layerId)
 }
 
 /** Abort and evict image work not required by the exact visible project layer set. */
 export function syncImageAssetProject(areas: readonly Pick<LabelAreaConfig, 'id' | 'layers'>[]): void {
-  const allowed = new Map<string, string>()
+  const allowed = new Map<string, Map<string, ImageSourceIdentity>>()
   for (const area of areas) for (const layer of visibleImageLayersForRuntime(area)) {
-    allowed.set(`${area.id}\u0000${layer.id}`, sourceIdentity(layer.src, layer.naturalWidth, layer.naturalHeight))
+    const areaAllowed = allowed.get(area.id) ?? new Map<string, ImageSourceIdentity>()
+    areaAllowed.set(layer.id, sourceIdentity(layer.src, layer.naturalWidth, layer.naturalHeight))
+    allowed.set(area.id, areaAllowed)
   }
-  for (const [owner, entry] of areaImageLoads) {
-    if (allowed.get(owner) !== entry.sourceIdentity) evictAreaImageOwner(owner, entry)
+  for (const [areaId, loads] of areaImageLoads) {
+    for (const [layerId, entry] of loads) {
+      if (!sameSourceIdentity(allowed.get(areaId)?.get(layerId), entry.sourceIdentity)) {
+        evictAreaImageOwner(areaId, layerId, entry)
+      }
+    }
   }
   for (const [areaId, receipts] of currentReceipts) {
     for (const [layerId, receipt] of receipts) {
-      if (allowed.get(`${areaId}\u0000${layerId}`) !== receipt.sourceIdentity) receipts.delete(layerId)
+      if (!sameSourceIdentity(allowed.get(areaId)?.get(layerId), receipt.sourceIdentity)) receipts.delete(layerId)
     }
     if (receipts.size === 0) currentReceipts.delete(areaId)
   }
@@ -433,13 +457,29 @@ export function syncImageAssetProject(areas: readonly Pick<LabelAreaConfig, 'id'
 
 /** Explicit area/project disposal boundary; normal active-area switches must not call this. */
 export function releaseImageAssetArea(areaId: string): void {
-  const prefix = `${areaId}\u0000`
-  for (const [owner, entry] of areaImageLoads) if (owner.startsWith(prefix)) evictAreaImageOwner(owner, entry)
+  const loads = areaImageLoads.get(areaId)
+  if (loads) for (const [layerId, entry] of [...loads]) evictAreaImageOwner(areaId, layerId, entry)
   currentReceipts.delete(areaId)
 }
 
 /** Imported-project replacement boundary, including replacements that reuse ids and sources. */
 export function resetImageAssetProject(): void {
-  for (const [owner, entry] of [...areaImageLoads]) evictAreaImageOwner(owner, entry)
+  for (const [areaId, loads] of [...areaImageLoads]) {
+    for (const [layerId, entry] of [...loads]) evictAreaImageOwner(areaId, layerId, entry)
+  }
   currentReceipts.clear()
+}
+
+let mountedCanvasConsumers = 0
+
+/** Keep project-wide receipts across area navigation, but release them when the last canvas unmounts. */
+export function retainImageAssetCanvasRuntime(): () => void {
+  mountedCanvasConsumers += 1
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    mountedCanvasConsumers = Math.max(0, mountedCanvasConsumers - 1)
+    if (mountedCanvasConsumers === 0) resetImageAssetProject()
+  }
 }

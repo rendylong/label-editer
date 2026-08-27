@@ -245,4 +245,25 @@ describe('sidebar actions', () => {
     expect(useLabelStore.getState().selectedLayerIds).toEqual(copyIds)
     expect(useLabelStore.getState().activeArea?.layers.find((layer) => layer.id === copyIds[0])).toMatchObject({ x: 230, y: 180, locked: false })
   })
+
+  it('rejects image-budget overflow through the mutation gateway and duplication path without partial state', () => {
+    const image = (index: number) => ({
+      id: `image-${index}`, kind: 'image' as const, src: `data:image/png;base64,${index}`,
+      naturalWidth: 1, naturalHeight: 1, width: 1, height: 1,
+      x: 10, y: 10, rotation: 0, opacity: 1, visible: true, locked: false,
+      zIndex: index, craft: [],
+    })
+    useLabelStore.getState().addArea({ ...area(), layers: Array.from({ length: 64 }, (_, index) => image(index)) })
+    useLabelStore.getState().selectLayers(['image-0'])
+
+    expect(() => duplicateSelectedLayers()).toThrow(/image.*count|image.*layer/i)
+    expect(useLabelStore.getState().activeArea?.layers).toHaveLength(64)
+    expect(useLabelStore.getState().selectedLayerIds).toEqual(['image-0'])
+
+    expect(() => useLabelStore.getState().applyAreaOp('area-a', (config) => ({
+      ...config,
+      layers: config.layers.map((layer) => layer.id === 'image-0' ? { ...layer, width: 8193 } : layer),
+    }))).toThrow(/rendered|frame|image.*dimension/i)
+    expect(useLabelStore.getState().activeArea?.layers[0]).toMatchObject({ width: 1, height: 1 })
+  })
 })

@@ -17,6 +17,7 @@ import type {
 import { validateLabelSpec } from '../agent/labelSpecSchema'
 import { assertPhysicalAreaPlacement, resolvePhysicalLayer } from './physicalLayout'
 import { canonicalFontStack } from '../label/fontStack'
+import { assertImageResourceBudget } from '../label/imageResourceLimits'
 import { validateVectorPath } from '../label/vectorPathValidation'
 import type { LabelSide } from '../agent/designContracts'
 
@@ -202,5 +203,6 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
     else warnings.push(`区域「${next.name}」没有 layers，已创建空白区域`)
     return next
   })
+  assertImageResourceBudget(areas)
   return { areas, warnings }
 }

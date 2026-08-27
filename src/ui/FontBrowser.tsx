@@ -283,7 +283,7 @@ export function FontBrowser({
   selectionKey: string
   disabled?: boolean
   onSelect: (fontId: string) => void
-  uploadFont: (file: File) => Promise<UploadedFont>
+  uploadFont: (file: File, existingFonts: readonly UploadedFontRecord[]) => Promise<UploadedFont>
   onUploadCommit: (font: UploadedFont) => void
 }): React.JSX.Element {
   const favoriteIds = useUiStore((state) => state.favoriteFontIds)
@@ -468,7 +468,7 @@ export function FontBrowser({
       await selectionController.current.run(
         async () => {
           try {
-            return { ok: true as const, font: await uploadFont(file) }
+            return { ok: true as const, font: await uploadFont(file, uploadedFonts) }
           } catch (uploadError) {
             return {
               ok: false as const,

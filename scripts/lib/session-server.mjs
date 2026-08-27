@@ -76,6 +76,14 @@ export async function createSessionServer({
     || typeof now !== 'function') throw new Error('Invalid session resource limits')
   const sessions = new Map()
 
+  // Request bodies are asynchronous, so every state-dependent predicate and its
+  // mutation must run in one per-session critical section after the body is read.
+  function serializeSessionMutation(session, mutation) {
+    const operation = session.mutationTail.then(mutation, mutation)
+    session.mutationTail = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
   function clearReviewLeaseTimer(lease) {
     if (lease.timer !== undefined) clearTimeout(lease.timer)
     delete lease.timer
@@ -100,7 +108,7 @@ export async function createSessionServer({
 
   function rollbackReviewLease(session, lease, { remember = true } = {}) {
     clearReviewLeaseTimer(lease)
-    if (lease.phase === 'committed' || lease.phase === 'verified') {
+    if (lease.phase === 'committed' || lease.phase === 'prepared') {
       for (const artifact of lease.committed.values()) session.artifacts.delete(artifact.id)
       session.currentArtifactsByResultId.clear()
       for (const [resultId, artifact] of lease.prior) {
@@ -124,8 +132,11 @@ export async function createSessionServer({
 
   function finishExpiredReviewLease(session, lease) {
     if (session.reviewLease !== lease) return
-    if (lease.phase === 'verified') sealReviewLease(session, lease)
-    else rollbackReviewLease(session, lease)
+    // A prepared receipt proves that the client read and hashed the candidate,
+    // not that the caller crossed its final synchronous freshness barrier. Until
+    // an explicit success signal (or a next-consumer read) seals it, expiry must
+    // restore the prior committed set.
+    rollbackReviewLease(session, lease)
   }
 
   function scheduleReviewLeaseTimer(session, lease) {
@@ -169,7 +180,6 @@ export async function createSessionServer({
     const token = body?.leaseToken ?? request.headers['x-artifact-lease-token']
     const generation = body?.generation ?? Number(request.headers['x-artifact-generation'])
     if (!Number.isSafeInteger(generation) || generation < 1) return null
-    if (generation !== session.reviewGeneration) return null
     const settled = session.reviewSettlements.get(settlementKey(batchId, generation))
     if (!settled || settled.action !== action || !validToken(settled.leaseToken, token)) return null
     return settled.payload
@@ -211,55 +221,198 @@ export async function createSessionServer({
             return json(response, 400, { ok: false, error: 'Invalid artifact batch id' })
           }
           if (request.method === 'POST' && parts[5] === 'acquire') {
-            if (session.reviewLease?.phase === 'verified') sealReviewLease(session, session.reviewLease)
-            if (session.reviewLease) return json(response, 409, { ok: false, error: 'Review artifact lease is busy' })
             const body = JSON.parse((await readBody(request, 1024)).toString('utf8') || '{}')
             if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 0) {
               return json(response, 400, { ok: false, error: 'Invalid lease request' })
             }
-            const lease = {
-              batchId,
-              leaseToken: randomBytes(32).toString('base64url'),
-              generation: ++session.reviewGeneration,
-              deadline: now() + reviewLeaseMs,
-              expiresAt: Date.now() + reviewLeaseMs,
-              phase: 'staging',
-              staged: new Map(),
-              stagedBytes: 0,
-            }
-            session.reviewLease = lease
-            scheduleReviewLeaseTimer(session, lease)
-            json(response, 201, {
-              ok: true, batchId, leaseToken: lease.leaseToken,
-              generation: lease.generation, expiresAt: lease.expiresAt,
+            const outcome = await serializeSessionMutation(session, () => {
+              expireReviewLeaseAtBoundary(session)
+              if (session.reviewLease) {
+                return { status: 409, payload: { ok: false, error: 'Review artifact lease is busy' } }
+              }
+              const lease = {
+                batchId,
+                leaseToken: randomBytes(32).toString('base64url'),
+                generation: ++session.reviewGeneration,
+                deadline: now() + reviewLeaseMs,
+                expiresAt: Date.now() + reviewLeaseMs,
+                phase: 'staging',
+                staged: new Map(),
+                stagedBytes: 0,
+              }
+              session.reviewLease = lease
+              scheduleReviewLeaseTimer(session, lease)
+              return { status: 201, payload: {
+                ok: true, batchId, leaseToken: lease.leaseToken,
+                generation: lease.generation, expiresAt: lease.expiresAt,
+              } }
             })
+            json(response, outcome.status, outcome.payload)
             return
           }
           if (request.method === 'PUT') {
             const id = parts[5]
             if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
-            let lease = requestLease(session, batchId, request, undefined, ['staging'])
-            if (!lease) return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
-            if (session.artifacts.has(id)) return json(response, 409, { ok: false, error: 'Artifact already exists' })
-            const batch = lease.staged
-            if (batch.has(id)) return json(response, 409, { ok: false, error: 'Artifact already staged' })
-            if (batch.size >= maxReviewBatchArtifacts) return json(response, 413, { ok: false, error: 'Review artifact count exceeds limit' })
             const resultId = String(request.headers['x-artifact-result-id'] ?? id)
-            if (!/^[A-Za-z0-9._-]{1,160}$/.test(resultId)
-              || [...batch.values()].some((artifact) => artifact.resultId === resultId)) {
-              return json(response, 400, { ok: false, error: 'Invalid or duplicate artifact result id' })
+            if (!/^[A-Za-z0-9._-]{1,160}$/.test(resultId)) {
+              return json(response, 400, { ok: false, error: 'Invalid artifact result id' })
             }
-            const remaining = maxReviewBatchBytes - lease.stagedBytes
-            if (remaining < 1) return json(response, 413, { ok: false, error: 'Review artifact bytes exceed limit' })
-            const bytes = await readBody(request, Math.min(maxUploadBytes, remaining))
-            lease = requestLease(session, batchId, request, undefined, ['staging'])
-            if (!lease) return json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
+            const bytes = await readBody(request, Math.min(maxUploadBytes, maxReviewBatchBytes))
             const encodedName = request.headers['x-artifact-file-name']
             const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
+            const outcome = await serializeSessionMutation(session, () => {
+              const lease = requestLease(session, batchId, request, undefined, ['staging'])
+              if (!lease) return { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact lease' } }
+              if (session.artifacts.has(id)) return { status: 409, payload: { ok: false, error: 'Artifact already exists' } }
+              const batch = lease.staged
+              if (batch.has(id)) return { status: 409, payload: { ok: false, error: 'Artifact already staged' } }
+              if (batch.size >= maxReviewBatchArtifacts) {
+                return { status: 413, payload: { ok: false, error: 'Review artifact count exceeds limit' } }
+              }
+              if ([...batch.values()].some((artifact) => artifact.resultId === resultId)) {
+                return { status: 400, payload: { ok: false, error: 'Invalid or duplicate artifact result id' } }
+              }
+              if (bytes.byteLength > maxReviewBatchBytes - lease.stagedBytes) {
+                return { status: 413, payload: { ok: false, error: 'Review artifact bytes exceed limit' } }
+              }
+              const artifact = {
+                id,
+                resultId,
+                batchId,
+                fileName: sanitizeArtifactName(decodedName),
+                mimeType: String(request.headers['content-type'] ?? 'application/octet-stream').split(';')[0],
+                bytes,
+                byteLength: bytes.byteLength,
+                sha256: sha256Bytes(bytes),
+                width: Number(request.headers['x-artifact-width']) || undefined,
+                height: Number(request.headers['x-artifact-height']) || undefined,
+                areaId: typeof request.headers['x-artifact-area-id'] === 'string'
+                  ? decodeURIComponent(request.headers['x-artifact-area-id'])
+                  : undefined,
+                channel: typeof request.headers['x-artifact-channel'] === 'string'
+                  ? request.headers['x-artifact-channel']
+                  : undefined,
+                url: `${origin}/session/${session.id}/artifact/${encodeURIComponent(id)}?token=${session.token}`,
+              }
+              batch.set(id, artifact)
+              lease.stagedBytes += bytes.byteLength
+              const { bytes: _bytes, ...descriptor } = artifact
+              return { status: 201, payload: { ok: true, ...descriptor, generation: lease.generation } }
+            })
+            json(response, outcome.status, outcome.payload)
+            return
+          }
+          if (request.method === 'POST' && parts[5] === 'commit') {
+            const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
+            const outcome = await serializeSessionMutation(session, () => {
+              const lease = requestLease(session, batchId, request, body, ['staging'])
+              const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : null
+              const resultIds = Array.isArray(body?.resultIds) ? body.resultIds : artifactIds
+              const batch = lease?.staged
+              if (!lease || !batch || !artifactIds || artifactIds.length !== batch.size
+                || !resultIds || resultIds.length !== batch.size
+                || artifactIds.some((id, index) => typeof id !== 'string' || id !== [...batch.keys()][index])
+                || resultIds.some((id, index) => typeof id !== 'string' || id !== [...batch.values()][index].resultId)) {
+                return { status: 409, payload: { ok: false, error: 'Artifact batch is incomplete or mismatched' } }
+              }
+              if (artifactIds.some((id) => session.artifacts.has(id))) {
+                return { status: 409, payload: { ok: false, error: 'Artifact already exists' } }
+              }
+              const committed = new Map(batch)
+              const prior = new Map(session.currentArtifactsByResultId)
+              for (const previous of prior.values()) session.artifacts.delete(previous.id)
+              session.currentArtifactsByResultId.clear()
+              for (const [id, artifact] of committed) {
+                session.artifacts.set(id, artifact)
+                session.currentArtifactsByResultId.set(artifact.resultId, artifact)
+              }
+              Object.assign(lease, { phase: 'committed', committed, prior })
+              delete lease.staged
+              delete lease.stagedBytes
+              return { status: 201, payload: {
+                ok: true, batchId, artifactIds, resultIds, generation: lease.generation,
+              } }
+            })
+            json(response, outcome.status, outcome.payload)
+            return
+          }
+          if (request.method === 'POST' && parts[5] === 'receipt') {
+            const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
+            const outcome = await serializeSessionMutation(session, () => {
+              const lease = requestLease(session, batchId, request, body, ['committed', 'prepared'])
+              const artifacts = Array.isArray(body?.artifacts) ? body.artifacts : null
+              const committed = lease?.committed
+              const expected = committed ? [...committed.values()] : []
+              if (!lease || !committed || !artifacts || artifacts.length !== expected.length
+                || artifacts.some((candidate, index) => {
+                  const artifact = expected[index]
+                  return !candidate || typeof candidate !== 'object' || Array.isArray(candidate)
+                    || Object.keys(candidate).some((key) => !['id', 'resultId', 'sha256'].includes(key))
+                    || candidate.id !== artifact.id || candidate.resultId !== artifact.resultId
+                    || candidate.sha256 !== artifact.sha256
+                })) {
+                return { status: 409, payload: { ok: false, error: 'Artifact readback receipt is incomplete or mismatched' } }
+              }
+              lease.phase = 'prepared'
+              return { status: 200, payload: {
+                ok: true,
+                batchId,
+                generation: lease.generation,
+                receipt: true,
+                artifactIds: expected.map((artifact) => artifact.id),
+              } }
+            })
+            json(response, outcome.status, outcome.payload)
+            return
+          }
+          if (request.method === 'POST' && parts[5] === 'finalize') {
+            const body = JSON.parse((await readBody(request, 4096)).toString('utf8'))
+            const outcome = await serializeSessionMutation(session, () => {
+              const lease = requestLease(session, batchId, request, body, ['prepared'])
+              if (!lease) {
+                const replay = replayReviewSettlement(session, batchId, request, body, 'finalize')
+                return replay
+                  ? { status: 200, payload: replay }
+                  : { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact lease' } }
+              }
+              return { status: 200, payload: sealReviewLease(session, lease) }
+            })
+            json(response, outcome.status, outcome.payload)
+            return
+          }
+          if (request.method === 'DELETE' && parts.length === 5) {
+            const outcome = await serializeSessionMutation(session, () => {
+              const lease = requestLease(session, batchId, request, undefined, ['staging', 'committed', 'prepared'])
+              if (!lease) {
+                const replay = replayReviewSettlement(session, batchId, request, undefined, 'abort')
+                return replay
+                  ? { status: 200, payload: replay }
+                  : { status: 409, payload: { ok: false, error: 'Invalid or stale review artifact lease' } }
+              }
+              return { status: 200, payload: rollbackReviewLease(session, lease) }
+            })
+            json(response, outcome.status, outcome.payload)
+            return
+          }
+          json(response, 404, { ok: false, error: 'Artifact batch route not found' })
+          return
+        }
+        if (parts[2] === 'artifact' && request.method === 'PUT') {
+          const id = parts[3]
+          if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
+          const bytes = await readBody(request, maxUploadBytes)
+          const encodedName = request.headers['x-artifact-file-name']
+          const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
+          const outcome = await serializeSessionMutation(session, () => {
+            expireReviewLeaseAtBoundary(session)
+            if (session.reviewLease) {
+              return { status: 409, payload: { ok: false, error: 'Review artifact lease is busy' } }
+            }
+            if (session.artifacts.has(id) || session.currentArtifactsByResultId.has(id)) {
+              return { status: 409, payload: { ok: false, error: 'Artifact id conflicts with review evidence' } }
+            }
             const artifact = {
               id,
-              resultId,
-              batchId,
               fileName: sanitizeArtifactName(decodedName),
               mimeType: String(request.headers['content-type'] ?? 'application/octet-stream').split(';')[0],
               bytes,
@@ -275,109 +428,29 @@ export async function createSessionServer({
                 : undefined,
               url: `${origin}/session/${session.id}/artifact/${encodeURIComponent(id)}?token=${session.token}`,
             }
-            batch.set(id, artifact)
-            lease.stagedBytes += bytes.byteLength
-            const { bytes: _bytes, ...descriptor } = artifact
-            json(response, 201, { ok: true, ...descriptor, generation: lease.generation })
-            return
-          }
-          if (request.method === 'POST' && parts[5] === 'commit') {
-            const body = JSON.parse((await readBody(request, 64 * 1024)).toString('utf8'))
-            const lease = requestLease(session, batchId, request, body, ['staging'])
-            const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : null
-            const resultIds = Array.isArray(body?.resultIds) ? body.resultIds : artifactIds
-            const batch = lease?.staged
-            if (!lease || !batch || !artifactIds || artifactIds.length !== batch.size
-              || !resultIds || resultIds.length !== batch.size
-              || artifactIds.some((id, index) => typeof id !== 'string' || id !== [...batch.keys()][index])
-              || resultIds.some((id, index) => typeof id !== 'string' || id !== [...batch.values()][index].resultId)) {
-              return json(response, 409, { ok: false, error: 'Artifact batch is incomplete or mismatched' })
-            }
-            if (artifactIds.some((id) => session.artifacts.has(id))) {
-              return json(response, 409, { ok: false, error: 'Artifact already exists' })
-            }
-            const committed = new Map(batch)
-            const prior = new Map(session.currentArtifactsByResultId)
-            for (const previous of prior.values()) session.artifacts.delete(previous.id)
-            session.currentArtifactsByResultId.clear()
-            for (const [id, artifact] of committed) {
-              session.artifacts.set(id, artifact)
-              session.currentArtifactsByResultId.set(artifact.resultId, artifact)
-            }
-            Object.assign(lease, { phase: 'committed', committed, prior, readBackIds: new Set() })
-            delete lease.staged
-            delete lease.stagedBytes
-            json(response, 201, { ok: true, batchId, artifactIds, resultIds, generation: lease.generation })
-            return
-          }
-          if (request.method === 'POST' && parts[5] === 'finalize') {
-            const body = JSON.parse((await readBody(request, 4096)).toString('utf8'))
-            const lease = requestLease(session, batchId, request, body, ['verified'])
-            if (!lease) {
-              const replay = replayReviewSettlement(session, batchId, request, body, 'finalize')
-              return replay
-                ? json(response, 200, replay)
-                : json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
-            }
-            json(response, 200, sealReviewLease(session, lease))
-            return
-          }
-          if (request.method === 'DELETE' && parts.length === 5) {
-            const lease = requestLease(session, batchId, request, undefined, ['staging', 'committed', 'verified'])
-            if (!lease) {
-              const replay = replayReviewSettlement(session, batchId, request, undefined, 'abort')
-              return replay
-                ? json(response, 200, replay)
-                : json(response, 409, { ok: false, error: 'Invalid or stale review artifact lease' })
-            }
-            json(response, 200, rollbackReviewLease(session, lease))
-            return
-          }
-          json(response, 404, { ok: false, error: 'Artifact batch route not found' })
-          return
-        }
-        if (parts[2] === 'artifact' && request.method === 'PUT') {
-          if (session.reviewLease?.phase === 'verified') sealReviewLease(session, session.reviewLease)
-          if (session.reviewLease) return json(response, 409, { ok: false, error: 'Review artifact lease is busy' })
-          const id = parts[3]
-          if (!id || !/^[A-Za-z0-9._-]{1,160}$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid artifact id' })
-          const bytes = await readBody(request, maxUploadBytes)
-          expireReviewLeaseAtBoundary(session)
-          if (session.reviewLease?.phase === 'verified') sealReviewLease(session, session.reviewLease)
-          if (session.reviewLease) return json(response, 409, { ok: false, error: 'Review artifact lease is busy' })
-          const encodedName = request.headers['x-artifact-file-name']
-          const decodedName = typeof encodedName === 'string' ? decodeURIComponent(encodedName) : id
-          const artifact = {
-            id,
-            fileName: sanitizeArtifactName(decodedName),
-            mimeType: String(request.headers['content-type'] ?? 'application/octet-stream').split(';')[0],
-            bytes,
-            byteLength: bytes.byteLength,
-            sha256: sha256Bytes(bytes),
-            width: Number(request.headers['x-artifact-width']) || undefined,
-            height: Number(request.headers['x-artifact-height']) || undefined,
-            areaId: typeof request.headers['x-artifact-area-id'] === 'string'
-              ? decodeURIComponent(request.headers['x-artifact-area-id'])
-              : undefined,
-            channel: typeof request.headers['x-artifact-channel'] === 'string'
-              ? request.headers['x-artifact-channel']
-              : undefined,
-            url: `${origin}/session/${session.id}/artifact/${encodeURIComponent(id)}?token=${session.token}`,
-          }
-          session.artifacts.set(id, artifact)
-          json(response, 201, artifact)
+            session.artifacts.set(id, artifact)
+            return { status: 201, payload: artifact }
+          })
+          json(response, outcome.status, outcome.payload)
           return
         }
         if (parts[2] === 'artifact' && request.method === 'GET') {
           const artifact = session.artifacts.get(parts[3])
           if (!artifact) return json(response, 404, { ok: false, error: 'Artifact not found' })
           if (artifact.batchId && session.reviewLease?.batchId === artifact.batchId
-            && (session.reviewLease.phase === 'committed' || session.reviewLease.phase === 'verified')) {
-            const lease = requestLease(session, artifact.batchId, request, undefined, ['committed', 'verified'])
-            if (!lease) return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
-            lease.readBackIds.add(artifact.id)
-            if (lease.phase === 'committed' && lease.readBackIds.size === lease.committed.size) {
-              lease.phase = 'verified'
+            && (session.reviewLease.phase === 'committed' || session.reviewLease.phase === 'prepared')) {
+            const hasLeaseClaim = request.headers['x-artifact-lease-token'] !== undefined
+              || request.headers['x-artifact-generation'] !== undefined
+            if (hasLeaseClaim) {
+              const lease = requestLease(session, artifact.batchId, request, undefined, ['committed', 'prepared'])
+              if (!lease) return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
+            } else if (session.reviewLease.phase === 'prepared') {
+              // A receipt-confirmed transaction stays recoverable until success.
+              // Dereferencing it as a normal (non-transaction) consumer is itself
+              // the synchronous success boundary, so seal before exposing bytes.
+              sealReviewLease(session, session.reviewLease)
+            } else {
+              return json(response, 409, { ok: false, error: 'Committed artifact readback requires its active lease' })
             }
           }
           response.writeHead(200, {
@@ -440,6 +513,7 @@ export async function createSessionServer({
         reviewLease: null,
         reviewGeneration: 0,
         reviewSettlements: new Map(),
+        mutationTail: Promise.resolve(),
       }
       sessions.set(session.id, session)
       return { id: session.id, token: session.token }

@@ -16,6 +16,7 @@ import { designAssetReadinessKey, designFontReadinessKey } from './exportReadine
 import {
   bindImageAssetReceipt,
   loadAreaContentBoundImage,
+  retainImageAssetCanvasRuntime,
   visibleImageLayersForRuntime,
 } from './imageAssetReceipt'
 import { clearTransparentCanvasBorder } from './canvasBorder'
@@ -256,6 +257,23 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     () => readOnly ? [] : layers.filter((layer) => selectedLayerIdSet.has(layer.id) && !layer.locked).map((layer) => layer.id),
     [layers, readOnly, selectedLayerIdSet],
   )
+  const imageEffectIdentity = useMemo(() => JSON.stringify(layers.flatMap((layer) => (
+    layer.kind === 'image'
+      ? [{
+          id: layer.id,
+          src: layer.src,
+          naturalWidth: layer.naturalWidth,
+          naturalHeight: layer.naturalHeight,
+          width: layer.width,
+          height: layer.height,
+          fit: layer.fit ?? 'stretch',
+          visible: layer.visible,
+          craft: layer.craft,
+        }]
+      : []
+  ))), [layers])
+
+  useEffect(() => retainImageAssetCanvasRuntime(), [])
 
   const selectFromClick = (clickedId: string | null, shiftKey: boolean): void => {
     const state = useLabelStore.getState()
@@ -305,7 +323,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
     return () => {
       alive = false
     }
-  }, [layers.map((l) => (l.kind === 'image' ? `${l.src}:${l.naturalWidth}:${l.naturalHeight}:${l.width}:${l.height}:${l.fit ?? 'stretch'}:${JSON.stringify(l.craft)}` : '')).join('|'), config?.meshIndex, activationRevision])
+  }, [activationRevision, areaId, config?.meshIndex, imageEffectIdentity])
 
   const displayHeight = useMemo(() => {
     if (!spec || displayWidth <= 0) return 300

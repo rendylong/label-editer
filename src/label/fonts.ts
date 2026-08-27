@@ -13,16 +13,23 @@ export interface UploadedFont {
 }
 
 /** 上传字体文件：由项目级托管缓存校验并注册唯一 FontFace。 */
-export async function uploadFontFile(file: File): Promise<UploadedFont> {
+export async function uploadFontFile(
+  file: File,
+  existingFonts: readonly UploadedFontRecord[] = [],
+): Promise<UploadedFont> {
   if (!/\.(ttf|otf|woff2)$/i.test(file.name)) throw new Error('仅支持 ttf / otf / woff2 字体')
   if (file.size > 20 * 1024 * 1024) throw new Error('字体文件超过 20MB 上限')
   const dataUrl = await fileToDataUrl(file)
   const name = file.name.replace(/\.(ttf|otf|woff2)$/i, '')
+  const id = uploadedFontId(name)
+  if (existingFonts.some((font) => uploadedFontId(font.name) === id && font.name !== name)) {
+    throw new Error(`Uploaded font runtime identity conflict: ${id}`)
+  }
   const family = uploadedFontReceipt({ name, dataUrl }).cssFamily
   const css = `"${family}", sans-serif`
   const loaded = await prepareUploadedFontUpload({ name, dataUrl })
   if (!loaded.ok) throw new Error(loaded.error ?? '字体加载失败')
-  return { id: uploadedFontId(name), name, css, dataUrl }
+  return { id, name, css, dataUrl }
 }
 
 function fileToDataUrl(file: File): Promise<string> {

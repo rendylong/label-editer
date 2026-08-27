@@ -11,6 +11,7 @@ import { assertRasterAspect, assertRasterDimensions, withBakeCanvasSize } from '
 import { assertPhysicalAreaPlacement, resolveLayersForCanvas } from '../app/physicalLayout'
 import { syncUploadedFontProject } from '../label/fontRuntime'
 import { resetImageAssetProject, syncImageAssetProject } from '../label/imageAssetReceipt'
+import { assertImageResourceBudget } from '../label/imageResourceLimits'
 
 export interface BakeResult {
   color: HTMLCanvasElement
@@ -155,6 +156,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     set((s) => {
       // 同 id 替换（避免重复区域）
       const areas = [...s.areas.filter((a) => a.id !== id), area]
+      assertImageResourceBudget(areas)
       return {
         areas,
         activeAreaId: id,
@@ -230,11 +232,13 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     if (next === area) return
     if (commit) {
       const areas = s.areas.map((a) => (a.id === areaId ? { ...next, undoStack: [...a.undoStack.slice(-199), prev], redoStack: [] } : a))
+      assertImageResourceBudget(areas)
       const updated = areas.find((a) => a.id === areaId)!
       const selectedLayerIds = s.activeAreaId === areaId ? existingLayerIds(s.selectedLayerIds, updated.layers) : s.selectedLayerIds
       set({ areas, activeArea: s.activeAreaId === areaId ? updated : s.activeArea, selectedLayerIds, ...(s.activeAreaId === areaId ? { meshIndex: updated.meshIndex, nodeName: updated.nodeName } : {}) })
     } else {
       const areas = s.areas.map((a) => (a.id === areaId ? next : a))
+      assertImageResourceBudget(areas)
       const updated = areas.find((a) => a.id === areaId)!
       const selectedLayerIds = s.activeAreaId === areaId ? existingLayerIds(s.selectedLayerIds, updated.layers) : s.selectedLayerIds
       set({ areas, activeArea: s.activeAreaId === areaId ? updated : s.activeArea, selectedLayerIds })
@@ -249,6 +253,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     const current = snapshotOf(area)
     const next = applySnapshot(area, prev)
     const areas = s.areas.map((a) => (a.id === area.id ? { ...next, undoStack: a.undoStack.slice(0, -1), redoStack: [...a.redoStack, current] } : a))
+    assertImageResourceBudget(areas)
     const updated = areas.find((a) => a.id === area.id)!
     set({ areas, activeArea: updated, selectedLayerIds: existingLayerIds(s.selectedLayerIds, updated.layers) })
   },
@@ -261,6 +266,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     const current = snapshotOf(area)
     const next = applySnapshot(area, nextSnap)
     const areas = s.areas.map((a) => (a.id === area.id ? { ...next, redoStack: a.redoStack.slice(0, -1), undoStack: [...a.undoStack, current] } : a))
+    assertImageResourceBudget(areas)
     const updated = areas.find((a) => a.id === area.id)!
     set({ areas, activeArea: updated, selectedLayerIds: existingLayerIds(s.selectedLayerIds, updated.layers) })
   },
@@ -301,6 +307,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
         return { ...next, layers: resolveLayersForCanvas(area, canvas) }
       })
       const updated = areas.find((area) => area.id === areaId)
+      assertImageResourceBudget(areas)
       return {
         areas,
         activeArea: s.activeAreaId === areaId && updated ? updated : s.activeArea,
@@ -342,6 +349,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
       return { ...next, layers: resolveLayersForCanvas(a, canvas) }
     })
     const updated = areas.find((a) => a.id === areaId)!
+    assertImageResourceBudget(areas)
     set({
       areas,
       activeArea: s.activeAreaId === areaId ? updated : s.activeArea,
@@ -359,6 +367,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
   replaceAreasAtomically: (areas, activeAreaId, runtime) => {
     const activeArea = areas.find((area) => area.id === activeAreaId)
     if (!activeArea) throw new Error(`无法激活不存在的贴标区域：${activeAreaId}`)
+    assertImageResourceBudget(areas)
     resetImageAssetProject()
     set((state) => ({
       areas,

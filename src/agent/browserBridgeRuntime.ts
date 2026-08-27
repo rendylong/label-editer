@@ -762,6 +762,63 @@ async function commitArtifactBatch(
   }
 }
 
+interface ReviewArtifactReceipt {
+  id: string
+  resultId: string
+  sha256: string
+}
+
+async function acknowledgeArtifactBatchReadback(
+  bootstrap: AgentBridgeBootstrap,
+  lease: ReviewArtifactLease,
+  artifacts: readonly ReviewArtifactReceipt[],
+): Promise<void> {
+  const { batchId } = lease
+  const url = artifactStageUrl(bootstrap, batchId, '/receipt')
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...leaseHeaders(lease) },
+    body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation, artifacts }),
+    redirect: 'error',
+  })
+  if (!response.ok || response.redirected || response.status !== 200 || response.url !== url.href
+    || response.headers.get('content-type') !== 'application/json; charset=utf-8') {
+    throw new Error(`Artifact readback receipt failed (${response.status})`)
+  }
+  let value: unknown
+  try { value = await response.json() } catch { throw new Error('Invalid artifact readback receipt response') }
+  const body = value as {
+    ok?: unknown
+    batchId?: unknown
+    generation?: unknown
+    receipt?: unknown
+    artifactIds?: unknown
+  }
+  const artifactIds = Array.isArray(body?.artifactIds) ? body.artifactIds : undefined
+  if (!body || !hasExactKeys(body, ['ok', 'batchId', 'generation', 'receipt', 'artifactIds'])
+    || body.ok !== true || body.batchId !== batchId || body.generation !== lease.generation
+    || body.receipt !== true || !artifactIds || artifactIds.length !== artifacts.length
+    || artifactIds.some((id, index) => id !== artifacts[index].id)) {
+    throw new Error('Invalid artifact readback receipt response')
+  }
+}
+
+function signalArtifactBatchSuccess(bootstrap: AgentBridgeBootstrap, lease: ReviewArtifactLease): void {
+  const { batchId } = lease
+  const url = artifactStageUrl(bootstrap, batchId, '/finalize')
+  // This request is intentionally launched, not awaited. The caller has just run
+  // its final synchronous freshness barrier and must return without another await.
+  // If transport or acknowledgement is lost, the prepared candidate remains
+  // recoverable until its lease expires; a normal consumer read can also seal it.
+  void fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...leaseHeaders(lease) },
+    body: JSON.stringify({ leaseToken: lease.leaseToken, generation: lease.generation }),
+    redirect: 'error',
+    keepalive: true,
+  }).catch(() => undefined)
+}
+
 async function abortArtifactBatch(bootstrap: AgentBridgeBootstrap, lease: ReviewArtifactLease): Promise<void> {
   const { batchId } = lease
   const url = artifactStageUrl(bootstrap, batchId)
@@ -1123,11 +1180,24 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             }
           }
 
-          // The server marks a transaction recoverably verified only after every exact
-          // committed artifact has been read back. Nothing asynchronous may run between
-          // this last live barrier and the successful return: a failed barrier can still
-          // abort to the prior set, while a successful verified lease seals on the next
-          // acquire/legacy mutation or its monotonic deadline.
+          try {
+            await acknowledgeArtifactBatchReadback(bootstrap, lease, views.map((view, index) => ({
+              id: internalIds[index],
+              resultId: view.id,
+              sha256: sha256HexSync(prepared[index].bytes),
+            })))
+          } catch (error) {
+            throw reviewNotReady('readback-receipt', 'Review artifact readback receipt failed', {
+              cause: error instanceof Error ? error.message : String(error),
+            })
+          }
+
+          // State machine: staging -> committed -> prepared (exact bytes were read,
+          // hashed, and acknowledged). Prepared is still recoverable: any failed final
+          // barrier aborts it and restores the prior set. After this final synchronous
+          // barrier we launch, but never await, the prepared -> sealed success signal.
+          // A lost signal leaves the candidate recoverable; its first normal consumer
+          // read seals synchronously, while expiry restores the prior set.
           assertReviewStateUnchanged(snapshot, 'before-result')
           assertReviewPlanUnchanged(plan, width, height, 'before-result-plan')
           if (currentReviewDocument().json !== document.json) {
@@ -1140,6 +1210,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           assertValidationReady(returnValidation)
           const returnFidelity = compareBlueprintFidelity({ blueprint, editableAreas: useLabelStore.getState().areas })
           assertFidelityReady(returnFidelity)
+          signalArtifactBatchSuccess(bootstrap, lease)
           completed = true
           return {
             inputKind: 'label-project-v3',

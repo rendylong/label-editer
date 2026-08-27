@@ -93,4 +93,22 @@ describe('font upload', () => {
     expect(remove).toHaveBeenCalledOnce()
     expect(remove).toHaveBeenCalledWith(ValidFontFace.created[0])
   })
+
+  it('rejects a colliding normalized runtime name before preparing or owning a FontFace', async () => {
+    class ValidFontFace {
+      static created: ValidFontFace[] = []
+      constructor() { ValidFontFace.created.push(this) }
+      async load(): Promise<ValidFontFace> { return this }
+    }
+    vi.stubGlobal('FileReader', FileReaderDouble)
+    vi.stubGlobal('FontFace', ValidFontFace)
+    vi.stubGlobal('document', { fonts: { add: vi.fn(), delete: vi.fn(), ready: Promise.resolve() } })
+    const { uploadFontFile } = await import('../src/label/fonts')
+
+    await expect(uploadFontFile(
+      { name: 'brand-font.woff2', size: 4 } as File,
+      [{ name: 'Brand Font', dataUrl: 'data:font/woff2;base64,T0xE' }],
+    )).rejects.toThrow(/runtime identity|already exists|conflict/i)
+    expect(ValidFontFace.created).toHaveLength(0)
+  })
 })
