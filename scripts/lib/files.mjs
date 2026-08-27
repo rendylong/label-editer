@@ -7,6 +7,12 @@ const ACTIVE_PUBLICATIONS = new Set()
 const PUBLICATION_LOCK_WAIT_MS = 30_000
 const PUBLICATION_LOCK_RETRY_MS = 20
 const EMPTY_LOCK_GRACE_MS = 200
+const MAX_PROCESS_PID = 0x7fffffff
+const SANITIZED_TOKEN_MAX_CODE_UNITS = 160
+const RESIDUE_CLAIM_HEX_LENGTH = 24
+const RESIDUE_ENTRY_NAMES = [
+  'owner.json', 'transaction.json', 'recovery.json', 'staged.complete', 'published.verified',
+]
 const DEFAULT_PUBLICATION_FILE_SYSTEM = { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, stat }
 
 export class PathPolicyError extends Error {
@@ -41,6 +47,15 @@ export async function resolveAllowedOutputPath(allowedRoots, inputPath) {
   return path.join(parent, path.basename(absolute))
 }
 
+function truncateUnicodeSafe(value, maximumCodeUnits) {
+  let result = ''
+  for (const character of value) {
+    if (result.length + character.length > maximumCodeUnits) break
+    result += character
+  }
+  return result
+}
+
 export function sanitizeArtifactName(value) {
   const normalized = String(value)
     .normalize('NFKC')
@@ -49,7 +64,9 @@ export function sanitizeArtifactName(value) {
     .replace(/[^\p{L}\p{N}._-]+/gu, '-')
     .replace(/-{2,}/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')
-  return normalized.slice(0, 160) || 'artifact'
+  const truncated = truncateUnicodeSafe(normalized, SANITIZED_TOKEN_MAX_CODE_UNITS)
+    .replace(/^[-.]+|[-.]+$/g, '')
+  return truncated || 'artifact'
 }
 
 export function sha256Bytes(bytes) {
@@ -138,21 +155,25 @@ async function readJsonIfPresent(fileSystem, filePath) {
   }
 }
 
+function validProcessPid(pid) {
+  return Number.isInteger(pid) && pid > 0 && pid <= MAX_PROCESS_PID
+}
+
 function ownerIsActive(owner) {
-  if (!owner || !Number.isInteger(owner.pid) || typeof owner.token !== 'string') return false
+  if (!owner || !validProcessPid(owner.pid) || typeof owner.token !== 'string') return true
   if (owner.pid === process.pid) return ACTIVE_PUBLICATIONS.has(owner.token)
   try {
     process.kill(owner.pid, 0)
     return true
   } catch (error) {
-    return error?.code === 'EPERM'
+    return error?.code !== 'ESRCH'
   }
 }
 
 function assertTransaction(journal, outputDir) {
   const parent = path.dirname(outputDir)
   const base = path.basename(outputDir)
-  if (journal?.version !== 1 || !Number.isInteger(journal.pid) || typeof journal.token !== 'string'
+  if (journal?.version !== 1 || !validProcessPid(journal.pid) || !validPublicationToken(journal.token)
     || journal.outputName !== base || typeof journal.hadExisting !== 'boolean'
     || journal.temporaryName !== `.${base}.${journal.token}.tmp`
     || journal.backupName !== `.${base}.${journal.token}.backup`
@@ -218,7 +239,12 @@ async function releasePublicationLock(fileSystem, lockPath, token) {
     if (error?.code === 'ENOENT') return
     throw error
   }
-  await removeAndSync(fileSystem, releasedLockPath, { recursive: true, force: true })
+  await cleanupLockResidueCandidate(
+    fileSystem,
+    lockPath,
+    path.basename(releasedLockPath),
+    { allowedActiveOwner: { pid: process.pid, token } },
+  )
 }
 
 function parseLockResidueName(lockPath, name) {
@@ -232,14 +258,18 @@ function parseLockResidueName(lockPath, name) {
   const pidText = identity.slice(0, delimiter)
   if (!/^[1-9][0-9]*$/.test(pidText)) return undefined
   const pid = Number(pidText)
-  if (!Number.isSafeInteger(pid) || pid <= 0 || String(pid) !== pidText) return undefined
+  if (!validProcessPid(pid) || String(pid) !== pidText) return undefined
   const token = identity.slice(delimiter + 1)
   if (!validPublicationToken(token)) return undefined
-  return { name, pid, token, suffix }
+  return { name, pid, token, tokenHash: publicationTokenHash(token), suffix }
+}
+
+function publicationTokenHash(token) {
+  return createHash('sha256').update(token, 'utf8').digest('hex').slice(0, RESIDUE_CLAIM_HEX_LENGTH)
 }
 
 function validSanitizedTokenPrefix(value) {
-  return typeof value === 'string' && value.length > 0 && value.length <= 160
+  return typeof value === 'string' && value.length > 0 && value.length <= SANITIZED_TOKEN_MAX_CODE_UNITS
     && sanitizeArtifactName(value) === value
 }
 
@@ -270,7 +300,8 @@ async function inspectResidueJson(fileSystem, filePath) {
     if (!openedInfo.isFile()
       || (info.dev !== undefined && openedInfo.dev !== info.dev)
       || (info.ino !== undefined && openedInfo.ino !== info.ino)) return { state: 'invalid' }
-    return { state: 'valid', value: JSON.parse(await handle.readFile('utf8')), info: openedInfo }
+    const raw = await handle.readFile('utf8')
+    return { state: 'valid', value: JSON.parse(raw), raw, info: openedInfo }
   } catch (error) {
     if (error?.code === 'ENOENT' || error?.code === 'ELOOP' || error instanceof SyntaxError) {
       return { state: 'invalid' }
@@ -315,129 +346,309 @@ function exactKeys(value, expected) {
 
 function validGeneratedOwner(owner) {
   return exactKeys(owner, ['version', 'pid', 'token'])
-    && owner.version === 1 && Number.isSafeInteger(owner.pid) && owner.pid > 0
+    && owner.version === 1 && validProcessPid(owner.pid)
     && validPublicationToken(owner.token)
 }
 
-function validGeneratedJournal(journal, outputDir) {
-  if (!exactKeys(journal, [
-    'version', 'pid', 'token', 'outputName', 'temporaryName', 'backupName', 'hadExisting',
-  ]) || !Number.isSafeInteger(journal.pid) || journal.pid <= 0
-    || !validPublicationToken(journal.token)) return false
+function parseLockResidueCandidateName(lockPath, name) {
+  const direct = parseLockResidueName(lockPath, name)
+  if (direct) return { ...direct, isCleanupClaim: false }
+  const prefix = `${path.basename(lockPath)}.cleanup.`
+  if (!name.startsWith(prefix)) return undefined
+  const claimMatch = /^([tr])\.([1-9][0-9]*)\.([0-9a-f]{24})\.([0-9a-f]{24})$/.exec(
+    name.slice(prefix.length),
+  )
+  if (!claimMatch) return undefined
+  const pid = Number(claimMatch[2])
+  if (!validProcessPid(pid) || String(pid) !== claimMatch[2]) return undefined
+  return {
+    name,
+    pid,
+    tokenHash: claimMatch[3],
+    suffix: claimMatch[1] === 't' ? '.tmp' : '.released',
+    isCleanupClaim: true,
+  }
+}
+
+function parseResidueEntryName(name) {
+  if (RESIDUE_ENTRY_NAMES.includes(name)) return { logicalName: name, isCleanupClaim: false }
+  for (const logicalName of RESIDUE_ENTRY_NAMES) {
+    const prefix = `${logicalName}.cleanup-`
+    if (name.startsWith(prefix)
+      && new RegExp(`^[0-9a-f]{${RESIDUE_CLAIM_HEX_LENGTH}}$`).test(name.slice(prefix.length))) {
+      return { logicalName, isCleanupClaim: true }
+    }
+  }
+  return undefined
+}
+
+function sameInode(left, right, type) {
+  return left && right && !right.isSymbolicLink() && right[type]()
+    && left.dev !== undefined && right.dev !== undefined && left.dev === right.dev
+    && left.ino !== undefined && right.ino !== undefined && left.ino === right.ino
+}
+
+function sameInspection(left, right, marker) {
+  return left?.state === 'valid' && right?.state === 'valid'
+    && sameInode(left.info, right.info, 'isFile')
+    && left.info.size === right.info.size
+    && (marker || left.raw === right.raw)
+}
+
+async function inspectResidueSnapshot(fileSystem, residuePath, identity) {
+  let info
   try {
-    assertTransaction(journal, outputDir)
-    return true
-  } catch {
+    info = await fileSystem.lstat(residuePath)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined
+    throw error
+  }
+  if (info.isSymbolicLink() || !info.isDirectory()) return undefined
+  const entries = (await fileSystem.readdir(residuePath)).sort()
+  const records = new Map()
+  for (const actualName of entries) {
+    const parsed = parseResidueEntryName(actualName)
+    if (!parsed || records.has(parsed.logicalName)
+      || (parsed.isCleanupClaim && !identity.isCleanupClaim)) return undefined
+    const marker = parsed.logicalName === 'staged.complete' || parsed.logicalName === 'published.verified'
+    const inspection = marker
+      ? await inspectResidueMarker(fileSystem, path.join(residuePath, actualName))
+      : await inspectResidueJson(fileSystem, path.join(residuePath, actualName))
+    if (inspection.state !== 'valid') return undefined
+    records.set(parsed.logicalName, { ...inspection, actualName, marker })
+  }
+  return { info, entries, records }
+}
+
+function sameResidueSnapshot(left, right) {
+  if (!left || !right || !sameInode(left.info, right.info, 'isDirectory')
+    || left.entries.length !== right.entries.length
+    || left.entries.some((entry, index) => entry !== right.entries[index])) return false
+  for (const [logicalName, record] of left.records) {
+    const current = right.records.get(logicalName)
+    if (!current || current.actualName !== record.actualName
+      || !sameInspection(record, current, record.marker)) return false
+  }
+  return true
+}
+
+function hasResidueEntries(snapshot, names) {
+  return snapshot.records.size === names.length && names.every((name) => snapshot.records.has(name))
+}
+
+function matchesResidueIdentity(owner, identity) {
+  return owner.pid === identity.pid
+    && (typeof identity.token === 'string'
+      ? owner.token === identity.token
+      : publicationTokenHash(owner.token) === identity.tokenHash)
+}
+
+function classifyResiduePhase(identity, snapshot) {
+  const owner = snapshot.records.get('owner.json')?.value
+  const recovery = snapshot.records.get('recovery.json')?.value
+  if (identity.suffix === '.tmp') {
+    if (hasResidueEntries(snapshot, [])) return { initializer: identity, cleanupOrder: [] }
+    if (hasResidueEntries(snapshot, ['owner.json'])
+      && validGeneratedOwner(owner) && matchesResidueIdentity(owner, identity)) {
+      return { initializer: owner, cleanupOrder: ['owner.json'] }
+    }
+    return undefined
+  }
+
+  if (hasResidueEntries(snapshot, [])) return { initializer: identity, cleanupOrder: [] }
+  if (hasResidueEntries(snapshot, ['owner.json'])
+    && validGeneratedOwner(owner) && matchesResidueIdentity(owner, identity)) {
+    return { initializer: owner, cleanupOrder: ['owner.json'] }
+  }
+  if (hasResidueEntries(snapshot, ['owner.json', 'staged.complete', 'published.verified'])
+    && validGeneratedOwner(owner) && matchesResidueIdentity(owner, identity)) {
+    return { initializer: owner, cleanupOrder: ['owner.json', 'staged.complete', 'published.verified'] }
+  }
+  if (hasResidueEntries(snapshot, ['staged.complete', 'published.verified'])) {
+    return { initializer: identity, cleanupOrder: ['staged.complete', 'published.verified'] }
+  }
+  if (hasResidueEntries(snapshot, ['staged.complete'])) {
+    return { initializer: identity, cleanupOrder: ['staged.complete'] }
+  }
+  if (hasResidueEntries(snapshot, ['published.verified'])) {
+    return { initializer: identity, cleanupOrder: ['published.verified'] }
+  }
+  if (hasResidueEntries(snapshot, ['recovery.json'])
+    && validGeneratedOwner(recovery) && matchesResidueIdentity(recovery, identity)) {
+    return { initializer: recovery, cleanupOrder: ['recovery.json'] }
+  }
+  if (hasResidueEntries(snapshot, ['owner.json', 'recovery.json'])
+    && validGeneratedOwner(owner) && validGeneratedOwner(recovery)
+    && matchesResidueIdentity(recovery, identity)) {
+    return { initializer: recovery, cleanupOrder: ['owner.json', 'recovery.json'] }
+  }
+  if (hasResidueEntries(snapshot, [
+    'owner.json', 'recovery.json', 'staged.complete', 'published.verified',
+  ]) && validGeneratedOwner(owner) && validGeneratedOwner(recovery)
+    && matchesResidueIdentity(recovery, identity)) {
+    return {
+      initializer: recovery,
+      cleanupOrder: ['owner.json', 'recovery.json', 'staged.complete', 'published.verified'],
+    }
+  }
+  if (hasResidueEntries(snapshot, ['recovery.json', 'staged.complete', 'published.verified'])
+    && validGeneratedOwner(recovery) && matchesResidueIdentity(recovery, identity)) {
+    return {
+      initializer: recovery,
+      cleanupOrder: ['recovery.json', 'staged.complete', 'published.verified'],
+    }
+  }
+  return undefined
+}
+
+function sameOwner(left, right) {
+  if (!left || !right || left.pid !== right.pid) return false
+  if (typeof left.token === 'string' && typeof right.token === 'string') return left.token === right.token
+  if (typeof left.token === 'string' && typeof right.tokenHash === 'string') {
+    return publicationTokenHash(left.token) === right.tokenHash
+  }
+  if (typeof right.token === 'string' && typeof left.tokenHash === 'string') {
+    return publicationTokenHash(right.token) === left.tokenHash
+  }
+  return left.tokenHash === right.tokenHash
+}
+
+function residueOwnerIsActive(owner, allowedActiveOwner) {
+  if (sameOwner(owner, allowedActiveOwner)) return false
+  if (typeof owner?.token !== 'string') {
+    if (!validProcessPid(owner?.pid) || owner.pid === process.pid) return true
+    try {
+      process.kill(owner.pid, 0)
+      return true
+    } catch (error) {
+      return error?.code !== 'ESRCH'
+    }
+  }
+  return ownerIsActive(owner)
+}
+
+function randomResidueClaim() {
+  return randomBytes(RESIDUE_CLAIM_HEX_LENGTH / 2).toString('hex')
+}
+
+function residueClaimName(lockPath, identity) {
+  const phase = identity.suffix === '.tmp' ? 't' : 'r'
+  return `${path.basename(lockPath)}.cleanup.${phase}.${identity.pid}.${identity.tokenHash}.${randomResidueClaim()}`
+}
+
+async function renameToResidueClaim(fileSystem, sourcePath, parent, lockPath, identity) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const claimPath = path.join(parent, residueClaimName(lockPath, identity))
+    try {
+      await renameAndSync(fileSystem, sourcePath, claimPath)
+      return claimPath
+    } catch (error) {
+      if (error?.code === 'ENOENT') return undefined
+      if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error
+    }
+  }
+  return undefined
+}
+
+async function preserveResidueClaim(fileSystem, claimPath, parent, lockPath, identity) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const preservedPath = path.join(parent, `${path.basename(lockPath)}.preserved.${identity.pid}.${identity.tokenHash}.${randomResidueClaim()}`)
+    try {
+      await renameAndSync(fileSystem, claimPath, preservedPath)
+      return preservedPath
+    } catch (error) {
+      if (error?.code === 'ENOENT') return undefined
+      if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error
+    }
+  }
+  return claimPath
+}
+
+async function claimAndRemoveResidueFile(fileSystem, residuePath, logicalName, expected) {
+  const sourcePath = path.join(residuePath, expected.actualName)
+  const claimedPath = path.join(residuePath, `${logicalName}.cleanup-${randomResidueClaim()}`)
+  try {
+    await renameAndSync(fileSystem, sourcePath, claimedPath)
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  }
+  const current = expected.marker
+    ? await inspectResidueMarker(fileSystem, claimedPath)
+    : await inspectResidueJson(fileSystem, claimedPath)
+  if (!sameInspection(expected, current, expected.marker)) return false
+  await removeAndSync(fileSystem, claimedPath, { force: true })
+  return true
+}
+
+async function cleanupLockResidueCandidate(fileSystem, lockPath, name, {
+  allowedActiveOwner,
+} = {}) {
+  const identity = parseLockResidueCandidateName(lockPath, name)
+  if (!identity) return false
+  const parent = path.dirname(lockPath)
+  const sourcePath = path.join(parent, name)
+  const snapshot = await inspectResidueSnapshot(fileSystem, sourcePath, identity)
+  const phase = snapshot && classifyResiduePhase(identity, snapshot)
+  if (!phase || residueOwnerIsActive(phase.initializer, allowedActiveOwner)) return false
+
+  const claimedPath = await renameToResidueClaim(fileSystem, sourcePath, parent, lockPath, identity)
+  if (!claimedPath) return false
+  const claimedIdentity = parseLockResidueCandidateName(lockPath, path.basename(claimedPath))
+  if (!claimedIdentity) return false
+  const claimedSnapshot = await inspectResidueSnapshot(fileSystem, claimedPath, claimedIdentity)
+  const claimedPhase = claimedSnapshot && classifyResiduePhase(claimedIdentity, claimedSnapshot)
+  if (!claimedPhase || !sameResidueSnapshot(snapshot, claimedSnapshot)
+    || residueOwnerIsActive(claimedPhase.initializer, allowedActiveOwner)) {
+    await preserveResidueClaim(fileSystem, claimedPath, parent, lockPath, claimedIdentity)
     return false
   }
-}
 
-async function sameResidueDirectory(fileSystem, residuePath, original) {
+  for (const logicalName of claimedPhase.cleanupOrder) {
+    const expected = claimedSnapshot.records.get(logicalName)
+    if (!expected || !(await claimAndRemoveResidueFile(fileSystem, claimedPath, logicalName, expected))) {
+      await preserveResidueClaim(fileSystem, claimedPath, parent, lockPath, claimedIdentity)
+      return false
+    }
+  }
+  if ((await fileSystem.readdir(claimedPath)).length !== 0) {
+    await preserveResidueClaim(fileSystem, claimedPath, parent, lockPath, claimedIdentity)
+    return false
+  }
+
+  const finalClaimPath = await renameToResidueClaim(fileSystem, claimedPath, parent, lockPath, claimedIdentity)
+  if (!finalClaimPath) return false
+  let finalInfo
   try {
-    const current = await fileSystem.lstat(residuePath)
-    return !current.isSymbolicLink() && current.isDirectory()
-      && (original.dev === undefined || current.dev === original.dev)
-      && (original.ino === undefined || current.ino === original.ino)
+    finalInfo = await fileSystem.lstat(finalClaimPath)
   } catch (error) {
-    if (error?.code === 'ENOENT') return false
+    if (error?.code === 'ENOENT') return true
     throw error
   }
-}
-
-async function sameResidueFile(fileSystem, filePath, original) {
-  try {
-    const current = await fileSystem.lstat(filePath)
-    return !current.isSymbolicLink() && current.isFile()
-      && (original.dev === undefined || current.dev === original.dev)
-      && (original.ino === undefined || current.ino === original.ino)
-  } catch (error) {
-    if (error?.code === 'ENOENT') return false
-    throw error
+  if (!sameInode(claimedSnapshot.info, finalInfo, 'isDirectory')
+    || (await fileSystem.readdir(finalClaimPath)).length !== 0) {
+    await preserveResidueClaim(fileSystem, finalClaimPath, parent, lockPath, claimedIdentity)
+    return false
   }
-}
-
-async function removeEmptyResidueDirectory(fileSystem, residuePath, parent) {
   try {
-    await fileSystem.rmdir(residuePath)
+    await fileSystem.rmdir(finalClaimPath)
     await syncDirectory(fileSystem, parent)
+    return true
   } catch (error) {
-    if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY') throw error
+    if (error?.code === 'ENOENT') return true
+    if (error?.code === 'ENOTEMPTY') {
+      await preserveResidueClaim(fileSystem, finalClaimPath, parent, lockPath, claimedIdentity)
+      return false
+    }
+    throw error
   }
 }
 
-async function cleanupAbandonedLockResidue(fileSystem, lockPath, outputDir) {
+async function cleanupAbandonedLockResidue(fileSystem, lockPath) {
   const parent = path.dirname(lockPath)
   for (const name of await fileSystem.readdir(parent)) {
-    const identity = parseLockResidueName(lockPath, name)
-    if (!identity) continue
-    const residuePath = path.join(parent, name)
-    let residueInfo
-    try {
-      residueInfo = await fileSystem.lstat(residuePath)
-    } catch (error) {
-      if (error?.code === 'ENOENT') continue
-      throw error
-    }
-    if (residueInfo.isSymbolicLink() || !residueInfo.isDirectory()) continue
-
-    const owner = await inspectResidueJson(fileSystem, path.join(residuePath, 'owner.json'))
-    const journal = await inspectResidueJson(fileSystem, path.join(residuePath, 'transaction.json'))
-    const recovery = await inspectResidueJson(fileSystem, path.join(residuePath, 'recovery.json'))
-    const staged = await inspectResidueMarker(fileSystem, path.join(residuePath, 'staged.complete'))
-    const verified = await inspectResidueMarker(fileSystem, path.join(residuePath, 'published.verified'))
-    if ([owner, journal, recovery, staged, verified].some((entry) => entry.state === 'invalid')) continue
-    if (owner.state === 'valid' && !validGeneratedOwner(owner.value)) continue
-    if (journal.state === 'valid' && !validGeneratedJournal(journal.value, outputDir)) continue
-    if (recovery.state === 'valid' && !validGeneratedOwner(recovery.value)) continue
-    if (owner.state === 'valid' && journal.state === 'valid'
-      && (owner.value.pid !== journal.value.pid || owner.value.token !== journal.value.token)) continue
-
-    let initializer
-    if (recovery.state === 'valid') {
-      const prior = owner.state === 'valid' ? owner.value : journal.state === 'valid' ? journal.value : undefined
-      if (recovery.value.pid !== identity.pid || recovery.value.token !== identity.token
-        || (prior && recovery.value.token !== `recovery-${prior.token}`)) continue
-      initializer = recovery.value
-    } else {
-      if (owner.state === 'valid'
-        && (owner.value.pid !== identity.pid || owner.value.token !== identity.token)) continue
-      if (journal.state === 'valid'
-        && (journal.value.pid !== identity.pid || journal.value.token !== identity.token)) continue
-      initializer = owner.state === 'valid' ? owner.value
-        : journal.state === 'valid' ? journal.value : undefined
-    }
-    if (!initializer) {
-      if (ownerIsActive(identity) || (await fileSystem.readdir(residuePath)).length !== 0
-        || !(await sameResidueDirectory(fileSystem, residuePath, residueInfo))) continue
-      await removeEmptyResidueDirectory(fileSystem, residuePath, parent)
-      continue
-    }
-    if (ownerIsActive(initializer)) continue
-
-    const identityFileName = recovery.state === 'valid' ? 'recovery.json'
-      : owner.state === 'valid' ? 'owner.json' : 'transaction.json'
-    const metadata = [
-      ['owner.json', owner], ['transaction.json', journal], ['recovery.json', recovery],
-      ['staged.complete', staged], ['published.verified', verified],
-    ].filter(([, inspection]) => inspection.state === 'valid')
-      .sort(([left], [right]) => Number(left === identityFileName) - Number(right === identityFileName))
-    const expectedEntries = new Set(metadata.map(([fileName]) => fileName))
-    if ((await fileSystem.readdir(residuePath)).some((entry) => !expectedEntries.has(entry))
-      || !(await sameResidueDirectory(fileSystem, residuePath, residueInfo))) continue
-    let metadataStable = true
-    for (const [fileName, inspection] of metadata) {
-      if (!(await sameResidueFile(fileSystem, path.join(residuePath, fileName), inspection.info))) {
-        metadataStable = false
-        break
-      }
-    }
-    if (!metadataStable) continue
-    for (const [fileName] of metadata) {
-      await removeAndSync(fileSystem, path.join(residuePath, fileName), { force: true })
-    }
-    if (await sameResidueDirectory(fileSystem, residuePath, residueInfo)) {
-      await removeEmptyResidueDirectory(fileSystem, residuePath, parent)
-    }
+    if (!parseLockResidueCandidateName(lockPath, name)) continue
+    await cleanupLockResidueCandidate(fileSystem, lockPath, name)
   }
 }
 
@@ -476,7 +687,7 @@ async function acquirePublicationLock(fileSystem, lockPath, outputDir, token, { 
   let acquired = false
   ACTIVE_PUBLICATIONS.add(token)
   try {
-    await cleanupAbandonedLockResidue(fileSystem, lockPath, outputDir)
+    await cleanupAbandonedLockResidue(fileSystem, lockPath)
     await fileSystem.mkdir(lockTemporary, { recursive: false })
     await writeDurableExclusive(fileSystem, ownerPath, new TextEncoder().encode(JSON.stringify({
       version: 1,

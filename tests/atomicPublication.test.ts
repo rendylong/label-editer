@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, readFile, readlink, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, readlink, rename, rm, rmdir, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
 import { publishAtomically } from '../scripts/lib/files.mjs'
 // @ts-expect-error Pure Node ESM module is consumed directly by the internal renderer.
@@ -31,7 +31,7 @@ function dimensionedPng(width: number, height: number): Buffer {
 
 const filesModuleUrl = pathToFileURL(path.resolve(import.meta.dirname, '../scripts/lib/files.mjs')).href
 const childPublisher = String.raw`
-  import { open, rename, rm } from 'node:fs/promises'
+  import { open, rename, rm, rmdir } from 'node:fs/promises'
   const { publishAtomically } = await import(process.env.FILES_MODULE_URL)
   const output = process.env.OUTPUT_DIR
   const round = process.env.ROUND
@@ -62,6 +62,7 @@ const childPublisher = String.raw`
     },
     async rename(source, target) {
       await rename(source, target)
+      if (boundary === 'claim-release-owner' && /[/\\]owner\.json\.cleanup-[0-9a-f]{24}$/.test(String(target))) crash()
       if (boundary === 'rename-journal' && target.endsWith('transaction.json')) crash()
       if (boundary === 'rename-existing' && source === output && target.endsWith('.backup')) crash()
       if (boundary === 'rename-staging' && source.endsWith('.tmp') && target === output) crash()
@@ -70,9 +71,15 @@ const childPublisher = String.raw`
     },
     async rm(target, options) {
       await rm(target, options)
+      if (boundary === 'cleanup-release-owner' && /[/\\]owner\.json\.cleanup-[0-9a-f]{24}$/.test(String(target))) crash()
+      if (boundary === 'cleanup-release-staged' && /[/\\]staged\.complete\.cleanup-[0-9a-f]{24}$/.test(String(target))) crash()
       if (boundary === 'cleanup-backup' && target.endsWith('.backup')) crash()
       if (boundary === 'cleanup-journal' && target.endsWith('transaction.json')) crash()
       if (boundary === 'cleanup-lock' && target.endsWith('.released')) crash()
+    },
+    async rmdir(target) {
+      await rmdir(target)
+      if (boundary === 'cleanup-lock' && target.includes('.publish.lock.cleanup.r.')) crash()
     },
   }
   const artifacts = [
@@ -150,6 +157,20 @@ async function waitForPath(target: string) {
     if (Date.now() - started >= 2_000) throw new Error(`Timed out waiting for path: ${target}`)
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
+}
+
+async function findFileWithContents(directory: string, expected: string): Promise<string | undefined> {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name)
+    if (entry.isDirectory()) {
+      const nested = await findFileWithContents(target, expected)
+      if (nested) return nested
+    } else if (entry.isFile() && await readFile(target, 'utf8').then(
+      (contents) => contents === expected,
+      () => false,
+    )) return target
+  }
+  return undefined
 }
 
 afterEach(async () => {
@@ -292,6 +313,207 @@ describe('atomic directory publication recovery', () => {
 
     expect(await readRound(output)).toBe('new')
     await expect(stat(residue)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('preserves a residue whose PID is outside the positive signed range supported by process.kill', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const pid = 2_147_483_648
+    const token = 'outside-pid-range-0123456789ab'
+    const residue = path.join(root, `.review.publish.lock.${pid}.${token}.tmp`)
+    await mkdir(residue)
+    await writeFile(path.join(residue, 'owner.json'), JSON.stringify({ version: 1, pid, token }))
+
+    await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+
+    expect(await readRound(output)).toBe('new')
+    expect((await stat(residue)).isDirectory()).toBe(true)
+  })
+
+  it('preserves ownership when process.kill cannot determine whether a valid PID is alive', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const pid = 2_147_483_647
+    const token = 'indeterminate-owner-0123456789ab'
+    const residue = path.join(root, `.review.publish.lock.${pid}.${token}.tmp`)
+    await mkdir(residue)
+    await writeFile(path.join(residue, 'owner.json'), JSON.stringify({ version: 1, pid, token }))
+    const realKill = process.kill.bind(process)
+    const kill = vi.spyOn(process, 'kill').mockImplementation(((candidate: number, signal?: NodeJS.Signals | number) => {
+      if (candidate === pid) throw Object.assign(new Error('indeterminate owner state'), { code: 'EINVAL' })
+      return realKill(candidate, signal as NodeJS.Signals | number)
+    }) as typeof process.kill)
+
+    try {
+      await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+    } finally {
+      kill.mockRestore()
+    }
+
+    expect(await readRound(output)).toBe('new')
+    expect((await stat(residue)).isDirectory()).toBe(true)
+  })
+
+  it('preserves exact-name residues whose metadata combination is impossible for their suffix phase', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const prefix = path.join(root, '.review.publish.lock')
+    const cases = [
+      { pid: 2_147_483_640, token: 'tmp-recovery-0123456789ab', suffix: '.tmp', files: ['recovery.json'] },
+      { pid: 2_147_483_641, token: 'tmp-journal-0123456789ab', suffix: '.tmp', files: ['transaction.json'] },
+      { pid: 2_147_483_642, token: 'tmp-marker-0123456789ab', suffix: '.tmp', files: ['owner.json', 'staged.complete'] },
+      { pid: 2_147_483_643, token: 'released-journal-0123456789ab', suffix: '.released', files: ['transaction.json'] },
+      { pid: 2_147_483_644, token: 'released-phase-0123456789ab', suffix: '.released', files: ['owner.json', 'staged.complete'] },
+    ]
+    const residues: string[] = []
+    for (const entry of cases) {
+      const residue = `${prefix}.${entry.pid}.${entry.token}${entry.suffix}`
+      residues.push(residue)
+      await mkdir(residue)
+      for (const fileName of entry.files) {
+        if (fileName === 'owner.json' || fileName === 'recovery.json') {
+          await writeFile(path.join(residue, fileName), JSON.stringify({
+            version: 1, pid: entry.pid, token: entry.token,
+          }))
+        } else if (fileName === 'transaction.json') {
+          await writeFile(path.join(residue, fileName), JSON.stringify({
+            version: 1,
+            pid: entry.pid,
+            token: entry.token,
+            outputName: 'review',
+            temporaryName: `.review.${entry.token}.tmp`,
+            backupName: `.review.${entry.token}.backup`,
+            hadExisting: false,
+          }))
+        } else {
+          await writeFile(path.join(residue, fileName), '')
+        }
+      }
+    }
+
+    await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+
+    expect(await readRound(output)).toBe('new')
+    for (const residue of residues) expect((await stat(residue)).isDirectory()).toBe(true)
+  })
+
+  it.each([
+    ['cleanup-release-owner', ['staged.complete', 'published.verified']],
+    ['cleanup-release-staged', ['published.verified']],
+  ] as const)('converges a genuine marker-only release after %s is interrupted', async (boundary, expectedMarkers) => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'round-0')
+
+    const interrupted = await runPublisher({ output, round: boundary, force: false, boundary })
+    expect(interrupted, interrupted.stderr).toMatchObject({ code: 86 })
+    const residueName = (await readdir(root)).find((entry) => entry.includes('.publish.lock.cleanup.r.'))
+    expect(residueName).toBeDefined()
+    expect((await readdir(path.join(root, residueName!))).sort()).toEqual([...expectedMarkers].sort())
+
+    await expect(publishAtomically(output, artifacts('probe'), { sessionId: 'probe' }))
+      .rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
+    expect(await readRound(output)).toBe(boundary)
+    expect(await readdir(root)).toEqual(['round-0'])
+  })
+
+  it('converges when cleanup crashes after atomically claiming a verified metadata inode', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'round-0')
+
+    const interrupted = await runPublisher({
+      output, round: 'claimed-owner', force: false, boundary: 'claim-release-owner',
+    })
+    expect(interrupted, interrupted.stderr).toMatchObject({ code: 86 })
+    const residueName = (await readdir(root)).find((entry) => entry.includes('.publish.lock.cleanup.r.'))
+    expect(residueName).toBeDefined()
+    expect(await readdir(path.join(root, residueName!))).toEqual(expect.arrayContaining([
+      expect.stringMatching(/^owner\.json\.cleanup-[0-9a-f]{24}$/),
+      'staged.complete',
+      'published.verified',
+    ]))
+
+    await expect(publishAtomically(output, artifacts('probe'), { sessionId: 'probe' }))
+      .rejects.toMatchObject({ code: 'OUTPUT_CONFLICT' })
+    expect(await readRound(output)).toBe('claimed-owner')
+    expect(await readdir(root)).toEqual(['round-0'])
+  })
+
+  it('preserves a replacement directory swapped in immediately before the cleanup claim', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const pid = 2_147_483_639
+    const token = 'directory-swap-0123456789ab'
+    const residue = path.join(root, `.review.publish.lock.${pid}.${token}.tmp`)
+    const original = `${residue}.original`
+    await mkdir(residue)
+    await writeFile(path.join(residue, 'owner.json'), JSON.stringify({ version: 1, pid, token }))
+    let swapped = false
+
+    await publishAtomically(output, artifacts('new'), {
+      sessionId: 'normal',
+      fileSystem: {
+        async rename(source: string, target: string) {
+          if (!swapped && source === residue && path.basename(target).includes('.publish.lock.cleanup.t.')) {
+            await rename(source, original)
+            await mkdir(source)
+            await writeFile(path.join(source, 'sentinel'), 'user-owned replacement directory')
+            swapped = true
+          }
+          await rename(source, target)
+        },
+      },
+    })
+
+    expect(swapped).toBe(true)
+    expect(await findFileWithContents(root, 'user-owned replacement directory')).toBeDefined()
+    expect((await stat(original)).isDirectory()).toBe(true)
+    expect(await readRound(output)).toBe('new')
+  })
+
+  it('preserves a replacement metadata inode swapped in immediately before the file claim', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const pid = 2_147_483_638
+    const token = 'metadata-swap-0123456789ab'
+    const residue = path.join(root, `.review.publish.lock.${pid}.${token}.tmp`)
+    await mkdir(residue)
+    await writeFile(path.join(residue, 'owner.json'), JSON.stringify({ version: 1, pid, token }))
+    let replacementClaim = ''
+
+    await publishAtomically(output, artifacts('new'), {
+      sessionId: 'normal',
+      fileSystem: {
+        async rename(source: string, target: string) {
+          if (!replacementClaim && path.basename(source) === 'owner.json'
+            && /^owner\.json\.cleanup-[0-9a-f]{24}$/.test(path.basename(target))) {
+            await rename(source, `${source}.original`)
+            await writeFile(source, 'user-owned replacement metadata')
+            replacementClaim = target
+          }
+          await rename(source, target)
+        },
+      },
+    })
+
+    expect(replacementClaim).not.toBe('')
+    expect(await findFileWithContents(root, 'user-owned replacement metadata')).toBeDefined()
+    expect(await readRound(output)).toBe('new')
+  })
+
+  it('uses one Unicode-safe canonical token grammar for NFKC input ending at an astral boundary', async () => {
+    const root = await temporaryDirectory()
+    const output = path.join(root, 'review')
+    const sessionId = `${'Ａ'.repeat(159)}𐐷`
+
+    const interrupted = await runPublisher({
+      output, round: sessionId, force: false, boundary: 'initialize-owner',
+    })
+    expect(interrupted, interrupted.stderr).toMatchObject({ code: 86 })
+
+    await publishAtomically(output, artifacts('new'), { sessionId: 'normal' })
+
+    expect(await readRound(output)).toBe('new')
+    expect(await readdir(root)).toEqual(['review'])
   })
 
   it.each([
