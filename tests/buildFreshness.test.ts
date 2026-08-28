@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -11,7 +11,7 @@ async function fixtureRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'glb-label-build-fingerprint-'))
   await mkdir(path.join(root, 'src'), { recursive: true })
   await mkdir(path.join(root, 'public', 'nested'), { recursive: true })
-  await mkdir(path.join(root, 'dist'), { recursive: true })
+  await mkdir(path.join(root, 'dist', 'assets'), { recursive: true })
   await writeFile(path.join(root, 'src', 'main.ts'), 'export const version = 1\n')
   await writeFile(path.join(root, 'public', 'nested', 'runtime.bin'), 'public-v1')
   await writeFile(path.join(root, 'index.html'), '<main>source</main>')
@@ -20,7 +20,8 @@ async function fixtureRoot(): Promise<string> {
   await writeFile(path.join(root, 'npm-shrinkwrap.json'), '{"lockfileVersion":3}\n')
   await writeFile(path.join(root, 'vite.config.ts'), 'export default {}\n')
   await writeFile(path.join(root, 'tsconfig.json'), '{}\n')
-  await writeFile(path.join(root, 'dist', 'index.html'), '<main>built</main>')
+  await writeFile(path.join(root, 'dist', 'index.html'), '<script src="/assets/app.js"></script>')
+  await writeFile(path.join(root, 'dist', 'assets', 'app.js'), 'built-v1')
   return root
 }
 
@@ -43,6 +44,57 @@ describe('editor build freshness', () => {
       .rejects.toThrow(/stale editor build/i)
     await expect(createPluginRuntime({ pluginRoot: root }))
       .rejects.toThrow(/stale editor build/i)
+  })
+
+  it('binds the exact regular-file dist inventory and bytes after the marker is written', async () => {
+    const mutations: Array<[string, (root: string) => Promise<unknown>]> = [
+      ['modified index', (root) => writeFile(path.join(root, 'dist', 'index.html'), '<main>tampered</main>')],
+      ['missing referenced asset', (root) => rm(path.join(root, 'dist', 'assets', 'app.js'))],
+      ['stale referenced asset', (root) => writeFile(path.join(root, 'dist', 'assets', 'app.js'), 'built-v0')],
+      ['added file', (root) => writeFile(path.join(root, 'dist', 'extra.js'), 'unexpected')],
+      ['renamed referenced asset', (root) => rename(
+        path.join(root, 'dist', 'assets', 'app.js'),
+        path.join(root, 'dist', 'assets', 'renamed.js'),
+      )],
+      ['file replaced by directory', async (root) => {
+        await rm(path.join(root, 'dist', 'assets', 'app.js'))
+        await mkdir(path.join(root, 'dist', 'assets', 'app.js'))
+      }],
+      ['symlinked index', async (root) => {
+        await rm(path.join(root, 'dist', 'index.html'))
+        await symlink(path.join(root, 'index.html'), path.join(root, 'dist', 'index.html'))
+      }],
+    ]
+
+    for (const [name, mutate] of mutations) {
+      const root = await fixtureRoot()
+      const editorRoot = path.join(root, 'dist')
+      await writeEditorBuildFingerprint(root, editorRoot)
+      await mutate(root)
+      await expect(assertFreshEditorBuild(root, editorRoot), name).rejects.toThrow(/stale editor build|symbolic link/i)
+    }
+  })
+
+  it('excludes the marker from its own inventory and leaves no partial marker files', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    await writeEditorBuildFingerprint(root, editorRoot)
+    await writeEditorBuildFingerprint(root, editorRoot)
+    await expect(assertFreshEditorBuild(root, editorRoot)).resolves.toBeDefined()
+    expect((await readdir(editorRoot)).filter((entry) => entry.includes('build-fingerprint')))
+      .toEqual(['build-fingerprint.json'])
+  })
+
+  it('validates an npm-packaged runtime without a workspace-only pnpm lockfile', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    await rm(path.join(root, 'pnpm-lock.yaml'))
+    await writeEditorBuildFingerprint(root, editorRoot)
+    await expect(assertFreshEditorBuild(root, editorRoot)).resolves.toMatchObject({
+      version: 2,
+      algorithm: 'sha256',
+      distFileCount: 2,
+    })
   })
 
   it('invalidates an existing build when recursive public assets or supported lockfiles change, appear, or disappear', async () => {
