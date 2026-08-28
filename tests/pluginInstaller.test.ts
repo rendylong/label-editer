@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -8,6 +7,9 @@ import * as ts from 'typescript'
 import { afterAll, describe, expect, it } from 'vitest'
 import { compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
 import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from '../src/agent/designContracts'
+import { computeLabelSetup } from '../src/app/modelLoader'
+import { extractMeshAccessors, isMeshWorldMirrored, meshLocalFrontDirection, readGlb } from '../src/glb/analyze'
+import { makeDefaultRemap } from '../src/glb/uvRemap'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 
@@ -31,6 +33,7 @@ const approvalRuntimeFiles = [
 
 const approvalSkillFiles = [
   'skills/cosmetic-label/SKILL.md',
+  'skills/cosmetic-label/data/kb/labels.jsonl',
   'skills/cosmetic-label/references/editor_handoff.md',
   'skills/cosmetic-label/references/label_content.md',
   'skills/cosmetic-label/references/label_mockup.html',
@@ -43,6 +46,8 @@ const approvalSkillFiles = [
   'skills/cosmetic-label-editor/references/quality-control.md',
 ] as const
 
+const packagedReviewModelFile = 'public/sample/面霜瓶.glb'
+
 const runtimeClosureEntries = [
   'scripts/label-cli.mjs',
   'scripts/plugin-runtime.mjs',
@@ -52,10 +57,6 @@ const runtimeClosureEntries = [
   'scripts/write-build-fingerprint.mjs',
   'src/label/cssColor.ts',
 ] as const
-
-const externalReviewModel = process.env.GLB_LABEL_E2E_MODEL
-  ?? '/Users/apple/realibox/cosmetic-bottles-glb/02_perfume_glass_with_cap.glb'
-const externalReviewModelPresent = existsSync(externalReviewModel)
 
 type PackFile = { path: string; mode: number; size: number }
 type PackageArchive = {
@@ -266,13 +267,151 @@ function sha256(bytes: string | Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-async function writeInstalledReviewFixture(callerRoot: string): Promise<{
+type InstalledInspectionMesh = {
+  stableSelector: string
+  meshIndex: number
+  nodeIndex: number
+  nodeName: string
+  materialNames: string[]
+  mappingMode: 'cylindrical' | 'planar'
+  labelCandidate: true
+  warnings: []
+}
+
+type InstalledSampleInspection = {
+  modelPath: string
+  fingerprint: string
+  target: InstalledInspectionMesh
+  stdout: string
+  stderr: string
+}
+
+function isLabelSuitableInspectedMesh(value: unknown): value is InstalledInspectionMesh {
+  if (!value || typeof value !== 'object') return false
+  const mesh = value as Record<string, unknown>
+  if (!Number.isInteger(mesh.meshIndex) || Number(mesh.meshIndex) < 0
+    || !Number.isInteger(mesh.nodeIndex) || Number(mesh.nodeIndex) < 0) return false
+  if (mesh.stableSelector !== `mesh:${String(mesh.meshIndex)}/node:${String(mesh.nodeIndex)}`) return false
+  return typeof mesh.nodeName === 'string' && mesh.nodeName.trim().length > 0
+    && Array.isArray(mesh.materialNames) && mesh.materialNames.length > 0
+    && mesh.materialNames.every((name) => typeof name === 'string' && name.trim().length > 0)
+    && (mesh.mappingMode === 'cylindrical' || mesh.mappingMode === 'planar')
+    && mesh.labelCandidate === true
+    && Array.isArray(mesh.warnings) && mesh.warnings.length === 0
+}
+
+function labelSemanticPriority(mesh: InstalledInspectionMesh): number {
+  return /label|贴标|标签|sticker|decal/i.test(`${mesh.nodeName} ${mesh.materialNames.join(' ')}`) ? 0 : 1
+}
+
+function selectInstalledReviewTarget(meshes: unknown[]): InstalledInspectionMesh {
+  const candidates = meshes.filter(isLabelSuitableInspectedMesh).sort((left, right) => (
+    labelSemanticPriority(left) - labelSemanticPriority(right)
+    || left.meshIndex - right.meshIndex
+    || left.nodeIndex - right.nodeIndex
+    || left.stableSelector.localeCompare(right.stableSelector)
+  ))
+  if (candidates.length === 0) {
+    throw new Error('Installed inspect returned no warning-free, mapped, material-backed label candidate')
+  }
+  return candidates[0]
+}
+
+async function inspectInstalledPackagedSample(installed: InstalledPackage): Promise<InstalledSampleInspection> {
+  const packagedModelPath = path.join(installed.packageRoot, packagedReviewModelFile)
+  const packagedModelInfo = await lstat(packagedModelPath)
+  if (!packagedModelInfo.isFile() || packagedModelInfo.isSymbolicLink()) {
+    throw new Error(`Packaged review sample is not a direct regular file: ${packagedReviewModelFile}`)
+  }
+  const modelPath = path.join(installed.callerRoot, 'package.glb')
+  await copyFile(packagedModelPath, modelPath)
+  const copiedModelInfo = await lstat(modelPath)
+  if (!copiedModelInfo.isFile() || copiedModelInfo.isSymbolicLink()) {
+    throw new Error('Copied review sample is not a direct regular file')
+  }
+
+  const result = spawnSync(process.execPath, [
+    installed.launcherPath, 'inspect', path.basename(modelPath), '--json',
+  ], {
+    cwd: installed.callerRoot,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  })
+  if (result.status !== 0) throw commandFailure('installed packaged-sample inspect', result)
+  let envelope: unknown
+  try {
+    envelope = JSON.parse(result.stdout)
+  } catch (error) {
+    throw new Error(`Installed inspect returned invalid JSON: ${String(error)}`)
+  }
+  if (!envelope || typeof envelope !== 'object') throw new Error('Installed inspect returned no envelope')
+  const response = envelope as Record<string, unknown>
+  const data = response.data as Record<string, unknown> | undefined
+  if (response.ok !== true || response.operation !== 'inspect_model' || !data) {
+    throw new Error(`Installed inspect returned an invalid envelope: ${result.stdout}`)
+  }
+  if (data.name !== path.basename(modelPath)
+    || typeof data.fingerprint !== 'string'
+    || !/^[a-f0-9]{64}$/.test(data.fingerprint)
+    || data.fingerprint !== sha256(await readFile(modelPath))) {
+    throw new Error('Installed inspect did not bind the copied packaged sample')
+  }
+  const dimensions = data.dimensions as Record<string, unknown> | undefined
+  if (!dimensions || !['width', 'height', 'depth'].every((axis) => (
+    typeof dimensions[axis] === 'number' && Number.isFinite(dimensions[axis]) && Number(dimensions[axis]) > 0
+  ))) {
+    throw new Error('Installed inspect returned invalid model dimensions')
+  }
+  if (!Array.isArray(data.meshes)) throw new Error('Installed inspect returned no mesh list')
+  return {
+    modelPath,
+    fingerprint: data.fingerprint,
+    target: selectInstalledReviewTarget(data.meshes),
+    stdout: result.stdout,
+    stderr: result.stderr,
+  }
+}
+
+async function writeInstalledReviewFixture(
+  callerRoot: string,
+  inspection: InstalledSampleInspection,
+): Promise<{
   inputPath: string
   modelPath: string
   outputDir: string
   blueprintSha256: string
   designReviewManifestSha256: string
+  target: InstalledInspectionMesh
 }> {
+  const document = await readGlb(await readFile(inspection.modelPath))
+  const mesh = extractMeshAccessors(document, inspection.target.meshIndex)
+  const remap = makeDefaultRemap(
+    mesh,
+    isMeshWorldMirrored(document, inspection.target.meshIndex),
+    meshLocalFrontDirection(document, inspection.target.meshIndex),
+  )
+  if (remap.mode !== inspection.target.mappingMode) {
+    throw new Error('Installed inspect mapping mode disagrees with the packaged sample geometry')
+  }
+  const artboard = { widthMm: 58.76605666054, heightMm: 30, background: 'transparent' }
+  const artboardAspect = artboard.widthMm / artboard.heightMm
+  const sourceRange = { uStart: 0.35, uWidth: 0.3, vStart: 0.2, vHeight: 0.6 }
+  const centerU = sourceRange.uStart + sourceRange.uWidth / 2
+  let uWidth = sourceRange.uWidth
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    const candidate = { ...sourceRange, uStart: centerU - uWidth / 2, uWidth }
+    const targetAspect = computeLabelSetup(mesh, remap, candidate, 'overlay').spec.aspect
+    if (Math.abs(artboardAspect - targetAspect) <= 1e-6 * Math.abs(artboardAspect)) break
+    uWidth *= artboardAspect / targetAspect
+  }
+  const range = { ...sourceRange, uStart: centerU - uWidth / 2, uWidth }
+  if (range.uStart < 0 || range.uStart + range.uWidth > 1 || range.uWidth < 0.05) {
+    throw new Error('Packaged sample cannot provide a bounded label range for the approved artboard')
+  }
+  const resolvedAspect = computeLabelSetup(mesh, remap, range, 'overlay').spec.aspect
+  if (Math.abs(artboardAspect - resolvedAspect) > 1e-6 * Math.abs(artboardAspect)) {
+    throw new Error(`Packaged sample target aspect ${resolvedAspect} does not match ${artboardAspect}`)
+  }
   const blueprint: LayoutBlueprintV1 = {
     version: 1,
     revision: 'installed-review-v1',
@@ -280,7 +419,7 @@ async function writeInstalledReviewFixture(callerRoot: string): Promise<{
     assets: [],
     areas: [{
       id: 'front', side: 'front', carrier: 'direct_surface_print',
-      artboard: { widthMm: 58.76605666054, heightMm: 30, background: 'transparent' },
+      artboard,
       placementIntent: 'Centered direct print on the front face.', placementPolicy: 'block',
       layers: [{
         id: 'installed-mark', kind: 'shape', boundsMm: { x: 16, y: 4, width: 26, height: 22 },
@@ -332,8 +471,15 @@ async function writeInstalledReviewFixture(callerRoot: string): Promise<{
   }
   const areas = compileBlueprintToSpecAreas(blueprint, [{
     blueprintAreaId: 'front', name: 'Front',
-    target: { nodeName: 'Cube.001_Material.001_0' }, surfaceMode: 'overlay',
-    range: { uStart: 0.35, uWidth: 0.3, vStart: 0.2, vHeight: 0.6 },
+    target: {
+      stableSelector: inspection.target.stableSelector,
+      meshIndex: inspection.target.meshIndex,
+      nodeName: inspection.target.nodeName,
+      materialName: inspection.target.materialNames[0],
+    },
+    surfaceMode: 'overlay',
+    remap: { mode: remap.mode, wrap: remap.wrap, offset: remap.offset, mirrorU: remap.mirrorU },
+    range,
   }])
   areas[0].designBinding = {
     blueprintRevision: blueprint.revision,
@@ -341,16 +487,21 @@ async function writeInstalledReviewFixture(callerRoot: string): Promise<{
     reviewManifestSha256: designReviewManifestSha256,
   }
   const inputPath = path.join(callerRoot, 'working-label-spec.json')
-  const modelPath = path.join(callerRoot, 'package.glb')
   const outputDir = path.join(callerRoot, 'production-review-revision-001')
   await Promise.all([
     writeFile(inputPath, `${JSON.stringify({ version: 2, areas })}\n`),
     writeFile(path.join(callerRoot, 'editor-handoff.json'), `${JSON.stringify(handoff)}\n`),
     writeFile(path.join(callerRoot, 'layout-blueprint.json'), blueprintJson),
     writeFile(path.join(callerRoot, 'design-review-manifest.json'), designManifestJson),
-    copyFile(externalReviewModel, modelPath),
   ])
-  return { inputPath, modelPath, outputDir, blueprintSha256, designReviewManifestSha256 }
+  return {
+    inputPath,
+    modelPath: inspection.modelPath,
+    outputDir,
+    blueprintSha256,
+    designReviewManifestSha256,
+    target: inspection.target,
+  }
 }
 
 afterAll(async () => {
@@ -373,6 +524,7 @@ async function createPluginSource(root: string): Promise<void> {
     'scripts',
     'scripts/lib',
     'skills/cosmetic-label',
+    'skills/cosmetic-label/data/kb',
     'skills/cosmetic-label/references',
     'skills/cosmetic-label/scripts',
     'skills/cosmetic-label-editor',
@@ -453,6 +605,13 @@ describe('GLB label editor installer', () => {
     expect(files.has('assets/icon.png')).toBe(true)
     expect(files.has('docs/plugin-directory-submission.md')).toBe(true)
     expect(files.get('scripts/install-plugin.mjs')?.mode).toBe(0o755)
+    expect(files.get(packagedReviewModelFile)?.size, packagedReviewModelFile).toBeGreaterThan(1_000)
+    const packagedReviewModelInfo = await lstat(path.join(packageRoot, packagedReviewModelFile))
+    expect(packagedReviewModelInfo.isFile()).toBe(true)
+    expect(packagedReviewModelInfo.isSymbolicLink()).toBe(false)
+    const packagedReviewModelBytes = await readFile(path.join(packageRoot, packagedReviewModelFile))
+    expect(packagedReviewModelBytes.subarray(0, 4)).toEqual(Buffer.from('glTF'))
+    expect(packagedReviewModelBytes).toEqual(await readFile(path.join(repoRoot, packagedReviewModelFile)))
     for (const runtimeEntry of [
       'scripts/generate-label-validator.mjs',
       'scripts/label-cli.mjs',
@@ -548,6 +707,45 @@ describe('GLB label editor installer', () => {
       expect(await readFile(path.join(runtimeRoot, requiredFile)), `runtime/${requiredFile}`).toEqual(packagedBytes)
       expect(await readFile(path.join(installed.installRoot, 'plugin', requiredFile)), `plugin/${requiredFile}`).toEqual(packagedBytes)
     }
+    expect(await readFile(path.join(runtimeRoot, packagedReviewModelFile)))
+      .toEqual(await readFile(path.join(installed.packageRoot, packagedReviewModelFile)))
+
+    const installedSkillRoot = path.join(installed.installRoot, 'plugin/skills/cosmetic-label')
+    for (const requiredFile of ['scripts/query_labels.py', 'data/kb/labels.jsonl']) {
+      const requiredInfo = await lstat(path.join(installedSkillRoot, requiredFile))
+      expect(requiredInfo.isFile(), requiredFile).toBe(true)
+      expect(requiredInfo.isSymbolicLink(), requiredFile).toBe(false)
+    }
+    const knowledgeStatsResult = spawnSync('python3', ['scripts/query_labels.py', '--stats'], {
+      cwd: installedSkillRoot,
+      encoding: 'utf8',
+      maxBuffer: 16 * 1024 * 1024,
+    })
+    if ((knowledgeStatsResult.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+      throw new Error('python3 is required to verify the installed cosmetic-label knowledge base')
+    }
+    expect(knowledgeStatsResult.status, [
+      knowledgeStatsResult.error?.stack,
+      knowledgeStatsResult.stderr,
+      knowledgeStatsResult.stdout,
+    ].filter(Boolean).join('\n')).toBe(0)
+    const knowledgeStats = JSON.parse(knowledgeStatsResult.stdout) as {
+      records: number
+      extracted: number
+      tiers: Record<string, number>
+      cats: Record<string, number>
+    }
+    expect(knowledgeStats.records).toBeGreaterThanOrEqual(100)
+    expect(knowledgeStats.extracted).toBeGreaterThanOrEqual(100)
+    expect(knowledgeStats.extracted).toBeLessThanOrEqual(knowledgeStats.records)
+    expect(Object.keys(knowledgeStats.tiers).length).toBeGreaterThanOrEqual(3)
+    expect(Object.keys(knowledgeStats.cats).length).toBeGreaterThanOrEqual(10)
+    expect(Object.values(knowledgeStats.tiers).reduce((sum, count) => sum + count, 0))
+      .toBe(knowledgeStats.extracted)
+    expect(Object.values(knowledgeStats.cats).reduce((sum, count) => sum + count, 0))
+      .toBe(knowledgeStats.extracted)
+    expect([knowledgeStatsResult.stdout, knowledgeStatsResult.stderr].join('\n')).not.toContain(repoRoot)
+    expect([knowledgeStatsResult.stdout, knowledgeStatsResult.stderr].join('\n')).not.toContain(installed.packageRoot)
 
     const launcherInfo = await lstat(installed.launcherPath)
     expect(launcherInfo.isFile()).toBe(true)
@@ -610,12 +808,36 @@ describe('GLB label editor installer', () => {
       .not.toContain(repoRoot)
   }, 180_000)
 
-  it.skipIf(!externalReviewModelPresent)(
-    'publishes and reads back a real clean review through the installed launcher when the external GLB is available',
+  it(
+    'publishes and reads back a real clean review through the installed launcher using the packaged sample',
     async () => {
       const installed = await installedPackage()
-      const fixture = await writeInstalledReviewFixture(installed.callerRoot)
-      const result = spawnSync(process.execPath, [
+      const inspection = await inspectInstalledPackagedSample(installed)
+      expect(inspection.target).toMatchObject({
+        stableSelector: expect.stringMatching(/^mesh:\d+\/node:\d+$/),
+        meshIndex: expect.any(Number),
+        nodeIndex: expect.any(Number),
+        nodeName: expect.any(String),
+        materialNames: expect.arrayContaining([expect.any(String)]),
+        mappingMode: expect.stringMatching(/^(cylindrical|planar)$/),
+        labelCandidate: true,
+        warnings: [],
+      })
+      expect([inspection.stdout, inspection.stderr].join('\n')).not.toContain(repoRoot)
+      expect([inspection.stdout, inspection.stderr].join('\n')).not.toContain(installed.packageRoot)
+
+      const fixture = await writeInstalledReviewFixture(installed.callerRoot, inspection)
+      const writtenSpec = JSON.parse(await readFile(fixture.inputPath, 'utf8'))
+      expect(writtenSpec.areas[0]).toMatchObject({
+        target: {
+          stableSelector: fixture.target.stableSelector,
+          meshIndex: fixture.target.meshIndex,
+          nodeName: fixture.target.nodeName,
+          materialName: fixture.target.materialNames[0],
+        },
+        remap: { mode: fixture.target.mappingMode },
+      })
+      const reviewArgs = [
         installed.launcherPath,
         'review', path.basename(fixture.inputPath),
         '--glb', path.basename(fixture.modelPath),
@@ -623,7 +845,8 @@ describe('GLB label editor installer', () => {
         '--width', '320',
         '--height', '320',
         '--json',
-      ], {
+      ]
+      const result = spawnSync(process.execPath, reviewArgs, {
         cwd: installed.callerRoot,
         encoding: 'utf8',
         maxBuffer: 32 * 1024 * 1024,
@@ -637,7 +860,7 @@ describe('GLB label editor installer', () => {
           outputDir: await realpath(fixture.outputDir),
           manifestPath: path.join(await realpath(fixture.outputDir), 'review-manifest.json'),
           revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
-          modelFingerprint: sha256(await readFile(fixture.modelPath)),
+          modelFingerprint: inspection.fingerprint,
           validation: { ready: true },
           fidelity: { pass: true },
         },
@@ -655,15 +878,21 @@ describe('GLB label editor installer', () => {
         input: { revision: envelope.data.revision },
         blueprint: { revision: 'installed-review-v1', sha256: fixture.blueprintSha256 },
         designReviewManifest: { sha256: fixture.designReviewManifestSha256 },
-        model: { fingerprint: sha256(await readFile(fixture.modelPath)) },
+        model: { fingerprint: inspection.fingerprint },
         areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
         areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
       })
       expect(manifest.artifacts).toHaveLength(5)
-      expect((await readdir(fixture.outputDir)).sort()).toEqual([
+      const canonicalOutputDir = await realpath(fixture.outputDir)
+      const expectedOutputFiles = [
         'label-front.png', 'model-back.png', 'model-front.png', 'review-manifest.json',
         'review-sheet.png', 'surface-front.png',
-      ])
+      ]
+      expect((await readdir(fixture.outputDir)).sort()).toEqual(expectedOutputFiles)
+      expect(envelope.data.artifacts).toEqual(manifest.artifacts.map((artifact: { path: string }) => ({
+        ...artifact,
+        path: path.join(canonicalOutputDir, artifact.path),
+      })))
       for (const artifact of manifest.artifacts) {
         const artifactPath = path.join(fixture.outputDir, artifact.path)
         const artifactInfo = await lstat(artifactPath)
@@ -676,6 +905,27 @@ describe('GLB label editor installer', () => {
         expect(bytes.readUInt32BE(20), artifact.path).toBe(320)
         expect(sha256(bytes), artifact.path).toBe(artifact.sha256)
       }
+
+      const immutableSnapshot = Object.fromEntries(await Promise.all(expectedOutputFiles.map(async (fileName) => (
+        [fileName, sha256(await readFile(path.join(fixture.outputDir, fileName)))]
+      ))))
+      const conflictResult = spawnSync(process.execPath, reviewArgs, {
+        cwd: installed.callerRoot,
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 * 1024,
+      })
+      expect(conflictResult.status, [conflictResult.stderr, conflictResult.stdout].join('\n')).toBe(9)
+      expect(JSON.parse(conflictResult.stdout)).toMatchObject({
+        ok: false,
+        operation: 'render_label_review',
+        error: { code: 'OUTPUT_CONFLICT' },
+      })
+      expect((await readdir(fixture.outputDir)).sort()).toEqual(expectedOutputFiles)
+      expect(Object.fromEntries(await Promise.all(expectedOutputFiles.map(async (fileName) => (
+        [fileName, sha256(await readFile(path.join(fixture.outputDir, fileName)))]
+      ))))).toEqual(immutableSnapshot)
+      expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual(manifest)
+      expect([conflictResult.stdout, conflictResult.stderr].join('\n')).not.toContain(repoRoot)
     },
     180_000,
   )
