@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { chromium } from 'playwright'
@@ -1137,7 +1137,7 @@ describe('GLB label plugin E2E', () => {
     }
   }, 180_000)
 
-  it.runIf(runRealE2E)('publishes a realistic 1600 square review through the additive CLI and returns conflict exit 9', async () => {
+  it.runIf(runRealE2E)('publishes and reads back a gate-bound 1600 square review through the packaged browser workflow', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'glb-label-task10-review-'))
     const fixture = reviewEvidenceFixture()
     const inputPath = path.join(root, 'working.json')
@@ -1165,16 +1165,35 @@ describe('GLB label plugin E2E', () => {
     const envelope = JSON.parse(stdout[0])
     expect(envelope).toMatchObject({
       ok: true, operation: 'render_label_review',
-      data: { outputDir: resolvedOutputDir, manifestPath: path.join(resolvedOutputDir, 'review-manifest.json') },
+      data: {
+        outputDir: resolvedOutputDir,
+        manifestPath: path.join(resolvedOutputDir, 'review-manifest.json'),
+        revision: revisionOf(fixture.spec),
+        modelFingerprint: hash(await readFile(modelPath)),
+        validation: { ready: true },
+        fidelity: { pass: true },
+      },
     })
+    expect(envelope.data.artifacts).toHaveLength(5)
+    expect(envelope.data.artifacts.map((artifact: { path: string }) => artifact.path).sort()).toEqual([
+      'label-front.png', 'model-back.png', 'model-front.png', 'review-sheet.png', 'surface-front.png',
+    ].map((file) => path.join(resolvedOutputDir, file)).sort())
     expect(stdout[0]).not.toMatch(/leaseToken|token=/)
 
     const manifestBytes = await readFile(path.join(outputDir, 'review-manifest.json'))
     const manifest = JSON.parse(manifestBytes.toString('utf8'))
+    const blueprintSha256 = hash(new TextEncoder().encode(fixture.request.designGate.blueprintJson))
+    const designReviewManifestSha256 = hash(new TextEncoder().encode(
+      fixture.request.designGate.designReviewManifestJson,
+    ))
     expect(manifest).toMatchObject({
       version: 1,
       input: { kind: 'label-spec-v2', revision: revisionOf(fixture.spec), sha256: hash(new TextEncoder().encode(inputBytes)) },
-      blueprint: { revision: 'task9-browser-review-v1' },
+      blueprint: { revision: 'task9-browser-review-v1', sha256: blueprintSha256 },
+      designReviewManifest: { sha256: designReviewManifestSha256 },
+      model: { fingerprint: hash(await readFile(modelPath)) },
+      areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
       artifacts: [
         {
           id: 'label-front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a',
@@ -1189,12 +1208,20 @@ describe('GLB label plugin E2E', () => {
         { id: 'review-sheet', path: 'review-sheet.png', width: 1600, height: 1600 },
       ],
     })
+    expect(manifest.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+    const outputInfo = await lstat(outputDir)
+    expect(outputInfo.isDirectory()).toBe(true)
+    expect(outputInfo.isSymbolicLink()).toBe(false)
     expect((await readdir(outputDir)).sort()).toEqual([
       'label-front.png', 'model-back.png', 'model-front.png', 'review-manifest.json',
       'review-sheet.png', 'surface-front.png',
     ])
     for (const artifact of manifest.artifacts) {
-      const bytes = await readFile(path.join(outputDir, artifact.path))
+      const artifactPath = path.join(outputDir, artifact.path)
+      const artifactInfo = await lstat(artifactPath)
+      expect(artifactInfo.isFile()).toBe(true)
+      expect(artifactInfo.isSymbolicLink()).toBe(false)
+      const bytes = await readFile(artifactPath)
       expect(bytes.subarray(0, 8), artifact.path).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
       expect(bytes.readUInt32BE(16), artifact.path).toBe(artifact.width)
       expect(bytes.readUInt32BE(20), artifact.path).toBe(artifact.height)
@@ -1211,6 +1238,7 @@ describe('GLB label plugin E2E', () => {
     })
     expect(conflictCode).toBe(9)
     expect(JSON.parse(conflictStdout[0])).toMatchObject({ ok: false, error: { code: 'OUTPUT_CONFLICT' } })
+    expect(await readFile(path.join(outputDir, 'review-manifest.json'))).toEqual(manifestBytes)
   }, 180_000)
 
   it.runIf(runRealE2E)('applies a front/back design and atomically publishes verified artifacts', async () => {

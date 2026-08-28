@@ -47,15 +47,26 @@ codex plugin add glb-label-editor@label-editer-dev
 
 插件清单位于 [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json)。插件安装时会同时安装 [`cosmetic-label`](skills/cosmetic-label/SKILL.md) 和 [`cosmetic-label-editor`](skills/cosmetic-label-editor/SKILL.md)，并生成指向受管理 runtime 的本地 CLI 启动器。
 
-## 两阶段工作流
+## 审批绑定工作流
 
-完整顺序固定为 `$cosmetic-label` → `$cosmetic-label-editor`：
+固定顺序仍为 `$cosmetic-label` → `$cosmetic-label-editor`，并包含两道与 revision 绑定的审批门：
 
-1. `$cosmetic-label` 完成需求澄清、案例依据、排版/字体/工艺/内容四维设计、正背标 mockup 和 Editor Handoff。
-2. 用户确认方向；若用户明确要求不中断快速执行，则交接状态标记为 `assumed_for_fast_run` 并公开全部假设。
-3. `$cosmetic-label-editor` 读取交接，再检查 GLB、解析稳定 mesh、生成并校验 Label Spec v2，最后发布完整产物。
+1. 先选择并记录 carrier，再发展视觉方向。若由 Agent 推断，需记录依据、一个可行备选及其取舍，并公开材料与供应商能力假设。
+2. 先生成可编辑的 `layout-blueprint.json`，再从该蓝图派生正/背 mockup 与干净的设计评审证据。蓝图是唯一设计事实源；参考 HTML、图片与 PDF 仅是不执行的视觉/内容证据。
+3. 设计审批只能绑定精确的 blueprint revision、blueprint SHA-256 与 design-review manifest SHA-256。等待审批、有 blocker、过期、缺失或 digest 不一致的设计门不得进入制作。
+4. `$cosmetic-label-editor` 检查 GLB、解析精确稳定目标、翻译已审批蓝图，并在应用或编辑已审批设计期间始终保持可见的 `live` 预览。
+5. 为当前 working revision 运行干净的制作 `review` 证据；图片不得包含网格、选区、变换控件、区域/调试标记或诊断通道。
+6. 制作审批只能绑定精确的当前 review manifest、输入 revision/digest、蓝图/design-review digest、模型 fingerprint 与映射区域绑定 digest。
+7. 使用诊断 `qc` 做检查和有上限的修复取证。QC 不能替代干净 review 或任一道审批门；可见修复需按变更范围重新 review 和审批。
+8. 只有当前审批、校验、QC 与输出交叉检查全部通过，才可 apply 或 export 当前 revision。
 
-设计阶段不猜 mesh、`stableSelector` 或 UV；制作阶段不擅自重做品牌、文案、字体、颜色、工艺和内容层级。Editor Handoff 合约位于 [`skills/cosmetic-label/references/editor_handoff.md`](skills/cosmetic-label/references/editor_handoff.md)。
+Carrier 与 process 是两个不同维度。`direct_surface_print`、`in_mold`、`foil_or_ink_only`、`clear_label` 和 `bare` 都不隐含纸张面板；`applied_label` 必须显式记录 substrate。烫金、油墨、白墨底、光油、击凸等属于图层 process，不是 carrier 的别名。
+
+`continuous_authorized` 必须由用户针对当前任务明确授权。它只移除等待，不会移除校验、披露、证据采集、两道审批记录、新鲜度检查、QC、修复上限或交付检查。紧急、沉默、历史任务和旧 `assumed_for_fast_run` 状态都不构成授权。
+
+若不支持的效果必须使用 flattened fallback，仅可在用户明确接受后继续，并需列明不可编辑图层和文字、丢失或近似的分色，以及更高保真矢量替代方案。不得把扁平化图稿描述为完全可编辑。
+
+设计阶段不猜 mesh、`stableSelector` 或 UV；制作阶段不擅自重做品牌、文案、字体、颜色、carrier、process 或内容层级。Handoff v2 合约位于 [`skills/cosmetic-label/references/editor_handoff.md`](skills/cosmetic-label/references/editor_handoff.md)。
 
 ## Agent 控制面
 
@@ -67,11 +78,12 @@ codex plugin add glb-label-editor@label-editer-dev
 | `validate` | 校验 Label Spec、资源、目标与设计/印刷问题 | 否 |
 | `live` | 自动打开只读 Web 预览并持续监听同一 working spec | 否 |
 | `preview` | 生成供 Agent 视觉检查的 PNG | 是 |
-| `qc` | 生成与当前 revision 绑定的多视角视觉检查证据 | 是 |
+| `review` | 生成与审批绑定的干净平面图稿和上模证据 | 是 |
+| `qc` | 生成用于检查与修复的诊断多视角证据 | 是 |
 | `apply` / `export` | 烘焙、GLB 交叉校验并完整发布产物 | 是 |
 | `open` | 显式人工接管，返回本机令牌化可编辑 URL | 否 |
 
-推荐制作顺序是 `inspect` → 创建/校验 working spec → `live` → `project` / `patch --force` 循环 → `validate` → `qc` / 修复 / 重拍 → `apply`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open` 不属于默认 Agent 工作流。
+规范顺序是 carrier 决策 → blueprint/mockup → 设计审批 → `inspect` → 创建/校验 working spec → `live` → `project` / `patch --force` 循环 → `validate` → 干净 `review` → 制作审批 → 诊断 `qc` / 修复 / 重拍 → `apply` 或 `export`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open` 不属于默认 Agent 工作流。
 
 ## CLI
 
@@ -97,7 +109,15 @@ node scripts/label-cli.mjs validate spec.json --glb model.glb --json
 # 自动打开可见的只读 Web 实时预览，并保持前台运行直到收到信号
 node scripts/label-cli.mjs live spec.json --glb model.glb --json
 
-# 为当前 working revision 生成标准视觉 QC 证据集
+# 为精确的当前 revision 生成干净制作审批证据
+label-cli review working-label-spec.json \
+  --glb package.glb \
+  --output production-review/revision-003 \
+  --width 1600 \
+  --height 1600 \
+  --json
+
+# 为当前 working revision 生成标准诊断 QC 证据集
 label-cli qc working-label-spec.json \
   --glb package.glb \
   --output label-qc/round-0 \
@@ -126,9 +146,30 @@ node scripts/label-cli.mjs open spec.json --glb model.glb
 
 退出码：`0` 成功；`2` 参数错误；`3` 路径越界；`4` Label Spec/项目无效；`5` 目标缺失或有歧义；`6` 浏览器不可用；`7` GLB 重建失败；`8` codec 不支持；`9` 输出冲突；`10` revision 冲突；`11` patch 操作无效；`1` 其他内部错误。
 
+## 干净制作评审证据
+
+精确的本地命令格式为：
+
+```bash
+label-cli review <spec-or-project.json> \
+  --glb <model.glb> \
+  --output <new-immutable-directory> \
+  --width <1-4096> \
+  --height <1-4096> \
+  --json
+```
+
+`--glb` 与 `--output` 必填；宽高默认均为 1600，可分别设置为 1 到 4096。正常流程写入新的不可变目录。`--force` 会显式替换已有目录，只用于经过明确授权的替换，而不是常规 revision 流程。
+
+输出包括每个非 bare 区域的干净平面图稿和正视上模证据、可用的整模正/背视图、`review-sheet.png` 与 `review-manifest.json`。manifest 绑定规范输入 revision 与 SHA-256、blueprint revision 与 SHA-256、design-review manifest SHA-256、模型 fingerprint、映射区域绑定 SHA-256，以及每个产物的路径/hash/尺寸。制作审批前，以及紧邻 QC 和 apply/export 前，都必须重新读取文件并重算这些 revision、fingerprint 与 digest 绑定。缺失、过期、意外、不可读或不匹配的证据会阻断制作；旧目录的审批不会转移到新 revision。
+
+`preview` 是供 Agent 快速推理的单图，干净 `review` 是面向用户的制作审批证据，`qc` 是诊断检查/修复证据。三者使用不同命令、目录、manifest 与审批语义。
+
+全部控制和渲染均在本机完成。插件不提供公网 HTTPS/MCP 服务；会话级本机令牌 URL 既不是公网端点，也不是交付证据。
+
 ## 视觉 QC 证据与修复
 
-完成校验后运行 `qc`，同时保持自动打开的 `live` 预览供用户持续评审。`live` 会让同一个只读 Web 页面始终与 working spec 同步；`qc` 是一次性取证命令，不会关闭、替换或另开一个实时预览页面。
+仅在当前制作审批通过（或存在有效的当前任务 continuous-authorization 记录）后运行 `qc`，同时保持自动打开的 `live` 预览。`live` 会让同一个只读 Web 页面始终与 working spec 同步；`qc` 是一次性诊断取证命令，不会关闭、替换或另开一个实时预览页面，其通道/叠加证据也不是审批图片。
 
 输入可以是 Label Spec v2 或 Label Project v3。`--glb` 与 `--output` 为必填项。`--preset qc-standard` 是默认且当前支持的 preset。默认截图尺寸为 1440 × 1440；`--width` 与 `--height` 接受 1 到 4096 的整数。对于特殊瓶型，可以用 `--camera-config cameras.json` 追加最多 32 个产品专用视角，但不会移除标准必拍视角。`--json` 会让 stdout 只包含一条 Agent envelope。已有输出目录默认受保护，只有显式添加 `--force` 才会替换；常规 QC 修复应新建下一轮目录，保留此前证据。
 
@@ -230,7 +271,7 @@ result/
 - 标准 GLB 可直接处理；Draco GLB 会在 Node 运行时先解压标准化，输出当前不保留 Draco 压缩。
 - `EXT_meshopt_compression` 和 `KHR_texture_basisu` 当前返回明确的 `UNSUPPORTED_CODEC`，不会静默生成不完整结果。
 - 工艺是屏幕/PBR 预览和分色数据，不等于供应商实物可行性。颜色、套准、附着力、触感和刀模需要打样确认。
-- 当前不会生成印厂可直接制版的 PDF/AI 刀模，也不替代法规、条码或宣称审核。
+- 屏幕/PBR 证据不是物理制造认证或供应商证明。当前不会生成印厂可直接制版的 PDF/AI 刀模，也不替代法规、条码、宣称或供应商审核。
 
 ## 前端开发与验证
 

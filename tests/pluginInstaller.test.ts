@@ -1,11 +1,37 @@
 import { readFileSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
+
+const approvalRuntimeFiles = [
+  'src/agent/layout-blueprint-v1.schema.json',
+  'src/agent/editor-handoff-v2.schema.json',
+  'src/agent/approval-record-v1.schema.json',
+  'src/agent/design-review-manifest-v1.schema.json',
+  'src/agent/review-manifest-v1.schema.json',
+  'src/agent/generated/designContractValidators.ts',
+  'scripts/render-design-review.mjs',
+  'scripts/lib/design-review.mjs',
+  'scripts/lib/review-output.mjs',
+  'src/agent/areaArtifactToken.mjs',
+  'src/agent/areaArtifactToken.d.mts',
+  'src/label/cssColor.ts',
+  'scripts/write-build-fingerprint.mjs',
+  'scripts/lib/build-fingerprint.mjs',
+] as const
+
+const approvalSkillFiles = [
+  'skills/cosmetic-label/SKILL.md',
+  'skills/cosmetic-label/references/editor_handoff.md',
+  'skills/cosmetic-label/references/label_process.md',
+  'skills/cosmetic-label/references/label_spec_template.md',
+  'skills/cosmetic-label-editor/SKILL.md',
+  'skills/cosmetic-label-editor/references/quality-control.md',
+] as const
 
 async function writeExecutable(filePath: string, body: string): Promise<void> {
   await writeFile(filePath, `#!/bin/sh\nset -eu\n${body}\n`)
@@ -18,10 +44,14 @@ async function createPluginSource(root: string): Promise<void> {
     'assets',
     'public',
     'scripts',
+    'scripts/lib',
     'skills/cosmetic-label',
+    'skills/cosmetic-label/references',
     'skills/cosmetic-label-editor',
     'skills/cosmetic-label-editor/references',
     'src',
+    'src/agent/generated',
+    'src/label',
   ]) {
     await mkdir(path.join(root, directory), { recursive: true })
   }
@@ -55,31 +85,53 @@ async function createPluginSource(root: string): Promise<void> {
   await writeFile(path.join(root, 'public/asset.txt'), 'asset')
   await writeFile(path.join(root, 'scripts/label-cli.mjs'), `#!/usr/bin/env node
 const command = process.argv[2]
-if (command !== 'schema') process.exit(2)
-process.stdout.write(JSON.stringify({ ok: true, operation: 'schema', data: { schema: {}, cwd: process.cwd() }, warnings: [] }) + '\\n')
+if (command === 'schema') {
+  process.stdout.write(JSON.stringify({ ok: true, operation: 'schema', data: { schema: {}, cwd: process.cwd() }, warnings: [] }) + '\\n')
+} else if (command === 'review') {
+  process.stdout.write(JSON.stringify({
+    ok: false,
+    operation: 'review',
+    error: { code: 'INVALID_USAGE', message: 'review requires --glb <model.glb>' },
+    warnings: [],
+  }) + '\\n')
+  process.exitCode = 2
+} else {
+  process.exitCode = 2
+}
 `)
   await chmod(path.join(root, 'scripts/label-cli.mjs'), 0o755)
-  await writeFile(path.join(root, 'skills/cosmetic-label/SKILL.md'), '# design')
-  await writeFile(path.join(root, 'skills/cosmetic-label-editor/SKILL.md'), '# editor')
-  await writeFile(
-    path.join(root, 'skills/cosmetic-label-editor/references/quality-control.md'),
-    '# Quality control fixture',
-  )
+  for (const requiredFile of approvalRuntimeFiles) {
+    const body = requiredFile.endsWith('.json')
+      ? JSON.stringify({ fixture: `fixture:${requiredFile}` })
+      : `// fixture:${requiredFile}\n`
+    await writeFile(path.join(root, requiredFile), body)
+  }
+  for (const requiredFile of approvalSkillFiles) {
+    await writeFile(path.join(root, requiredFile), `# fixture:${requiredFile}\n`)
+  }
   await writeFile(path.join(root, 'src/main.ts'), 'export {}')
 }
 
 describe('GLB label editor installer', () => {
-  it('packages a deterministic lockfile and executable installer entrypoint', () => {
-    const result = spawnSync('npm', ['pack', '--dry-run', '--json'], {
+  it('packages the complete approval and review runtime in a real npm tarball', async () => {
+    const packRoot = await mkdtemp(path.join(tmpdir(), 'glb-label-package-'))
+    const result = spawnSync('npm', ['pack', '--json', '--pack-destination', packRoot], {
       cwd: repoRoot,
       encoding: 'utf8',
     })
 
     expect(result.status, result.stderr).toBe(0)
     const pack = JSON.parse(result.stdout)[0]
-    const files = new Map<string, number>(
-      pack.files.map((entry: { path: string; mode: number }) => [entry.path, entry.mode]),
+    const tarballPath = path.join(packRoot, pack.filename)
+    const tarballInfo = await stat(tarballPath)
+    expect(tarballInfo.isFile()).toBe(true)
+    expect(tarballInfo.size).toBe(pack.size)
+    expect(pack.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+={0,2}$/)
+    expect(pack.shasum).toMatch(/^[a-f0-9]{40}$/)
+    const files = new Map<string, { path: string; mode: number; size: number }>(
+      pack.files.map((entry: { path: string; mode: number; size: number }) => [entry.path, entry]),
     )
+    expect(files.size).toBe(pack.entryCount)
     expect(files.has('npm-shrinkwrap.json')).toBe(true)
     expect(files.has('INSTALL_WITH_AGENT.md')).toBe(true)
     expect(files.has('README.md')).toBe(true)
@@ -91,8 +143,7 @@ describe('GLB label editor installer', () => {
     expect(files.has('TERMS.md')).toBe(true)
     expect(files.has('assets/icon.png')).toBe(true)
     expect(files.has('docs/plugin-directory-submission.md')).toBe(true)
-    expect(files.has('skills/cosmetic-label-editor/references/quality-control.md')).toBe(true)
-    expect(files.get('scripts/install-plugin.mjs')).toBe(0o755)
+    expect(files.get('scripts/install-plugin.mjs')?.mode).toBe(0o755)
     for (const runtimeEntry of [
       'scripts/generate-label-validator.mjs',
       'scripts/label-cli.mjs',
@@ -102,6 +153,10 @@ describe('GLB label editor installer', () => {
       'scripts/lib/build-fingerprint.mjs',
     ]) {
       expect(files.has(runtimeEntry), runtimeEntry).toBe(true)
+    }
+    for (const requiredFile of [...approvalRuntimeFiles, ...approvalSkillFiles]) {
+      expect(files.has(requiredFile), requiredFile).toBe(true)
+      expect(files.get(requiredFile)?.size, requiredFile).toBeGreaterThan(0)
     }
     expect(files.has('.mcp.json')).toBe(false)
     expect(files.has('scripts/mcp-server.mjs')).toBe(false)
@@ -115,6 +170,13 @@ describe('GLB label editor installer', () => {
     expect(shrinkwrap.version).toBe(packageJson.version)
     expect(shrinkwrap.packages[''].version).toBe(packageJson.version)
     expect(pluginManifest.version).toBe(packageJson.version)
+    expect(packageJson.dependencies).toMatchObject({
+      '@csstools/css-color-parser': '4.2.0',
+      '@csstools/css-parser-algorithms': '4.0.0',
+      '@csstools/css-tokenizer': '4.0.0',
+      ajv: '8.20.0',
+      playwright: '1.62.1',
+    })
     expect(JSON.stringify(shrinkwrap)).not.toContain('registry.npmmirror.com')
     const lockedPaths = Object.keys(shrinkwrap.packages)
     expect(lockedPaths.some((entry) => entry.startsWith('..'))).toBe(false)
@@ -124,6 +186,7 @@ describe('GLB label editor installer', () => {
     })) {
       expect(lockedPaths).toContain(`node_modules/${dependency}`)
     }
+    await rm(packRoot, { recursive: true, force: true })
   }, 30_000)
 
   it('prepares a runnable plugin source and registers it with Codex', async () => {
@@ -179,7 +242,7 @@ esac
     await expect(readFile(path.join(installRoot, 'runtime/dist/index.html'), 'utf8'))
       .resolves.toContain('built')
     await expect(readFile(path.join(installRoot, 'runtime/scripts/label-cli.mjs'), 'utf8'))
-      .resolves.toContain("command !== 'schema'")
+      .resolves.toContain("command === 'review'")
     await expect(readFile(path.join(installRoot, 'runtime/README.md'), 'utf8'))
       .resolves.toBe('# English')
     await expect(readFile(path.join(installRoot, 'runtime/README.zh-CN.md'), 'utf8'))
@@ -193,7 +256,17 @@ esac
     await expect(readFile(
       path.join(installRoot, 'plugin/skills/cosmetic-label-editor/references/quality-control.md'),
       'utf8',
-    )).resolves.toBe('# Quality control fixture')
+    )).resolves.toContain('fixture:skills/cosmetic-label-editor/references/quality-control.md')
+    for (const requiredFile of approvalRuntimeFiles) {
+      await expect(readFile(path.join(installRoot, 'runtime', requiredFile), 'utf8'))
+        .resolves.toContain(`fixture:${requiredFile}`)
+    }
+    for (const requiredFile of approvalSkillFiles) {
+      await expect(readFile(path.join(installRoot, 'runtime', requiredFile), 'utf8'))
+        .resolves.toContain(`fixture:${requiredFile}`)
+      await expect(readFile(path.join(installRoot, 'plugin', requiredFile), 'utf8'))
+        .resolves.toContain(`fixture:${requiredFile}`)
+    }
 
     const installedManifest = JSON.parse(
       await readFile(path.join(installRoot, 'plugin/.codex-plugin/plugin.json'), 'utf8'),
@@ -219,7 +292,22 @@ esac
       operation: 'schema',
       data: { cwd: await realpath(callerRoot) },
     })
-    expect(await readFile(launcherPath, 'utf8')).toContain(path.join(canonicalInstallRoot, 'runtime/scripts/label-cli.mjs'))
+    const launcherSource = await readFile(launcherPath, 'utf8')
+    expect(launcherSource).toContain(path.join(canonicalInstallRoot, 'runtime/scripts/label-cli.mjs'))
+    expect(launcherSource).not.toContain(repoRoot)
+
+    const invalidReviewResult = spawnSync(process.execPath, [
+      launcherPath, 'review', 'working.json', '--json',
+    ], {
+      cwd: callerRoot,
+      encoding: 'utf8',
+    })
+    expect(invalidReviewResult.status, invalidReviewResult.stderr).toBe(2)
+    expect(JSON.parse(invalidReviewResult.stdout)).toMatchObject({
+      ok: false,
+      operation: 'review',
+      error: { code: 'INVALID_USAGE' },
+    })
 
     const marketplace = JSON.parse(
       await readFile(path.join(installRoot, '.agents/plugins/marketplace.json'), 'utf8'),

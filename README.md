@@ -47,15 +47,26 @@ codex plugin add glb-label-editor@label-editer-dev
 
 The plugin manifest is [`.codex-plugin/plugin.json`](.codex-plugin/plugin.json). Installation includes both [`cosmetic-label`](skills/cosmetic-label/SKILL.md) and [`cosmetic-label-editor`](skills/cosmetic-label-editor/SKILL.md), and generates a local CLI launcher that points to the managed runtime.
 
-## Two-stage workflow
+## Approval-bound workflow
 
-The required sequence is `$cosmetic-label` → `$cosmetic-label-editor`:
+The required sequence remains `$cosmetic-label` → `$cosmetic-label-editor`, with two revision-bound approval gates:
 
-1. `$cosmetic-label` clarifies the request, gathers reference evidence, designs the label across layout, typography, craft, and content, produces front/back mockups, and creates the Editor Handoff.
-2. The user approves the direction. If the user explicitly requests an uninterrupted fast run, the handoff is marked `assumed_for_fast_run` and every assumption is disclosed.
-3. `$cosmetic-label-editor` reads the handoff, inspects the GLB, resolves stable meshes, generates and validates Label Spec v2, and publishes the complete deliverables.
+1. Choose and record the carrier before developing visual directions. If it is inferred, record the evidence, a feasible alternative and its tradeoff, and the material/supplier assumptions.
+2. Produce the editable `layout-blueprint.json`, then derive the front/back mockup and clean design-review evidence from that blueprint. The blueprint is the source of truth; reference HTML, images, and PDFs are inert visual/content evidence.
+3. Record design approval only for the exact blueprint revision, blueprint SHA-256, and design-review manifest SHA-256. An awaiting, blocked, stale, missing, or mismatched design gate cannot enter production.
+4. `$cosmetic-label-editor` inspects the GLB, resolves exact stable targets, translates the approved blueprint, and keeps the visible `live` preview open while the approved design is applied or edited.
+5. Run clean production `review` evidence for the current working revision. These images omit grids, selections, transforms, area/debug markers, and diagnostic channels.
+6. Record production approval only against the exact current review manifest, input revision/digest, blueprint/design-review digests, model fingerprint, and mapped-area binding digest.
+7. Run diagnostic `qc` for inspection and bounded repair evidence. QC does not substitute for clean review or either approval gate; a visible repair requires fresh review and approval as dictated by its scope.
+8. Only after current approvals, validation, QC, and output cross-checks pass may the current revision be applied or exported.
 
-The design stage does not guess meshes, `stableSelector` values, or UVs. The production stage does not silently redesign the brand, copy, typography, color, craft, or content hierarchy. The Editor Handoff contract is defined in [`skills/cosmetic-label/references/editor_handoff.md`](skills/cosmetic-label/references/editor_handoff.md).
+Carrier and process are different axes. `direct_surface_print`, `in_mold`, `foil_or_ink_only`, `clear_label`, and `bare` do not imply a paper panel; an `applied_label` records its substrate explicitly. Foil, ink, white underbase, varnish, emboss, and similar operations are layer processes, not alternate names for the carrier.
+
+`continuous_authorized` must be explicitly granted for the current task. It removes approval waits only: it does not remove validation, disclosures, evidence capture, either approval record, freshness checks, QC, repair limits, or delivery checks. Urgency, silence, previous work, and legacy `assumed_for_fast_run` state are not authorization.
+
+If an unsupported effect requires a flattened fallback, proceed only after explicit acceptance that identifies the non-editable layers and text, all lost or approximated separations, and a higher-fidelity vector alternative. Never describe flattened artwork as fully editable.
+
+The design stage does not guess meshes, `stableSelector` values, or UVs. The production stage does not silently redesign the brand, copy, typography, color, carrier, process, or content hierarchy. The Handoff v2 contract is defined in [`skills/cosmetic-label/references/editor_handoff.md`](skills/cosmetic-label/references/editor_handoff.md).
 
 ## Agent control surface
 
@@ -67,11 +78,12 @@ The design stage does not guess meshes, `stableSelector` values, or UVs. The pro
 | `validate` | Validate the Label Spec, assets, targets, and design/print issues | No |
 | `live` | Automatically open a read-only web preview and keep watching the same working spec | No |
 | `preview` | Generate a PNG for Agent visual inspection | Yes |
-| `qc` | Capture a revision-bound multi-view evidence set for visual review and repair | Yes |
+| `review` | Capture clean, approval-bound flat-artwork and on-model evidence | Yes |
+| `qc` | Capture diagnostic multi-view evidence for inspection and repair | Yes |
 | `apply` / `export` | Bake, cross-check the GLB, and publish the complete output | Yes |
 | `open` | Explicit human takeover; returns a tokenized local editable URL | No |
 
-The recommended production sequence is `inspect` → create/validate the working spec → `live` → repeat `project` / `patch --force` → `validate` → `qc` / repair / recapture → `apply`. Never guess a target from a similar node name; use the `stableSelector` returned by inspection. `open` is not part of the default Agent workflow.
+The canonical sequence is carrier decision → blueprint/mockup → design approval → `inspect` → create/validate the working spec → `live` → repeat `project` / `patch --force` → `validate` → clean `review` → production approval → diagnostic `qc` / repair / recapture → `apply` or `export`. Never guess a target from a similar node name; use the `stableSelector` returned by inspection. `open` is not part of the default Agent workflow.
 
 ## CLI
 
@@ -97,7 +109,15 @@ node scripts/label-cli.mjs validate spec.json --glb model.glb --json
 # Open the visible read-only live web preview and remain in the foreground until signaled
 node scripts/label-cli.mjs live spec.json --glb model.glb --json
 
-# Capture the standard visual-QC evidence set for the current working revision
+# Capture clean production-approval evidence for the exact current revision
+label-cli review working-label-spec.json \
+  --glb package.glb \
+  --output production-review/revision-003 \
+  --width 1600 \
+  --height 1600 \
+  --json
+
+# Capture the standard diagnostic-QC evidence set for the current working revision
 label-cli qc working-label-spec.json \
   --glb package.glb \
   --output label-qc/round-0 \
@@ -126,9 +146,30 @@ node scripts/label-cli.mjs open spec.json --glb model.glb
 
 Exit codes: `0` success; `2` invalid arguments; `3` path outside allowed roots; `4` invalid Label Spec/project; `5` missing or ambiguous target; `6` browser unavailable; `7` GLB rebuild failure; `8` unsupported codec; `9` output conflict; `10` revision conflict; `11` invalid patch operation; `1` any other internal error.
 
+## Clean production-review evidence
+
+The exact local syntax is:
+
+```bash
+label-cli review <spec-or-project.json> \
+  --glb <model.glb> \
+  --output <new-immutable-directory> \
+  --width <1-4096> \
+  --height <1-4096> \
+  --json
+```
+
+`--glb` and `--output` are required; width and height default to 1600 and may be set independently from 1 through 4096. A normal run writes a new immutable directory. `--force` is an explicit replacement of an existing directory and is reserved for a deliberately authorized replacement, not the normal revision workflow.
+
+The output contains clean flat artwork and face-on surface evidence for every non-bare area, useful whole-model front/back views, `review-sheet.png`, and `review-manifest.json`. The manifest binds the canonical input revision and SHA-256, blueprint revision and SHA-256, design-review manifest SHA-256, model fingerprint, mapped-area binding SHA-256, and every artifact path/hash/dimension. Before production approval, and again immediately before QC and apply/export, reread the files and recompute those revision, fingerprint, and digest bindings. Missing, stale, unexpected, unreadable, or mismatched evidence blocks production; approval of an older directory never transfers to a newer revision.
+
+`preview` is a quick Agent reasoning image, clean `review` is the human production-approval evidence set, and `qc` is diagnostic inspection/repair evidence. They are separate commands, directories, manifests, and approval meanings.
+
+All control and rendering are local. The plugin does not expose a public HTTPS/MCP service, and a session-local tokenized URL is neither a public endpoint nor delivery evidence.
+
 ## Visual QC evidence and repair
 
-Use `qc` after validation and while the automatically opened `live` preview remains available for user review. `live` keeps one read-only web page synchronized with the working spec. `qc` is a one-shot capture command: it does not close, replace, or open another live-preview page.
+Use `qc` only after current production approval (or a valid current-task continuous-authorization record) and while the automatically opened `live` preview remains available. `live` keeps one read-only web page synchronized with the working spec. `qc` is a one-shot diagnostic capture command: it does not close, replace, or open another live-preview page, and its channel/overlay evidence is not approval imagery.
 
 The input may be a Label Spec v2 or Label Project v3. `--glb` and `--output` are required. `--preset qc-standard` is the default and currently supported preset. It captures at 1440 × 1440 by default; `--width` and `--height` accept integers from 1 through 4096. For an unusual package, `--camera-config cameras.json` appends up to 32 product-specific views without removing the required standard views. `--json` keeps stdout to one Agent envelope. An existing output directory is protected unless `--force` is explicit; normal QC repair should use a new round directory instead of replacing earlier evidence.
 
@@ -230,7 +271,7 @@ result/
 - Standard GLB files are processed directly. Draco GLBs are decompressed and normalized in the Node.js runtime; current output does not preserve Draco compression.
 - `EXT_meshopt_compression` and `KHR_texture_basisu` return an explicit `UNSUPPORTED_CODEC` error rather than silently producing incomplete output.
 - Craft effects are screen/PBR previews and separation data, not proof of supplier feasibility. Color, registration, adhesion, tactile finish, and die cutting require physical sampling.
-- The plugin does not currently generate printer-ready PDF/AI dielines and does not replace regulatory, barcode, or claims review.
+- Screen/PBR evidence is not physical-manufacture certification or supplier proof. The plugin does not generate printer-ready PDF/AI dielines and does not replace regulatory, barcode, claims, or supplier review.
 
 ## Frontend development and verification
 
