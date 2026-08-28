@@ -11,7 +11,13 @@ export function editorSessionUrl(serverOrigin, session, pageQuery = {}) {
   return url.toString()
 }
 
-export async function createBrowserSessionManager({ server, headless = true, launchOptions = {}, pageQuery = {} }) {
+export async function createBrowserSessionManager({
+  server,
+  headless = true,
+  launchOptions = {},
+  pageQuery = {},
+  beforeOpen,
+}) {
   let browser
   const pages = new Map()
   const unavailableListeners = new Map()
@@ -49,6 +55,7 @@ export async function createBrowserSessionManager({ server, headless = true, lau
   async function open(session) {
     const existing = pages.get(session.id)
     if (existing) return existing
+    if (beforeOpen) await beforeOpen()
     const target = await ensureBrowser()
     const context = await target.newContext({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 1 })
     const page = await context.newPage()

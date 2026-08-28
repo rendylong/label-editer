@@ -6,6 +6,8 @@ import { isTransparentCssColor } from '../src/label/cssColor'
 
 const CORPUS = [
   ['transparent', true],
+  ['color-mix(in srgb, transparent, transparent)/**/', true],
+  ['color(display-p3 0 0 0 / 0)/**/', true],
   ['rgb(10 20 30 / 0)', true],
   ['hsl(120deg 40% 50% / 0)', true],
   ['color(display-p3 1 0 0 / 0)', true],
@@ -15,6 +17,12 @@ const CORPUS = [
   ['color-mix(in srgb, transparent 100%, red 0%)', true],
   ['color-mix(in srgb, 100% transparent, 0% red)', true],
   ['color-mix(in srgb, transparent calc(0%), red calc(0%))', true],
+  ['color-mix(in srgb, transparent 100%, red calc(0deg / 1deg * 1%))', true],
+  ['color-mix(in srgb, transparent 100%, red calc((0deg / 1deg) * 1%))', true],
+  ['color-mix(in srgb, transparent 100%, red calc(calc(0deg / 1deg) * 1%))', true],
+  ['color-mix(in srgb, transparent/**/ 100%, red calc(0px/**/ / /**/1px * (1% + 0%)))', true],
+  ['color-mix(in srgb, transparent 100%, red calc(0deg / 1rad * 1%))', true],
+  ['color-mix(in srgb, transparent 100%, red calc(0deg / 1deg * min(1%, 2%)))', true],
   ['rgb(from transparent r g b / 0)', true],
   ['hsl(from transparent h s l / 0)', true],
   ['lab(from transparent l a b / 0)', true],
@@ -38,9 +46,20 @@ const CORPUS = [
   ['color-mix(in srgb, transparent +0%, red -0%)', false],
   ['color-mix(in srgb, transparent 0% 0%, transparent)', false],
   ['color-mix(in srgb, color-mix(in srgb, transparent), transparent)', false],
+  ['color-mix(in srgb, transparent 100%, red calc(0deg / 1px * 1%))', false],
+  ['color-mix(in srgb, transparent 100%, red calc(0deg / 1deg * 1% * 1%))', false],
+  ['color-mix(in srgb, transparent 100%, red calc(0deg / 1deg))', false],
+  ['color-mix(in srgb, transparent 100%, red calc(0fr / 1fr * 1%))', false],
   ['alpha(from transparent / 0)', false],
   ['rgb(from nonsense r g b / 0)', false],
   ['color(from transparent srgb r g / 0)', false],
+] as const
+
+const CONTEXTUAL_CORPUS = [
+  'var(--transparent-color)',
+  'currentColor',
+  'color-mix(in srgb, transparent 100%, currentColor 0%)',
+  'color-mix(in srgb, transparent 100%, red calc(var(--weight)))',
 ] as const
 
 describe('browser-authoritative CSS transparency', () => {
@@ -102,6 +121,14 @@ describe('browser-authoritative CSS transparency', () => {
       expect(CORPUS.map(([value]) => isTransparentCssColor(value))).toEqual(expected)
       expect(results.map(({ actual }) => actual)).toEqual(expected)
       expect(results.every(({ actual, rendered }) => actual === rendered)).toBe(true)
+      expect(CONTEXTUAL_CORPUS.map((value) => isTransparentCssColor(value)))
+        .toEqual(CONTEXTUAL_CORPUS.map(() => false))
+      expect(await page.evaluate((values) => {
+        const classify = (globalThis as typeof globalThis & {
+          testCssTransparency: (value: string) => boolean
+        }).testCssTransparency
+        return values.map(classify)
+      }, CONTEXTUAL_CORPUS)).toEqual(CONTEXTUAL_CORPUS.map(() => false))
     } finally {
       await browser.close()
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))

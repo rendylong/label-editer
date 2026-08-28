@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -21,7 +21,10 @@ async function fixtureRoot(): Promise<string> {
   await writeFile(path.join(root, 'vite.config.ts'), 'export default {}\n')
   await writeFile(path.join(root, 'tsconfig.json'), '{}\n')
   await writeFile(path.join(root, 'dist', 'index.html'), '<script src="/assets/app.js"></script>')
-  await writeFile(path.join(root, 'dist', 'assets', 'app.js'), 'built-v1')
+  await writeFile(
+    path.join(root, 'dist', 'assets', 'app.js'),
+    'globalThis.__GLB_LABEL_EDITOR_AGENT_V1__ = {}\n',
+  )
   return root
 }
 
@@ -75,6 +78,90 @@ describe('editor build freshness', () => {
     }
   })
 
+  it('serves only the verified dist byte snapshot after runtime creation', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    const assetPath = path.join(editorRoot, 'assets', 'app.js')
+    const verifiedBytes = await readFile(assetPath, 'utf8')
+    await writeEditorBuildFingerprint(root, editorRoot)
+    const runtime = await createPluginRuntime({ pluginRoot: root })
+    try {
+      await writeFile(assetPath, 'globalThis.__GLB_LABEL_EDITOR_AGENT_V1__ = { tampered: true }\n')
+      const response = await fetch(`${runtime.origin}/assets/app.js`, { cache: 'no-store' })
+      expect(response.status).toBe(200)
+      expect(await response.text()).toBe(verifiedBytes)
+    } finally {
+      await runtime.close()
+    }
+  })
+
+  it.each([
+    ['source mutation', async (root: string) => {
+      await writeFile(path.join(root, 'src', 'main.ts'), 'export const version = 2\n')
+    }],
+    ['marker byte mutation', async (root: string) => {
+      const marker = path.join(root, 'dist', 'build-fingerprint.json')
+      await writeFile(marker, `${await readFile(marker, 'utf8')} `)
+    }],
+    ['dist byte mutation', async (root: string) => {
+      await writeFile(path.join(root, 'dist', 'assets', 'app.js'), 'tampered')
+    }],
+    ['dist addition', async (root: string) => {
+      await writeFile(path.join(root, 'dist', 'added.js'), 'added')
+    }],
+    ['dist deletion', async (root: string) => {
+      await rm(path.join(root, 'dist', 'assets', 'app.js'))
+    }],
+    ['dist rename', async (root: string) => {
+      await rename(path.join(root, 'dist', 'assets', 'app.js'), path.join(root, 'dist', 'assets', 'renamed.js'))
+    }],
+    ['dist symlink replacement', async (root: string) => {
+      const asset = path.join(root, 'dist', 'assets', 'app.js')
+      await rm(asset)
+      await symlink(path.join(root, 'index.html'), asset)
+    }],
+  ])('rejects %s before the lazy browser executable can run', async (_name, mutate) => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    await writeEditorBuildFingerprint(root, editorRoot)
+    const runtime = await createPluginRuntime({
+      pluginRoot: root,
+      launchOptions: { executablePath: path.join(root, 'browser-must-not-run') },
+    })
+    try {
+      const session = await runtime.createSession()
+      await mutate(root)
+      await expect(runtime.openEditor(session)).rejects.toThrow(/stale editor build|symbolic link/i)
+    } finally {
+      await runtime.close()
+    }
+  })
+
+  it('keeps one verified byte inventory across multiple browser opens and the final request race', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    const assetPath = path.join(editorRoot, 'assets', 'app.js')
+    const verifiedBytes = await readFile(assetPath, 'utf8')
+    await writeEditorBuildFingerprint(root, editorRoot)
+    const runtime = await createPluginRuntime({ pluginRoot: root })
+    try {
+      const first = await runtime.createSession()
+      const second = await runtime.createSession()
+      const firstUrl = await runtime.openEditor(first)
+      await expect(runtime.openEditor(second)).resolves.toMatch(/^http:\/\/127\.0\.0\.1:/)
+      expect((await fetch(firstUrl)).status).toBe(200)
+
+      await writeFile(assetPath, 'globalThis.__GLB_LABEL_EDITOR_AGENT_V1__ = { tampered: true }\n')
+      await expect(fetch(`${runtime.origin}/assets/app.js`).then((response) => response.text()))
+        .resolves.toBe(verifiedBytes)
+      await expect(runtime.openEditor(await runtime.createSession()))
+        .rejects.toThrow(/stale editor build/i)
+      await expect(runtime.openEditor(first)).resolves.toBe(firstUrl)
+    } finally {
+      await runtime.close()
+    }
+  }, 30_000)
+
   it('excludes the marker from its own inventory and leaves no partial marker files', async () => {
     const root = await fixtureRoot()
     const editorRoot = path.join(root, 'dist')
@@ -95,6 +182,13 @@ describe('editor build freshness', () => {
       algorithm: 'sha256',
       distFileCount: 2,
     })
+    const runtime = await createPluginRuntime({ pluginRoot: root })
+    try {
+      await expect(fetch(`${runtime.origin}/assets/app.js`).then((response) => response.text()))
+        .resolves.toContain('__GLB_LABEL_EDITOR_AGENT_V1__')
+    } finally {
+      await runtime.close()
+    }
   })
 
   it('invalidates an existing build when recursive public assets or supported lockfiles change, appear, or disappear', async () => {

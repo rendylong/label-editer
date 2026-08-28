@@ -1,8 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import path from 'node:path'
+import { snapshotEditorDist, takeEditorDistSnapshot } from './build-fingerprint.mjs'
 import { sanitizeArtifactName, sha256Bytes } from './files.mjs'
 
 const MIME = {
@@ -49,18 +48,32 @@ async function readBody(request, maxBytes) {
   return Buffer.concat(chunks)
 }
 
-function safeStaticPath(root, pathname) {
-  const relative = pathname === '/editor/' || pathname === '/editor'
+function safeStaticKey(pathname) {
+  if (typeof pathname !== 'string' || Buffer.byteLength(pathname) > 4096) return null
+  const encoded = pathname === '/editor/' || pathname === '/editor'
     ? 'index.html'
     : pathname.replace(/^\/editor\//, '').replace(/^\//, '')
-  const target = path.resolve(root, relative)
-  const rel = path.relative(path.resolve(root), target)
-  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return null
-  return target
+  let relative
+  try {
+    relative = decodeURIComponent(encoded)
+  } catch {
+    return null
+  }
+  if (!relative || relative.includes('\\') || relative.includes('\0') || Buffer.byteLength(relative) > 2048) {
+    return relative === '' ? 'index.html' : null
+  }
+  const segments = relative.split('/')
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) return null
+  return segments.join('/')
 }
 
 export async function createSessionServer({
   editorRoot,
+  editorSnapshot,
+  maxEditorAssetBytes,
+  maxEditorSnapshotBytes,
+  maxEditorAssetCount,
+  maxEditorAssetPathBytes,
   maxUploadBytes = 128 * 1024 * 1024,
   maxReviewBatchBytes = 128 * 1024 * 1024,
   maxReviewBatchArtifacts = 131,
@@ -74,6 +87,14 @@ export async function createSessionServer({
     || !Number.isSafeInteger(maxSessionAssetBytes) || maxSessionAssetBytes < 1
     || !Number.isSafeInteger(reviewLeaseMs) || reviewLeaseMs < 1
     || typeof now !== 'function') throw new Error('Invalid session resource limits')
+  const assetLimitOptions = {
+    maxEditorAssetBytes,
+    maxEditorSnapshotBytes,
+    maxEditorAssetCount,
+    maxEditorAssetPathBytes,
+  }
+  const captured = editorSnapshot ?? (await snapshotEditorDist(editorRoot, assetLimitOptions)).snapshot
+  const staticAssets = takeEditorDistSnapshot(captured)
   const sessions = new Map()
 
   // Request bodies are asynchronous, so every state-dependent predicate and its
@@ -589,20 +610,19 @@ export async function createSessionServer({
         json(response, 405, { ok: false, error: 'Method not allowed' })
         return
       }
-      const target = safeStaticPath(editorRoot, url.pathname)
-      if (!target) return json(response, 403, { ok: false, error: 'Forbidden' })
-      const file = await stat(target).then(() => target, () => null)
-      const fallback = file ?? path.join(editorRoot, 'index.html')
-      const info = await stat(fallback)
+      const key = safeStaticKey(url.pathname)
+      if (!key) return json(response, 403, { ok: false, error: 'Forbidden' })
+      const assetKey = staticAssets.has(key) ? key : 'index.html'
+      const bytes = staticAssets.get(assetKey)
       response.writeHead(200, {
-        'content-type': MIME[path.extname(fallback)] ?? 'application/octet-stream',
-        'content-length': info.size,
+        'content-type': MIME[path.extname(assetKey)] ?? 'application/octet-stream',
+        'content-length': bytes.byteLength,
         'cache-control': 'no-store',
         'content-security-policy': "default-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:",
         'x-content-type-options': 'nosniff',
       })
       if (request.method === 'HEAD') response.end()
-      else createReadStream(fallback).pipe(response)
+      else response.end(bytes)
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500
       json(response, status, { ok: false, error: error instanceof Error ? error.message : String(error) })
@@ -672,6 +692,7 @@ export async function createSessionServer({
       }
       sessions.clear()
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+      staticAssets.clear()
     },
   }
 }
