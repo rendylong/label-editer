@@ -89,6 +89,8 @@ The canonical sequence is carrier decision → blueprint/mockup → design appro
 
 Every command returns the same Agent envelope. With `--json`, stdout contains exactly one JSON record while progress and diagnostics go to stderr.
 
+For an installed plugin, invoke the launcher explicitly as `node ~/.codex/glb-label-editor/plugin/bin/label-cli.mjs ...`; the installer does not add a `label-cli` command to `PATH` or an npm `.bin` directory. The examples in the following block run from a repository checkout and therefore use `node scripts/label-cli.mjs ...`.
+
 ```bash
 # Print the complete Label Spec v2 JSON Schema
 node scripts/label-cli.mjs schema --json
@@ -110,7 +112,7 @@ node scripts/label-cli.mjs validate spec.json --glb model.glb --json
 node scripts/label-cli.mjs live spec.json --glb model.glb --json
 
 # Capture clean production-approval evidence for the exact current revision
-label-cli review working-label-spec.json \
+node scripts/label-cli.mjs review working-label-spec.json \
   --glb package.glb \
   --output production-review/revision-003 \
   --width 1600 \
@@ -118,7 +120,7 @@ label-cli review working-label-spec.json \
   --json
 
 # Capture the standard diagnostic-QC evidence set for the current working revision
-label-cli qc working-label-spec.json \
+node scripts/label-cli.mjs qc working-label-spec.json \
   --glb package.glb \
   --output label-qc/round-0 \
   --preset qc-standard \
@@ -148,10 +150,10 @@ Exit codes: `0` success; `2` invalid arguments; `3` path outside allowed roots; 
 
 ## Clean production-review evidence
 
-The exact local syntax is:
+The exact installed-plugin syntax is:
 
 ```bash
-label-cli review <spec-or-project.json> \
+node ~/.codex/glb-label-editor/plugin/bin/label-cli.mjs review <spec-or-project.json> \
   --glb <model.glb> \
   --output <new-immutable-directory> \
   --width <1-4096> \
@@ -201,7 +203,7 @@ Before inspecting images, the Agent compares `qc-manifest.json.input.revision` w
 
 ## Label Spec v2
 
-The single source of truth for the schema is [`src/agent/label-spec-v2.schema.json`](src/agent/label-spec-v2.schema.json), which is also available through `label-cli schema`. A real front/back example is available at [`tests/fixtures/specs/perfume-front-back-v2.json`](tests/fixtures/specs/perfume-front-back-v2.json).
+The single source of truth for the schema is [`src/agent/label-spec-v2.schema.json`](src/agent/label-spec-v2.schema.json), which is also available through the CLI's `schema` subcommand. A real front/back example is available at [`tests/fixtures/specs/perfume-front-back-v2.json`](tests/fixtures/specs/perfume-front-back-v2.json).
 
 Core structure:
 

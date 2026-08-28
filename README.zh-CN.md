@@ -89,6 +89,8 @@ Carrier 与 process 是两个不同维度。`direct_surface_print`、`in_mold`�
 
 所有命令都返回统一 Agent envelope。使用 `--json` 时，stdout 只写一条 JSON；进度与诊断写 stderr。
 
+安装插件后，应显式使用 `node ~/.codex/glb-label-editor/plugin/bin/label-cli.mjs ...` 调用启动器；安装器不会把 `label-cli` 命令加入 `PATH` 或 npm `.bin`。下面代码块中的示例从仓库 checkout 运行，因此统一使用 `node scripts/label-cli.mjs ...`。
+
 ```bash
 # 获取完整 Label Spec v2 JSON Schema
 node scripts/label-cli.mjs schema --json
@@ -110,7 +112,7 @@ node scripts/label-cli.mjs validate spec.json --glb model.glb --json
 node scripts/label-cli.mjs live spec.json --glb model.glb --json
 
 # 为精确的当前 revision 生成干净制作审批证据
-label-cli review working-label-spec.json \
+node scripts/label-cli.mjs review working-label-spec.json \
   --glb package.glb \
   --output production-review/revision-003 \
   --width 1600 \
@@ -118,7 +120,7 @@ label-cli review working-label-spec.json \
   --json
 
 # 为当前 working revision 生成标准诊断 QC 证据集
-label-cli qc working-label-spec.json \
+node scripts/label-cli.mjs qc working-label-spec.json \
   --glb package.glb \
   --output label-qc/round-0 \
   --preset qc-standard \
@@ -148,10 +150,10 @@ node scripts/label-cli.mjs open spec.json --glb model.glb
 
 ## 干净制作评审证据
 
-精确的本地命令格式为：
+安装后插件的精确命令格式为：
 
 ```bash
-label-cli review <spec-or-project.json> \
+node ~/.codex/glb-label-editor/plugin/bin/label-cli.mjs review <spec-or-project.json> \
   --glb <model.glb> \
   --output <new-immutable-directory> \
   --width <1-4096> \
@@ -201,7 +203,7 @@ label-qc/
 
 ## Label Spec v2
 
-Schema 的唯一来源是 [`src/agent/label-spec-v2.schema.json`](src/agent/label-spec-v2.schema.json)，也可以通过 `label-cli schema` 获取。真实正/背标示例见 [`tests/fixtures/specs/perfume-front-back-v2.json`](tests/fixtures/specs/perfume-front-back-v2.json)。
+Schema 的唯一来源是 [`src/agent/label-spec-v2.schema.json`](src/agent/label-spec-v2.schema.json)，也可以通过 CLI 的 `schema` 子命令获取。真实正/背标示例见 [`tests/fixtures/specs/perfume-front-back-v2.json`](tests/fixtures/specs/perfume-front-back-v2.json)。
 
 核心结构：
 

@@ -1065,7 +1065,7 @@ describe('GLB label plugin E2E', () => {
     ])
   })
 
-  it.runIf(runRealE2E)('captures a gate-bound clean review through the packaged browser bridge', async () => {
+  it.runIf(runRealE2E)('captures a gate-bound clean review through the checkout browser bridge', async () => {
     const requestedEvidenceDir = process.env.GLB_LABEL_TASK9_EVIDENCE_DIR
     const evidenceDir = requestedEvidenceDir
       ? path.resolve(requestedEvidenceDir)
@@ -1137,7 +1137,7 @@ describe('GLB label plugin E2E', () => {
     }
   }, 180_000)
 
-  it.runIf(runRealE2E)('publishes and reads back a gate-bound 1600 square review through the packaged browser workflow', async () => {
+  it.runIf(runRealE2E)('publishes and reads back a gate-bound 1600 square review through the checkout CLI/browser workflow', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'glb-label-task10-review-'))
     const fixture = reviewEvidenceFixture()
     const inputPath = path.join(root, 'working.json')
