@@ -93,6 +93,16 @@ describe('GLB label editor installer', () => {
     expect(files.has('docs/plugin-directory-submission.md')).toBe(true)
     expect(files.has('skills/cosmetic-label-editor/references/quality-control.md')).toBe(true)
     expect(files.get('scripts/install-plugin.mjs')).toBe(0o755)
+    for (const runtimeEntry of [
+      'scripts/generate-label-validator.mjs',
+      'scripts/label-cli.mjs',
+      'scripts/plugin-runtime.mjs',
+      'scripts/render-design-review.mjs',
+      'scripts/write-build-fingerprint.mjs',
+      'scripts/lib/build-fingerprint.mjs',
+    ]) {
+      expect(files.has(runtimeEntry), runtimeEntry).toBe(true)
+    }
     expect(files.has('.mcp.json')).toBe(false)
     expect(files.has('scripts/mcp-server.mjs')).toBe(false)
 

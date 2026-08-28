@@ -14,12 +14,12 @@ export const DEFAULT_EDITOR_ASSET_LIMITS = Object.freeze({
 })
 
 const READ_CHUNK_BYTES = 64 * 1024
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n
 const EDITOR_ASSET_SNAPSHOTS = new WeakMap()
 const SOURCE_ENTRIES = [
   'src',
   'public',
-  'scripts/lib',
-  'scripts/generate-label-validator.mjs',
+  'scripts',
   'index.html',
   'package.json',
   'vite.config.ts',
@@ -371,7 +371,7 @@ async function walkRegularPath(authority, relativePath, depth, limits, state, {
 async function sourceInventory(authority, limits) {
   const state = inventoryState()
   for (const entry of SOURCE_ENTRIES) {
-    await walkRegularPath(authority, entry, 0, limits, state, { optional: true, kind: 'input' })
+    await walkRegularPath(authority, entry, 0, limits, state, { optional: entry !== 'scripts', kind: 'input' })
   }
   state.files.sort((left, right) => left.path.localeCompare(right.path))
   return state
@@ -396,8 +396,40 @@ async function distInventory(authority, limits) {
 
 function sameInventory(left, right) {
   return left.length === right.length && left.every((entry, index) => (
-    entry.path === right[index].path && entry.byteLength === right[index].byteLength
+    entry.path === right[index].path
+      && entry.byteLength === right[index].byteLength
+      && sameIdentity(entry.info, right[index].info)
   ))
+}
+
+function identityNeedsByteVerification(info) {
+  const ctime = statField(info, 'ctimeNs', 'ctimeMs')
+  return typeof ctime !== 'bigint' || ctime % NANOSECONDS_PER_MILLISECOND === 0n
+}
+
+async function assertInventoryBytesUnchanged(authority, inventory, limits, kind, collectFinalInventory) {
+  const final = await collectFinalInventory()
+  if (!sameInventory(inventory, final.files)) {
+    throw new Error(`Editor build ${kind} inventory changed while fingerprinting`)
+  }
+  const coarseTimestampEntries = inventory.filter((entry) => identityNeedsByteVerification(entry.info))
+  if (coarseTimestampEntries.length === 0) return
+  let totalBytes = 0
+  for (const entry of coarseTimestampEntries) {
+    const bytes = await readStableRegularFile(authority, entry.path, `${kind}: ${entry.path}`, {
+      maxFileBytes: limits.maxEditorAssetBytes,
+      maxAggregateBytes: limits.maxEditorSnapshotBytes - totalBytes,
+      expected: entry.info,
+    })
+    totalBytes += bytes.byteLength
+    if (bytes.byteLength !== entry.byteLength || sha256(bytes) !== entry.sha256) {
+      throw new Error(`Editor build ${kind} bytes changed while fingerprinting: ${entry.path}`)
+    }
+  }
+  const sealed = await collectFinalInventory()
+  if (!sameInventory(inventory, sealed.files)) {
+    throw new Error(`Editor build ${kind} inventory changed while fingerprinting`)
+  }
 }
 
 function createSnapshotReader(assets) {
@@ -479,13 +511,16 @@ async function collectEditorDist(editorRoot, options = {}, retainBytes = false) 
       })
       totalBytes += bytes.byteLength
       if (totalBytes > limits.maxEditorSnapshotBytes) throw new Error('Editor snapshot byte limit exceeded')
-      inventory.push({ path: entry.path, byteLength: bytes.byteLength, sha256: sha256(bytes) })
+      inventory.push({ path: entry.path, byteLength: bytes.byteLength, sha256: sha256(bytes), info: entry.info })
       if (assets) assets.set(entry.path, bytes)
     }
-    const final = await distInventory(authority, limits)
-    if (!sameInventory(inventory, final.files)) {
-      throw new Error('Editor build output inventory changed while fingerprinting')
-    }
+    await assertInventoryBytesUnchanged(
+      authority,
+      inventory,
+      limits,
+      'output',
+      () => distInventory(authority, limits),
+    )
     const digest = createHash('sha256')
     for (const entry of inventory) {
       digest.update(entry.path)
@@ -495,10 +530,11 @@ async function collectEditorDist(editorRoot, options = {}, retainBytes = false) 
       digest.update(entry.sha256)
       digest.update('\0')
     }
+    const distFiles = inventory.map(({ info: _info, ...entry }) => entry)
     const result = {
       distSha256: digest.digest('hex'),
       distFileCount: inventory.length,
-      distFiles: inventory,
+      distFiles,
       ...(assets ? { totalBytes } : {}),
     }
     if (!assets) return result
@@ -549,12 +585,15 @@ export async function editorSourceFingerprint(pluginRoot, options = {}) {
       digest.update('\0')
       digest.update(bytes)
       digest.update('\0')
-      readInventory.push({ path: entry.path, byteLength: bytes.byteLength })
+      readInventory.push({ path: entry.path, byteLength: bytes.byteLength, sha256: sha256(bytes), info: entry.info })
     }
-    const final = await sourceInventory(authority, limits)
-    if (!sameInventory(readInventory, final.files)) {
-      throw new Error('Editor build input inventory changed while fingerprinting')
-    }
+    await assertInventoryBytesUnchanged(
+      authority,
+      readInventory,
+      limits,
+      'input',
+      () => sourceInventory(authority, limits),
+    )
     return { sourceSha256: digest.digest('hex'), sourceFileCount: first.files.length }
   } finally {
     await closeRootAuthority(authority)

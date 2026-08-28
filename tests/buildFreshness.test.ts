@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { access, appendFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, appendFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error Build freshness is directly executable Node ESM.
 import { assertFreshEditorBuild, editorSourceFingerprint, snapshotEditorDist, writeEditorBuildFingerprint } from '../scripts/lib/build-fingerprint.mjs'
+// @ts-expect-error Plugin CLI is directly executable Node ESM.
+import { runCli } from '../scripts/label-cli.mjs'
 // @ts-expect-error Plugin runtime is directly executable ESM.
 import { createPluginRuntime } from '../scripts/plugin-runtime.mjs'
 
@@ -18,6 +20,11 @@ async function fixtureRoot(): Promise<string> {
   await writeFile(path.join(root, 'src', 'main.ts'), 'export const version = 1\n')
   await writeFile(path.join(root, 'scripts', 'lib', 'browser-core.mjs'), 'export const browserCore = 1\n')
   await writeFile(path.join(root, 'scripts', 'generate-label-validator.mjs'), 'export {}\n')
+  await writeFile(path.join(root, 'scripts', 'install-plugin.mjs'), 'export const installPlugin = 1\n')
+  await writeFile(path.join(root, 'scripts', 'label-cli.mjs'), 'export const labelCli = 1\n')
+  await writeFile(path.join(root, 'scripts', 'plugin-runtime.mjs'), 'export const pluginRuntime = 1\n')
+  await writeFile(path.join(root, 'scripts', 'render-design-review.mjs'), 'export const designReview = 1\n')
+  await writeFile(path.join(root, 'scripts', 'write-build-fingerprint.mjs'), 'export const buildFingerprint = 1\n')
   await writeFile(path.join(root, 'public', 'nested', 'runtime.bin'), 'public-v1')
   await writeFile(path.join(root, 'index.html'), '<main>source</main>')
   await writeFile(path.join(root, 'package.json'), '{"type":"module"}\n')
@@ -34,6 +41,74 @@ async function fixtureRoot(): Promise<string> {
 }
 
 describe('editor build freshness', () => {
+  it.each([
+    ['source digest', 'index.html', 'scripts/lib/browser-core.mjs'],
+    ['dist snapshot', 'dist/assets/app.js', 'dist/index.html'],
+  ])('rejects a same-inode, same-size %s mutation after that leaf was read', async (_name, targetRelative, triggerRelative) => {
+    const root = await fixtureRoot()
+    const target = path.join(root, targetRelative)
+    const restorableTimestampSeconds = 1_700_000_000.123456
+    await utimes(target, restorableTimestampSeconds, restorableTimestampSeconds)
+    const before = await stat(target, { bigint: true })
+    const original = await readFile(target)
+    const replacement = Buffer.alloc(original.byteLength, original[0] === 0x78 ? 0x79 : 0x78)
+    let mutationObserved = false
+    try {
+      const options = {
+        onEditorAssetOpened: async ({ relativePath, kind }: { relativePath: string, kind: string }) => {
+          const expectedTrigger = kind === 'output' ? triggerRelative.replace(/^dist\//, '') : triggerRelative
+          if (relativePath !== expectedTrigger || mutationObserved) return
+          mutationObserved = true
+          await writeFile(target, replacement)
+          await utimes(target, Number(before.atimeNs) / 1e9, Number(before.mtimeNs) / 1e9)
+          const after = await stat(target, { bigint: true })
+          expect(after.ino).toBe(before.ino)
+          expect(after.size).toBe(before.size)
+          expect(after.mtimeNs).toBe(before.mtimeNs)
+          expect(after.ctimeNs).not.toBe(before.ctimeNs)
+        },
+      }
+      const operation = targetRelative.startsWith('dist/')
+        ? snapshotEditorDist(path.join(root, 'dist'), options)
+        : editorSourceFingerprint(root, options)
+      await expect(operation).rejects.toThrow(/changed|inventory/i)
+      expect(mutationObserved).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['source leaf', 'index.html', 'scripts/lib/browser-core.mjs'],
+    ['dist leaf', 'dist/assets/app.js', 'dist/index.html'],
+  ])('rejects a %s replace-and-restore after its bytes were read', async (_name, targetRelative, triggerRelative) => {
+    const root = await fixtureRoot()
+    const target = path.join(root, targetRelative)
+    const preserved = `${target}.preserved`
+    let mutationObserved = false
+    try {
+      const options = {
+        onEditorAssetOpened: async ({ relativePath, kind }: { relativePath: string, kind: string }) => {
+          const expectedTrigger = kind === 'output' ? triggerRelative.replace(/^dist\//, '') : triggerRelative
+          if (relativePath !== expectedTrigger || mutationObserved) return
+          mutationObserved = true
+          const original = await readFile(target)
+          await rename(target, preserved)
+          await writeFile(target, Buffer.alloc(original.byteLength, 0x78))
+          await rm(target)
+          await rename(preserved, target)
+        },
+      }
+      const operation = targetRelative.startsWith('dist/')
+        ? snapshotEditorDist(path.join(root, 'dist'), options)
+        : editorSourceFingerprint(root, options)
+      await expect(operation).rejects.toThrow(/changed|inventory/i)
+      expect(mutationObserved).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('bounds every source input and rejects deep, long, numerous, linked, and nonregular trees', async () => {
     const oversized = await fixtureRoot()
     await writeFile(path.join(oversized, 'public', 'too-large.bin'), Buffer.alloc(32 * 1024 * 1024 + 1))
@@ -148,32 +223,32 @@ describe('editor build freshness', () => {
       .rejects.toThrow(/stale editor build/i)
   })
 
-  it('binds the exact regular-file dist inventory and bytes after the marker is written', async () => {
-    const mutations: Array<[string, (root: string) => Promise<unknown>]> = [
-      ['modified index', (root) => writeFile(path.join(root, 'dist', 'index.html'), '<main>tampered</main>')],
-      ['missing referenced asset', (root) => rm(path.join(root, 'dist', 'assets', 'app.js'))],
-      ['stale referenced asset', (root) => writeFile(path.join(root, 'dist', 'assets', 'app.js'), 'built-v0')],
-      ['added file', (root) => writeFile(path.join(root, 'dist', 'extra.js'), 'unexpected')],
-      ['renamed referenced asset', (root) => rename(
-        path.join(root, 'dist', 'assets', 'app.js'),
-        path.join(root, 'dist', 'assets', 'renamed.js'),
-      )],
-      ['file replaced by directory', async (root) => {
-        await rm(path.join(root, 'dist', 'assets', 'app.js'))
-        await mkdir(path.join(root, 'dist', 'assets', 'app.js'))
-      }],
-      ['symlinked index', async (root) => {
-        await rm(path.join(root, 'dist', 'index.html'))
-        await symlink(path.join(root, 'index.html'), path.join(root, 'dist', 'index.html'))
-      }],
-    ]
-
-    for (const [name, mutate] of mutations) {
-      const root = await fixtureRoot()
-      const editorRoot = path.join(root, 'dist')
+  it.each([
+    ['modified index', (root: string) => writeFile(path.join(root, 'dist', 'index.html'), '<main>tampered</main>')],
+    ['missing referenced asset', (root: string) => rm(path.join(root, 'dist', 'assets', 'app.js'))],
+    ['stale referenced asset', (root: string) => writeFile(path.join(root, 'dist', 'assets', 'app.js'), 'built-v0')],
+    ['added file', (root: string) => writeFile(path.join(root, 'dist', 'extra.js'), 'unexpected')],
+    ['renamed referenced asset', (root: string) => rename(
+      path.join(root, 'dist', 'assets', 'app.js'),
+      path.join(root, 'dist', 'assets', 'renamed.js'),
+    )],
+    ['file replaced by directory', async (root: string) => {
+      await rm(path.join(root, 'dist', 'assets', 'app.js'))
+      await mkdir(path.join(root, 'dist', 'assets', 'app.js'))
+    }],
+    ['symlinked index', async (root: string) => {
+      await rm(path.join(root, 'dist', 'index.html'))
+      await symlink(path.join(root, 'index.html'), path.join(root, 'dist', 'index.html'))
+    }],
+  ])('binds the exact regular-file dist inventory and bytes after the marker is written: %s', async (name, mutate) => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    try {
       await writeEditorBuildFingerprint(root, editorRoot)
       await mutate(root)
       await expect(assertFreshEditorBuild(root, editorRoot), name).rejects.toThrow(/stale editor build|symbolic link/i)
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 
@@ -287,6 +362,97 @@ describe('editor build freshness', () => {
         .resolves.toContain('__GLB_LABEL_EDITOR_AGENT_V1__')
     } finally {
       await runtime.close()
+    }
+  })
+
+  it.each([
+    'scripts/install-plugin.mjs',
+    'scripts/label-cli.mjs',
+    'scripts/plugin-runtime.mjs',
+    'scripts/render-design-review.mjs',
+    'scripts/write-build-fingerprint.mjs',
+    'scripts/lib/browser-core.mjs',
+  ])('binds packaged runtime leaf %s before browser runtime creation', async (relativePath) => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    let runtime: Awaited<ReturnType<typeof createPluginRuntime>> | undefined
+    let failure: unknown
+    try {
+      await rm(path.join(root, 'pnpm-lock.yaml'))
+      await writeEditorBuildFingerprint(root, editorRoot)
+      const original = await readFile(path.join(root, relativePath))
+      const replacement = Buffer.from(original)
+      replacement[0] ^= 0x01
+      await writeFile(path.join(root, relativePath), replacement)
+      try {
+        runtime = await createPluginRuntime({ pluginRoot: root })
+      } catch (error) {
+        failure = error
+      }
+      expect(failure).toBeInstanceOf(Error)
+      expect((failure as Error).message).toMatch(/stale editor build/i)
+    } finally {
+      await runtime?.close()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a mutated packaged CLI leaf before the CLI can perform its operation', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    const output: string[] = []
+    try {
+      await rm(path.join(root, 'pnpm-lock.yaml'))
+      await writeEditorBuildFingerprint(root, editorRoot)
+      const cliPath = path.join(root, 'scripts', 'label-cli.mjs')
+      const original = await readFile(cliPath)
+      const replacement = Buffer.from(original)
+      replacement[replacement.byteLength - 1] ^= 0x01
+      await writeFile(cliPath, replacement)
+
+      await runCli(['validate', path.join(root, 'missing.json'), '--json'], {
+        runtimeOptions: { pluginRoot: root },
+        stdout: (value: string) => output.push(value),
+        stderr: () => undefined,
+      })
+
+      expect(output).toHaveLength(1)
+      expect(JSON.parse(output[0])).toMatchObject({
+        ok: false,
+        error: { message: expect.stringMatching(/stale editor build/i) },
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    ['top-level script addition', async (root: string) => {
+      await writeFile(path.join(root, 'scripts', 'added-runtime.mjs'), 'globalThis.addedRuntime = true\n')
+    }],
+    ['top-level script removal', async (root: string) => {
+      await rm(path.join(root, 'scripts', 'label-cli.mjs'))
+    }],
+    ['top-level script symlink', async (root: string) => {
+      await symlink(path.join(root, 'index.html'), path.join(root, 'scripts', 'linked-runtime.mjs'))
+    }],
+    ['nested script parent symlink', async (root: string) => {
+      const outside = path.join(root, 'outside-scripts')
+      await mkdir(outside)
+      await writeFile(path.join(outside, 'runtime.mjs'), 'globalThis.outsideRuntime = true\n')
+      await symlink(outside, path.join(root, 'scripts', 'extensions'))
+    }],
+  ])('fails closed when the packaged scripts tree has a %s after review', async (_name, mutate) => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    try {
+      await rm(path.join(root, 'pnpm-lock.yaml'))
+      await writeEditorBuildFingerprint(root, editorRoot)
+      await mutate(root)
+      await expect(assertFreshEditorBuild(root, editorRoot))
+        .rejects.toThrow(/stale editor build|symbolic link/i)
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 
