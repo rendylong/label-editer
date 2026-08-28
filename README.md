@@ -17,6 +17,8 @@ npx --yes --package="https://github.com/rendylong/label-editer/archive/$commit.t
 
 Node.js 22+ and the Codex CLI are the only prerequisites. The command resolves `main` to an immutable commit before invoking `npx`, so an older cached installer cannot be reused for a newer release. Using the npm bundled with Node.js, the installer installs locked dependencies and Playwright Chromium, builds the editor, and places the runnable plugin in `~/.codex/glb-label-editor`. It then adds the `label-editer` marketplace and installs and enables `glb-label-editor@label-editer`.
 
+Python 3 is optional and is required only to run the bundled cosmetic-label knowledge lookup at [`skills/cosmetic-label/scripts/query_labels.py`](skills/cosmetic-label/scripts/query_labels.py). The core install, launcher, inspect, validation, review, QC, apply, and export workflow does not depend on Python.
+
 After installing or updating the plugin, start a new Codex session so the skills reload. Verify the plugin state with:
 
 ```bash

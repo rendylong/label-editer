@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto'
 import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { spawnSync } from 'node:child_process'
+import {
+  spawnSync,
+  type SpawnSyncOptionsWithStringEncoding,
+  type SpawnSyncReturns,
+} from 'node:child_process'
 import * as ts from 'typescript'
 import { afterAll, describe, expect, it } from 'vitest'
 import { compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
@@ -90,13 +94,51 @@ let installedPackagePromise: Promise<InstalledPackage> | undefined
 let packageTemporaryRoot: string | undefined
 const unitTemporaryRoots: string[] = []
 
-function commandFailure(label: string, result: ReturnType<typeof spawnSync>): Error {
+function commandFailure(label: string, result: SpawnSyncReturns<string>): Error {
   return new Error([
     `${label} failed with status ${String(result.status)}`,
     result.error?.stack ?? '',
     String(result.stdout ?? ''),
     String(result.stderr ?? ''),
   ].filter(Boolean).join('\n'))
+}
+
+type BoundedCommandOptions = Omit<
+  SpawnSyncOptionsWithStringEncoding,
+  'encoding' | 'timeout' | 'maxBuffer'
+> & {
+  timeoutMs: number
+  maxBufferBytes: number
+}
+
+function runBoundedCommand(
+  label: string,
+  command: string,
+  args: readonly string[],
+  options: BoundedCommandOptions,
+): SpawnSyncReturns<string> {
+  const { timeoutMs, maxBufferBytes, ...spawnOptions } = options
+  const result = spawnSync(command, args, {
+    ...spawnOptions,
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    maxBuffer: maxBufferBytes,
+  })
+  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code
+  if (errorCode === 'ETIMEDOUT') {
+    throw new Error(`${label} timed out after ${String(timeoutMs)} ms\n${String(result.stderr ?? '')}`)
+  }
+  if (errorCode === 'ENOBUFS') {
+    throw new Error(`${label} exceeded its ${String(maxBufferBytes)}-byte output limit`)
+  }
+  if (result.error) throw commandFailure(label, result)
+  if (result.signal) {
+    throw new Error(`${label} terminated by signal ${result.signal}`)
+  }
+  if (result.status === null) {
+    throw new Error(`${label} ended without an exit status`)
+  }
+  return result
 }
 
 async function createPackageArchive(): Promise<PackageArchive> {
@@ -106,19 +148,19 @@ async function createPackageArchive(): Promise<PackageArchive> {
   const extractRoot = path.join(root, 'extract')
   await mkdir(packRoot)
   await mkdir(extractRoot)
-  const result = spawnSync('npm', ['pack', '--json', '--pack-destination', packRoot], {
+  const result = runBoundedCommand('npm pack', 'npm', ['pack', '--json', '--pack-destination', packRoot], {
     cwd: repoRoot,
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
+    timeoutMs: 60_000,
+    maxBufferBytes: 16 * 1024 * 1024,
   })
   if (result.status !== 0) throw commandFailure('npm pack', result)
   const parsed = JSON.parse(result.stdout)
   if (!Array.isArray(parsed) || parsed.length !== 1) throw new Error('npm pack did not return one package')
   const pack = parsed[0] as PackageArchive['pack']
   const tarballPath = path.join(packRoot, pack.filename)
-  const extracted = spawnSync('tar', ['-xzf', tarballPath, '-C', extractRoot], {
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
+  const extracted = runBoundedCommand('tar extract', 'tar', ['-xzf', tarballPath, '-C', extractRoot], {
+    timeoutMs: 60_000,
+    maxBufferBytes: 16 * 1024 * 1024,
   })
   if (extracted.status !== 0) throw commandFailure('tar extract', extracted)
   const packageRoot = path.join(extractRoot, 'package')
@@ -225,14 +267,14 @@ fi
 exec /bin/sh "$@"
 `)
 
-  const result = spawnSync(process.execPath, [
+  const result = runBoundedCommand('real packaged installer', process.execPath, [
     path.join(archive.packageRoot, 'scripts/install-plugin.mjs'),
     '--source', archive.packageRoot,
     '--install-root', installRoot,
     '--json',
   ], {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
+    timeoutMs: 150_000,
+    maxBufferBytes: 64 * 1024 * 1024,
     env: {
       ...process.env,
       PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
@@ -300,24 +342,42 @@ function isLabelSuitableInspectedMesh(value: unknown): value is InstalledInspect
     && Array.isArray(mesh.warnings) && mesh.warnings.length === 0
 }
 
-function labelSemanticPriority(mesh: InstalledInspectionMesh): number {
-  return /label|贴标|标签|sticker|decal/i.test(`${mesh.nodeName} ${mesh.materialNames.join(' ')}`) ? 0 : 1
+function directSurfaceSemanticPriority(mesh: InstalledInspectionMesh): number | undefined {
+  const nodeSemantic = mesh.nodeName.normalize('NFKC').toLowerCase()
+  const materialSemantic = mesh.materialNames.join(' ').normalize('NFKC').toLowerCase()
+  const combinedSemantic = `${nodeSemantic} ${materialSemantic}`
+  const artworkShell = /(?:^|[^a-z0-9])(?:label|decal|sticker|logo)(?:$|[^a-z0-9])|贴标|标签|贴纸|标牌/i
+  if (artworkShell.test(combinedSemantic)) return undefined
+
+  const packageSurface = /(?:^|[^a-z0-9])(?:bottle|body|container|package|packaging|jar|tube|vessel)(?:$|[^a-z0-9])|瓶身|瓶体|罐身|罐体|杯身|管身|盒身|容器|包装主体|包材/i
+  if (packageSurface.test(nodeSemantic)) return 0
+  if (packageSurface.test(materialSemantic)) return 1
+  return undefined
 }
 
 function selectInstalledReviewTarget(meshes: unknown[]): InstalledInspectionMesh {
-  const candidates = meshes.filter(isLabelSuitableInspectedMesh).sort((left, right) => (
-    labelSemanticPriority(left) - labelSemanticPriority(right)
-    || left.meshIndex - right.meshIndex
-    || left.nodeIndex - right.nodeIndex
-    || left.stableSelector.localeCompare(right.stableSelector)
-  ))
+  const candidates = meshes
+    .filter(isLabelSuitableInspectedMesh)
+    .map((mesh) => ({ mesh, priority: directSurfaceSemanticPriority(mesh) }))
+    .filter((candidate): candidate is { mesh: InstalledInspectionMesh; priority: number } => (
+      candidate.priority !== undefined
+    ))
+    .sort((left, right) => (
+      left.priority - right.priority
+      || left.mesh.meshIndex - right.mesh.meshIndex
+      || left.mesh.nodeIndex - right.mesh.nodeIndex
+      || left.mesh.stableSelector.localeCompare(right.mesh.stableSelector)
+    ))
   if (candidates.length === 0) {
-    throw new Error('Installed inspect returned no warning-free, mapped, material-backed label candidate')
+    throw new Error('Installed inspect returned no suitable direct_surface_print package surface')
   }
-  return candidates[0]
+  return candidates[0].mesh
 }
 
-async function inspectInstalledPackagedSample(installed: InstalledPackage): Promise<InstalledSampleInspection> {
+async function inspectInstalledPackagedSample(
+  installed: InstalledPackage,
+  env?: NodeJS.ProcessEnv,
+): Promise<InstalledSampleInspection> {
   const packagedModelPath = path.join(installed.packageRoot, packagedReviewModelFile)
   const packagedModelInfo = await lstat(packagedModelPath)
   if (!packagedModelInfo.isFile() || packagedModelInfo.isSymbolicLink()) {
@@ -330,12 +390,13 @@ async function inspectInstalledPackagedSample(installed: InstalledPackage): Prom
     throw new Error('Copied review sample is not a direct regular file')
   }
 
-  const result = spawnSync(process.execPath, [
+  const result = runBoundedCommand('installed packaged-sample inspect', process.execPath, [
     installed.launcherPath, 'inspect', path.basename(modelPath), '--json',
   ], {
     cwd: installed.callerRoot,
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 * 1024,
+    timeoutMs: 30_000,
+    maxBufferBytes: 32 * 1024 * 1024,
+    env,
   })
   if (result.status !== 0) throw commandFailure('installed packaged-sample inspect', result)
   let envelope: unknown
@@ -516,6 +577,29 @@ async function writeExecutable(filePath: string, body: string): Promise<void> {
   await chmod(filePath, 0o755)
 }
 
+async function createPythonBlockedEnvironment(
+  root: string,
+  scope: string,
+): Promise<{ env: NodeJS.ProcessEnv; invocationLog: string }> {
+  const bin = path.join(root, `${scope}-python-blocker-bin`)
+  const invocationLog = path.join(root, `${scope}-unexpected-python-invocation.log`)
+  await mkdir(bin, { recursive: true })
+  for (const pythonCommand of ['python', 'python3']) {
+    await writeExecutable(path.join(bin, pythonCommand), `
+printf '%s\\n' "$0 $*" >> "$PYTHON_INVOCATION_LOG"
+exit 97
+`)
+  }
+  return {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      PYTHON_INVOCATION_LOG: invocationLog,
+    },
+    invocationLog,
+  }
+}
+
 async function createPluginSource(root: string): Promise<void> {
   for (const directory of [
     '.codex-plugin',
@@ -582,6 +666,66 @@ process.stdout.write(JSON.stringify({ ok: true, operation: 'schema', data: { sch
 }
 
 describe('GLB label editor installer', () => {
+  it('selects a package body instead of a label shell for direct-surface review proof', () => {
+    const body: InstalledInspectionMesh = {
+      stableSelector: 'mesh:0/node:3',
+      meshIndex: 0,
+      nodeIndex: 3,
+      nodeName: '瓶身',
+      materialNames: ['渐变工艺'],
+      mappingMode: 'cylindrical',
+      labelCandidate: true,
+      warnings: [],
+    }
+    const labelShell: InstalledInspectionMesh = {
+      stableSelector: 'mesh:1/node:4',
+      meshIndex: 1,
+      nodeIndex: 4,
+      nodeName: 'label_0',
+      materialNames: ['LitMaterial'],
+      mappingMode: 'cylindrical',
+      labelCandidate: true,
+      warnings: [],
+    }
+
+    expect(selectInstalledReviewTarget([labelShell, body])).toEqual(body)
+  })
+
+  it('rejects label, decal, sticker, and logo shells as direct-surface review targets', () => {
+    const shellNames = ['label_0', 'front-decal', 'brand sticker', 'logo shell']
+    const shells = shellNames.map((nodeName, index): InstalledInspectionMesh => ({
+      stableSelector: `mesh:${String(index)}/node:${String(index + 1)}`,
+      meshIndex: index,
+      nodeIndex: index + 1,
+      nodeName,
+      materialNames: ['PrintedArtwork'],
+      mappingMode: 'planar',
+      labelCandidate: true,
+      warnings: [],
+    }))
+
+    expect(() => selectInstalledReviewTarget(shells))
+      .toThrow('Installed inspect returned no suitable direct_surface_print package surface')
+  })
+
+  it('fails clearly when a bounded child command exceeds its timeout', () => {
+    expect(() => runBoundedCommand(
+      'bounded timeout probe',
+      process.execPath,
+      ['-e', 'setTimeout(() => undefined, 1_000)'],
+      { timeoutMs: 25, maxBufferBytes: 1_024 },
+    )).toThrow('bounded timeout probe timed out after 25 ms')
+  })
+
+  it('fails clearly when a bounded child command exceeds its output limit', () => {
+    expect(() => runBoundedCommand(
+      'bounded output probe',
+      process.execPath,
+      ['-e', "process.stdout.write('x'.repeat(8_192))"],
+      { timeoutMs: 5_000, maxBufferBytes: 1_024 },
+    )).toThrow('bounded output probe exceeded its 1024-byte output limit')
+  })
+
   it('packages the complete approval and review runtime in a real npm tarball', async () => {
     const { packageRoot, pack, tarballPath } = await packageArchive()
     const tarballInfo = await stat(tarballPath)
@@ -716,14 +860,51 @@ describe('GLB label editor installer', () => {
       expect(requiredInfo.isFile(), requiredFile).toBe(true)
       expect(requiredInfo.isSymbolicLink(), requiredFile).toBe(false)
     }
-    const knowledgeStatsResult = spawnSync('python3', ['scripts/query_labels.py', '--stats'], {
-      cwd: installedSkillRoot,
-      encoding: 'utf8',
-      maxBuffer: 16 * 1024 * 1024,
+    const knowledgeJsonLines = (await readFile(
+      path.join(installedSkillRoot, 'data/kb/labels.jsonl'),
+      'utf8',
+    )).trimEnd().split(/\r?\n/)
+    const knowledgeRecords = knowledgeJsonLines.map((line, index) => {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(line)
+      } catch (error) {
+        throw new Error(`Installed labels.jsonl line ${String(index + 1)} is invalid JSON: ${String(error)}`)
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`Installed labels.jsonl line ${String(index + 1)} is not an object`)
+      }
+      const record = parsed as Record<string, unknown>
+      for (const field of ['key', 'category', 'brand', 'tier', 'label_status']) {
+        if (typeof record[field] !== 'string' || record[field].trim().length === 0) {
+          throw new Error(`Installed labels.jsonl line ${String(index + 1)} has no ${field}`)
+        }
+      }
+      if (record.label_status === 'extracted') {
+        const meta = record._meta as Record<string, unknown> | undefined
+        if (!record.label || typeof record.label !== 'object' || Array.isArray(record.label)
+          || !meta || typeof meta.prompt_version !== 'string' || meta.prompt_version.length === 0) {
+          throw new Error(`Installed labels.jsonl line ${String(index + 1)} has incomplete extracted data`)
+        }
+      }
+      return record
     })
-    if ((knowledgeStatsResult.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
-      throw new Error('python3 is required to verify the installed cosmetic-label knowledge base')
-    }
+    const nodeExtractedRecords = knowledgeRecords.filter((record) => record.label_status === 'extracted')
+    expect(knowledgeRecords.length).toBeGreaterThanOrEqual(100)
+    expect(nodeExtractedRecords.length).toBeGreaterThanOrEqual(100)
+    expect(new Set(nodeExtractedRecords.map((record) => record.tier)).size).toBeGreaterThanOrEqual(3)
+    expect(new Set(nodeExtractedRecords.map((record) => record.category)).size).toBeGreaterThanOrEqual(10)
+
+    const knowledgeStatsResult = runBoundedCommand(
+      'installed optional cosmetic-label knowledge query',
+      'python3',
+      ['scripts/query_labels.py', '--stats'],
+      {
+        cwd: installedSkillRoot,
+        timeoutMs: 30_000,
+        maxBufferBytes: 16 * 1024 * 1024,
+      },
+    )
     expect(knowledgeStatsResult.status, [
       knowledgeStatsResult.error?.stack,
       knowledgeStatsResult.stderr,
@@ -735,8 +916,8 @@ describe('GLB label editor installer', () => {
       tiers: Record<string, number>
       cats: Record<string, number>
     }
-    expect(knowledgeStats.records).toBeGreaterThanOrEqual(100)
-    expect(knowledgeStats.extracted).toBeGreaterThanOrEqual(100)
+    expect(knowledgeStats.records).toBe(knowledgeRecords.length)
+    expect(knowledgeStats.extracted).toBe(nodeExtractedRecords.length)
     expect(knowledgeStats.extracted).toBeLessThanOrEqual(knowledgeStats.records)
     expect(Object.keys(knowledgeStats.tiers).length).toBeGreaterThanOrEqual(3)
     expect(Object.keys(knowledgeStats.cats).length).toBeGreaterThanOrEqual(10)
@@ -756,11 +937,19 @@ describe('GLB label editor installer', () => {
     expect(launcherSource).not.toContain(repoRoot)
     expect(launcherSource).not.toContain(installed.packageRoot)
 
-    const schemaResult = spawnSync(process.execPath, [installed.launcherPath, 'schema', '--json'], {
-      cwd: installed.callerRoot,
-      encoding: 'utf8',
-      maxBuffer: 16 * 1024 * 1024,
-    })
+    const coreWithoutPython = await createPythonBlockedEnvironment(installed.root, 'core-launcher')
+
+    const schemaResult = runBoundedCommand(
+      'installed launcher schema',
+      process.execPath,
+      [installed.launcherPath, 'schema', '--json'],
+      {
+        cwd: installed.callerRoot,
+        timeoutMs: 30_000,
+        maxBufferBytes: 16 * 1024 * 1024,
+        env: coreWithoutPython.env,
+      },
+    )
     expect(schemaResult.status, schemaResult.stderr).toBe(0)
     expect(JSON.parse(schemaResult.stdout)).toMatchObject({
       ok: true,
@@ -774,11 +963,13 @@ describe('GLB label editor installer', () => {
       },
     })
 
-    const invalidReviewResult = spawnSync(process.execPath, [
+    const invalidReviewResult = runBoundedCommand('installed invalid review route', process.execPath, [
       installed.launcherPath, 'review', 'working.json', '--json',
     ], {
       cwd: installed.callerRoot,
-      encoding: 'utf8',
+      timeoutMs: 30_000,
+      maxBufferBytes: 16 * 1024 * 1024,
+      env: coreWithoutPython.env,
     })
     expect(invalidReviewResult.status, invalidReviewResult.stderr).toBe(2)
     expect(JSON.parse(invalidReviewResult.stdout)).toMatchObject({
@@ -788,12 +979,13 @@ describe('GLB label editor installer', () => {
     })
 
     await writeFile(path.join(installed.callerRoot, 'invalid-label-spec.json'), '{"version":2,"areas":[]}\n')
-    const invalidSpecResult = spawnSync(process.execPath, [
+    const invalidSpecResult = runBoundedCommand('installed invalid-spec validation', process.execPath, [
       installed.launcherPath, 'validate', 'invalid-label-spec.json', '--json',
     ], {
       cwd: installed.callerRoot,
-      encoding: 'utf8',
-      maxBuffer: 16 * 1024 * 1024,
+      timeoutMs: 30_000,
+      maxBufferBytes: 16 * 1024 * 1024,
+      env: coreWithoutPython.env,
     })
     expect(invalidSpecResult.status, invalidSpecResult.stderr).toBe(4)
     expect(JSON.parse(invalidSpecResult.stdout)).toMatchObject({
@@ -806,13 +998,15 @@ describe('GLB label editor installer', () => {
     })
     expect([launcherSource, schemaResult.stdout, invalidReviewResult.stdout, invalidSpecResult.stdout].join('\n'))
       .not.toContain(repoRoot)
+    await expect(lstat(coreWithoutPython.invocationLog)).rejects.toMatchObject({ code: 'ENOENT' })
   }, 180_000)
 
   it(
     'publishes and reads back a real clean review through the installed launcher using the packaged sample',
     async () => {
       const installed = await installedPackage()
-      const inspection = await inspectInstalledPackagedSample(installed)
+      const reviewWithoutPython = await createPythonBlockedEnvironment(installed.root, 'review-launcher')
+      const inspection = await inspectInstalledPackagedSample(installed, reviewWithoutPython.env)
       expect(inspection.target).toMatchObject({
         stableSelector: expect.stringMatching(/^mesh:\d+\/node:\d+$/),
         meshIndex: expect.any(Number),
@@ -823,6 +1017,9 @@ describe('GLB label editor installer', () => {
         labelCandidate: true,
         warnings: [],
       })
+      expect(inspection.target.nodeName).toBe('瓶身')
+      expect(`${inspection.target.nodeName} ${inspection.target.materialNames.join(' ')}`)
+        .not.toMatch(/label|decal|sticker|logo|贴标|标签|贴纸|标牌/i)
       expect([inspection.stdout, inspection.stderr].join('\n')).not.toContain(repoRoot)
       expect([inspection.stdout, inspection.stderr].join('\n')).not.toContain(installed.packageRoot)
 
@@ -846,10 +1043,11 @@ describe('GLB label editor installer', () => {
         '--height', '320',
         '--json',
       ]
-      const result = spawnSync(process.execPath, reviewArgs, {
+      const result = runBoundedCommand('installed successful review', process.execPath, reviewArgs, {
         cwd: installed.callerRoot,
-        encoding: 'utf8',
-        maxBuffer: 32 * 1024 * 1024,
+        timeoutMs: 120_000,
+        maxBufferBytes: 32 * 1024 * 1024,
+        env: reviewWithoutPython.env,
       })
       expect(result.status, [result.stderr, result.stdout].join('\n')).toBe(0)
       const envelope = JSON.parse(result.stdout)
@@ -909,10 +1107,11 @@ describe('GLB label editor installer', () => {
       const immutableSnapshot = Object.fromEntries(await Promise.all(expectedOutputFiles.map(async (fileName) => (
         [fileName, sha256(await readFile(path.join(fixture.outputDir, fileName)))]
       ))))
-      const conflictResult = spawnSync(process.execPath, reviewArgs, {
+      const conflictResult = runBoundedCommand('installed immutable review conflict', process.execPath, reviewArgs, {
         cwd: installed.callerRoot,
-        encoding: 'utf8',
-        maxBuffer: 32 * 1024 * 1024,
+        timeoutMs: 60_000,
+        maxBufferBytes: 32 * 1024 * 1024,
+        env: reviewWithoutPython.env,
       })
       expect(conflictResult.status, [conflictResult.stderr, conflictResult.stdout].join('\n')).toBe(9)
       expect(JSON.parse(conflictResult.stdout)).toMatchObject({
@@ -926,6 +1125,7 @@ describe('GLB label editor installer', () => {
       ))))).toEqual(immutableSnapshot)
       expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual(manifest)
       expect([conflictResult.stdout, conflictResult.stderr].join('\n')).not.toContain(repoRoot)
+      await expect(lstat(reviewWithoutPython.invocationLog)).rejects.toMatchObject({ code: 'ENOENT' })
     },
     180_000,
   )
@@ -957,13 +1157,14 @@ case "$*" in
 esac
 `)
 
-    const result = spawnSync(process.execPath, [
+    const result = runBoundedCommand('controlled installer staging', process.execPath, [
       path.join(repoRoot, 'scripts/install-plugin.mjs'),
       '--source', sourceRoot,
       '--install-root', installRoot,
       '--json',
     ], {
-      encoding: 'utf8',
+      timeoutMs: 30_000,
+      maxBufferBytes: 16 * 1024 * 1024,
       env: {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
@@ -1024,10 +1225,16 @@ esac
     const callerRoot = path.join(root, 'caller-workspace')
     await mkdir(callerRoot)
     expect((await stat(launcherPath)).mode & 0o111).not.toBe(0)
-    const launcherResult = spawnSync(process.execPath, [launcherPath, 'schema', '--json'], {
-      cwd: callerRoot,
-      encoding: 'utf8',
-    })
+    const launcherResult = runBoundedCommand(
+      'controlled installed launcher schema',
+      process.execPath,
+      [launcherPath, 'schema', '--json'],
+      {
+        cwd: callerRoot,
+        timeoutMs: 15_000,
+        maxBufferBytes: 16 * 1024 * 1024,
+      },
+    )
     expect(launcherResult.status, launcherResult.stderr).toBe(0)
     expect(JSON.parse(launcherResult.stdout)).toMatchObject({
       ok: true,
@@ -1080,13 +1287,14 @@ esac
       'esac',
     ].join('\n'))
 
-    const result = spawnSync(process.execPath, [
+    const result = runBoundedCommand('legacy MCP rejection installer', process.execPath, [
       path.join(repoRoot, 'scripts/install-plugin.mjs'),
       '--source', sourceRoot,
       '--install-root', installRoot,
       '--json',
     ], {
-      encoding: 'utf8',
+      timeoutMs: 30_000,
+      maxBufferBytes: 16 * 1024 * 1024,
       env: {
         ...process.env,
         PATH: [fakeBin, process.env.PATH ?? ''].join(':'),

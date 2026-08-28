@@ -17,6 +17,8 @@ npx --yes --package="https://github.com/rendylong/label-editer/archive/$commit.t
 
 只要求预先安装 Node.js 22+ 和 Codex CLI。命令会先把 `main` 解析为不可变的 commit，再调用 `npx`，避免新版本继续复用旧安装器缓存。安装器会通过 Node.js 自带的 npm 安装锁定依赖和 Playwright Chromium、构建编辑器，并将可运行插件安装到 `~/.codex/glb-label-editor`。它随后会添加 `label-editer` marketplace，安装并启用 `glb-label-editor@label-editer`。
 
+Python 3 是可选依赖，仅在运行随附的 cosmetic-label 知识查询脚本 [`skills/cosmetic-label/scripts/query_labels.py`](skills/cosmetic-label/scripts/query_labels.py) 时需要。插件的核心安装、启动、检查、校验、review、QC、apply 和 export 流程不依赖 Python。
+
 安装或更新插件后，请新建 Codex 会话，使 Skill 重新加载。可以用下面的命令确认插件状态：
 
 ```bash
