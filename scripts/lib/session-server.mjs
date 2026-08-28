@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import path from 'node:path'
-import { snapshotEditorDist, takeEditorDistSnapshot } from './build-fingerprint.mjs'
+import { DEFAULT_EDITOR_ASSET_LIMITS, snapshotEditorDist, takeEditorDistSnapshot } from './build-fingerprint.mjs'
 import { sanitizeArtifactName, sha256Bytes } from './files.mjs'
 
 const MIME = {
@@ -79,6 +79,8 @@ export async function createSessionServer({
   maxEditorAssetPathBytes,
   maxEditorTreeDepth,
   maxEditorTreeEntries,
+  maxStaticResponseConcurrency = 8,
+  maxStaticResponseOutstandingBytes = maxEditorSnapshotBytes ?? DEFAULT_EDITOR_ASSET_LIMITS.maxEditorSnapshotBytes,
   maxUploadBytes = 128 * 1024 * 1024,
   maxReviewBatchBytes = 128 * 1024 * 1024,
   maxReviewBatchArtifacts = 131,
@@ -90,6 +92,8 @@ export async function createSessionServer({
   if (!Number.isSafeInteger(maxReviewBatchBytes) || maxReviewBatchBytes < 1
     || !Number.isSafeInteger(maxReviewBatchArtifacts) || maxReviewBatchArtifacts < 1
     || !Number.isSafeInteger(maxSessionAssetBytes) || maxSessionAssetBytes < 1
+    || !Number.isSafeInteger(maxStaticResponseConcurrency) || maxStaticResponseConcurrency < 1
+    || !Number.isSafeInteger(maxStaticResponseOutstandingBytes) || maxStaticResponseOutstandingBytes < 1
     || !Number.isSafeInteger(reviewLeaseMs) || reviewLeaseMs < 1
     || typeof now !== 'function') throw new Error('Invalid session resource limits')
   const assetLimitOptions = {
@@ -103,6 +107,73 @@ export async function createSessionServer({
   const captured = editorSnapshot ?? (await snapshotEditorDist(editorRoot, assetLimitOptions)).snapshot
   const staticAssets = takeEditorDistSnapshot(captured)
   const sessions = new Map()
+  const sockets = new Set()
+  const activeStaticSettlements = new Set()
+  let activeStaticResponses = 0
+  let staticResponseBytes = 0
+  let closePromise
+
+  function reserveStaticResponse(byteLength) {
+    if (!Number.isSafeInteger(byteLength) || byteLength < 0
+      || activeStaticResponses >= maxStaticResponseConcurrency
+      || byteLength > maxStaticResponseOutstandingBytes - staticResponseBytes) return null
+    activeStaticResponses += 1
+    staticResponseBytes += byteLength
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      activeStaticResponses -= 1
+      staticResponseBytes -= byteLength
+    }
+  }
+
+  function sendStaticAsset(request, response, assetKey, byteLength) {
+    const releaseBudget = reserveStaticResponse(byteLength)
+    if (!releaseBudget) {
+      json(response, 503, { ok: false, error: 'Static response capacity exhausted' })
+      return
+    }
+    let lease
+    let settled = false
+    const settle = () => {
+      if (settled) return
+      settled = true
+      response.off('finish', settle)
+      response.off('close', settle)
+      response.off('error', settle)
+      request.off('aborted', settle)
+      request.off('error', settle)
+      activeStaticSettlements.delete(settle)
+      lease?.release()
+      releaseBudget()
+    }
+    try {
+      lease = staticAssets.retain(assetKey)
+      if (!lease || lease.byteLength !== byteLength) {
+        settle()
+        json(response, 404, { ok: false, error: 'Editor asset not found' })
+        return
+      }
+      activeStaticSettlements.add(settle)
+      response.once('finish', settle)
+      response.once('close', settle)
+      response.once('error', settle)
+      request.once('aborted', settle)
+      request.once('error', settle)
+      response.writeHead(200, {
+        'content-type': MIME[path.extname(assetKey)] ?? 'application/octet-stream',
+        'content-length': byteLength,
+        'cache-control': 'no-store',
+        'content-security-policy': "default-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:",
+        'x-content-type-options': 'nosniff',
+      })
+      lease.writeTo(response)
+    } catch (error) {
+      settle()
+      throw error
+    }
+  }
 
   // Request bodies are asynchronous, so every state-dependent predicate and its
   // mutation must run in one per-session critical section after the body is read.
@@ -620,21 +691,28 @@ export async function createSessionServer({
       const key = safeStaticKey(url.pathname)
       if (!key) return json(response, 403, { ok: false, error: 'Forbidden' })
       const assetKey = staticAssets.has(key) ? key : 'index.html'
-      const bytes = staticAssets.read(assetKey)
-      if (!bytes) return json(response, 404, { ok: false, error: 'Editor asset not found' })
-      response.writeHead(200, {
-        'content-type': MIME[path.extname(assetKey)] ?? 'application/octet-stream',
-        'content-length': bytes.byteLength,
-        'cache-control': 'no-store',
-        'content-security-policy': "default-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:",
-        'x-content-type-options': 'nosniff',
-      })
-      if (request.method === 'HEAD') response.end()
-      else response.end(bytes)
+      const byteLength = staticAssets.size(assetKey)
+      if (byteLength === undefined) return json(response, 404, { ok: false, error: 'Editor asset not found' })
+      if (request.method === 'HEAD') {
+        response.writeHead(200, {
+          'content-type': MIME[path.extname(assetKey)] ?? 'application/octet-stream',
+          'content-length': byteLength,
+          'cache-control': 'no-store',
+          'content-security-policy': "default-src 'self' blob: data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' blob:; img-src 'self' blob: data:; font-src 'self' data:",
+          'x-content-type-options': 'nosniff',
+        })
+        response.end()
+        return
+      }
+      sendStaticAsset(request, response, assetKey, byteLength)
     } catch (error) {
       const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500
       json(response, status, { ok: false, error: error instanceof Error ? error.message : String(error) })
     }
+  })
+  server.on('connection', (socket) => {
+    sockets.add(socket)
+    socket.once('close', () => sockets.delete(socket))
   })
 
   let address
@@ -701,15 +779,22 @@ export async function createSessionServer({
       sessions.delete(sessionId)
     },
     async close() {
-      for (const session of sessions.values()) {
-        if (session.reviewLease) clearReviewLeaseTimer(session.reviewLease)
-      }
-      sessions.clear()
-      try {
-        await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
-      } finally {
-        staticAssets.dispose()
-      }
+      if (closePromise) return closePromise
+      closePromise = (async () => {
+        for (const session of sessions.values()) {
+          if (session.reviewLease) clearReviewLeaseTimer(session.reviewLease)
+        }
+        sessions.clear()
+        try {
+          const stopped = new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+          for (const socket of sockets) socket.destroy()
+          await stopped
+        } finally {
+          for (const settle of [...activeStaticSettlements]) settle()
+          staticAssets.dispose()
+        }
+      })()
+      return closePromise
     },
   }
 }

@@ -95,6 +95,162 @@ async function openNoFollow(absolutePath, flags, description) {
   }
 }
 
+function rootRelativeParts(relativePath, description) {
+  if (typeof relativePath !== 'string' || path.isAbsolute(relativePath)) {
+    throw new Error(`Editor build fingerprint path escapes its verified root: ${description}`)
+  }
+  if (!relativePath) return []
+  const parts = relativePath.split(path.sep)
+  if (parts.some((part) => !part || part === '.' || part === '..')) {
+    throw new Error(`Editor build fingerprint path escapes its verified root: ${description}`)
+  }
+  return parts
+}
+
+async function createRootAuthority(root, description) {
+  const absoluteRoot = path.resolve(root)
+  let rootInfo
+  try {
+    rootInfo = await pathInfo(absoluteRoot)
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new Error(`Stale editor build: ${description} root is missing`)
+    throw error
+  }
+  if (rootInfo.isSymbolicLink()) throw symbolicLinkError(`${description} root`)
+  if (!rootInfo.isDirectory()) {
+    throw new Error(`Editor build fingerprint requires a regular directory: ${description} root`)
+  }
+  const rootHandle = await openNoFollow(
+    absoluteRoot,
+    constants.O_RDONLY | (constants.O_DIRECTORY ?? 0),
+    `${description} root`,
+  )
+  try {
+    const opened = await rootHandle.stat({ bigint: true })
+    if (!opened.isDirectory() || !sameIdentity(rootInfo, opened)) {
+      throw new Error(`Editor build changed while fingerprinting: ${description} root`)
+    }
+    return {
+      root: absoluteRoot,
+      description,
+      rootHandle,
+      rootInfo: opened,
+      directories: new Map([['', opened]]),
+    }
+  } catch (error) {
+    await rootHandle.close().catch(() => undefined)
+    throw error
+  }
+}
+
+async function currentAuthorityInfo(authority, absolutePath, relativePath, expected, handle) {
+  const displayPath = portablePath(relativePath) || '.'
+  let current
+  try {
+    current = await pathInfo(absolutePath)
+  } catch {
+    throw new Error(`Editor build changed while fingerprinting: ${authority.description}: ${displayPath}`)
+  }
+  if (current.isSymbolicLink()) throw symbolicLinkError(`${authority.description}: ${displayPath}`)
+  const opened = await handle.stat({ bigint: true })
+  if (!sameIdentity(expected, current) || !sameIdentity(expected, opened)) {
+    throw new Error(`Editor build changed while fingerprinting: ${authority.description}: ${displayPath}`)
+  }
+}
+
+async function assertAuthorityStable(authority, opened = []) {
+  await currentAuthorityInfo(authority, authority.root, '', authority.rootInfo, authority.rootHandle)
+  for (const component of opened) {
+    await currentAuthorityInfo(
+      authority,
+      component.absolutePath,
+      component.relativePath,
+      component.info,
+      component.handle,
+    )
+  }
+}
+
+async function openRootRelativePath(authority, relativePath, description) {
+  const parts = rootRelativeParts(relativePath, description)
+  if (parts.length === 0) {
+    await assertAuthorityStable(authority)
+    return {
+      absolutePath: authority.root,
+      info: authority.rootInfo,
+      handle: authority.rootHandle,
+      async assertStable() { await assertAuthorityStable(authority) },
+      async close() {},
+    }
+  }
+
+  const opened = []
+  let currentRelative = ''
+  try {
+    await assertAuthorityStable(authority)
+    for (let index = 0; index < parts.length; index += 1) {
+      currentRelative = currentRelative ? path.join(currentRelative, parts[index]) : parts[index]
+      const absolutePath = path.join(authority.root, currentRelative)
+      const isLeaf = index === parts.length - 1
+      let info
+      try {
+        info = await pathInfo(absolutePath)
+      } catch (error) {
+        if (error?.code === 'ENOENT') throw error
+        throw error
+      }
+      const componentDescription = `${authority.description}: ${portablePath(currentRelative)}`
+      if (info.isSymbolicLink()) throw symbolicLinkError(componentDescription)
+      if (!isLeaf && !info.isDirectory()) {
+        throw new Error(`Editor build fingerprint requires a regular directory: ${componentDescription}`)
+      }
+      if (isLeaf && !info.isDirectory() && !info.isFile()) {
+        throw new Error(`Editor build fingerprint requires a regular file or directory: ${componentDescription}`)
+      }
+      const flags = constants.O_RDONLY | (info.isDirectory() ? (constants.O_DIRECTORY ?? 0) : 0)
+      const handle = await openNoFollow(absolutePath, flags, componentDescription)
+      const openedInfo = await handle.stat({ bigint: true })
+      if (!sameIdentity(info, openedInfo)
+        || (info.isDirectory() && !openedInfo.isDirectory())
+        || (info.isFile() && !openedInfo.isFile())) {
+        await handle.close().catch(() => undefined)
+        throw new Error(`Editor build changed while fingerprinting: ${componentDescription}`)
+      }
+      if (info.isDirectory()) {
+        const baseline = authority.directories.get(portablePath(currentRelative))
+        if (baseline && !sameIdentity(baseline, openedInfo)) {
+          await handle.close().catch(() => undefined)
+          throw new Error(`Editor build changed while fingerprinting: ${componentDescription}`)
+        }
+        if (!baseline) authority.directories.set(portablePath(currentRelative), openedInfo)
+      }
+      opened.push({ absolutePath, relativePath: currentRelative, info: openedInfo, handle })
+      await assertAuthorityStable(authority, opened)
+    }
+    const leaf = opened[opened.length - 1]
+    return {
+      absolutePath: leaf.absolutePath,
+      info: leaf.info,
+      handle: leaf.handle,
+      async assertStable() { await assertAuthorityStable(authority, opened) },
+      async close() {
+        for (const component of [...opened].reverse()) {
+          await component.handle.close().catch(() => undefined)
+        }
+      },
+    }
+  } catch (error) {
+    for (const component of [...opened].reverse()) {
+      await component.handle.close().catch(() => undefined)
+    }
+    throw error
+  }
+}
+
+async function closeRootAuthority(authority) {
+  await authority.rootHandle.close().catch(() => undefined)
+}
+
 async function readBoundedDescriptor(handle, description, maxFileBytes, maxAggregateBytes) {
   const chunks = []
   let total = 0
@@ -113,18 +269,18 @@ async function readBoundedDescriptor(handle, description, maxFileBytes, maxAggre
   return Buffer.concat(chunks, total)
 }
 
-async function readStableRegularFile(absolutePath, description, {
+async function readStableRegularFile(authority, relativePath, description, {
   maxFileBytes,
   maxAggregateBytes = maxFileBytes,
   expected,
   onOpened,
-  relativePath,
   kind,
 } = {}) {
-  let handle
+  let opened
   try {
-    handle = await openNoFollow(absolutePath, constants.O_RDONLY, description)
-    const before = await handle.stat({ bigint: true })
+    opened = await openRootRelativePath(authority, relativePath, description)
+    const { absolutePath, handle } = opened
+    const before = opened.info
     if (!before.isFile()) throw new Error(`Editor build fingerprint requires a regular file: ${description}`)
     if (expected && !sameIdentity(expected, before)) {
       throw new Error(`Editor build changed while fingerprinting: ${description}`)
@@ -138,19 +294,10 @@ async function readStableRegularFile(absolutePath, description, {
     if (!sameIdentity(before, after) || bytes.byteLength !== fileSize(after, description)) {
       throw new Error(`Editor build changed while fingerprinting: ${description}`)
     }
-    let current
-    try {
-      current = await pathInfo(absolutePath)
-    } catch {
-      throw new Error(`Editor build changed while fingerprinting: ${description}`)
-    }
-    if (current.isSymbolicLink()) throw symbolicLinkError(description)
-    if (!current.isFile() || !sameIdentity(after, current)) {
-      throw new Error(`Editor build changed while fingerprinting: ${description}`)
-    }
+    await opened.assertStable()
     return bytes
   } finally {
-    if (handle) await handle.close().catch(() => undefined)
+    if (opened) await opened.close()
   }
 }
 
@@ -169,50 +316,39 @@ function assertInventoryPath(relativePath, depth, limits) {
   return displayPath
 }
 
-async function walkRegularPath(root, relativePath, depth, limits, state, {
+async function walkRegularPath(authority, relativePath, depth, limits, state, {
   optional = false,
   kind,
   exclude,
 } = {}) {
   const displayPath = assertInventoryPath(relativePath, depth, limits)
-  const absolutePath = relativePath ? path.join(root, relativePath) : root
-  let info
+  let opened
   try {
-    info = await pathInfo(absolutePath)
+    opened = await openRootRelativePath(authority, relativePath, `${kind}: ${displayPath}`)
   } catch (error) {
     if (optional && error?.code === 'ENOENT') return
     if (error?.code === 'ENOENT') throw new Error(`Stale editor build: ${kind} entry is missing: ${displayPath}`)
     throw error
   }
-  if (info.isSymbolicLink()) throw symbolicLinkError(`${kind}: ${displayPath}`)
-  if (exclude?.(portablePath(relativePath), info)) return
-
-  if (info.isFile()) {
-    state.fileCount += 1
-    if (state.fileCount > limits.maxEditorAssetCount) throw new Error('Editor asset count limit exceeded')
-    const size = fileSize(info, `${kind}: ${displayPath}`)
-    if (size > limits.maxEditorAssetBytes) throw new Error(`Editor asset byte limit exceeded: ${displayPath}`)
-    state.declaredBytes += size
-    if (state.declaredBytes > limits.maxEditorSnapshotBytes) throw new Error('Editor snapshot byte limit exceeded')
-    state.files.push({ path: portablePath(relativePath), absolutePath, info, byteLength: size })
-    return
-  }
-  if (!info.isDirectory()) {
-    throw new Error(`Editor build fingerprint requires a regular file or directory: ${kind}: ${displayPath}`)
-  }
-
-  let directoryHandle
+  const { info, absolutePath } = opened
   let directory
   try {
-    directoryHandle = await openNoFollow(
-      absolutePath,
-      constants.O_RDONLY | (constants.O_DIRECTORY ?? 0),
-      `${kind}: ${displayPath}`,
-    )
-    const opened = await directoryHandle.stat({ bigint: true })
-    if (!opened.isDirectory() || !sameIdentity(info, opened)) {
-      throw new Error(`Editor build changed while fingerprinting: ${kind}: ${displayPath}`)
+    if (exclude?.(portablePath(relativePath), info)) return
+
+    if (info.isFile()) {
+      state.fileCount += 1
+      if (state.fileCount > limits.maxEditorAssetCount) throw new Error('Editor asset count limit exceeded')
+      const size = fileSize(info, `${kind}: ${displayPath}`)
+      if (size > limits.maxEditorAssetBytes) throw new Error(`Editor asset byte limit exceeded: ${displayPath}`)
+      state.declaredBytes += size
+      if (state.declaredBytes > limits.maxEditorSnapshotBytes) throw new Error('Editor snapshot byte limit exceeded')
+      state.files.push({ path: portablePath(relativePath), info, byteLength: size })
+      return
     }
+    if (!info.isDirectory()) {
+      throw new Error(`Editor build fingerprint requires a regular file or directory: ${kind}: ${displayPath}`)
+    }
+
     directory = await opendir(absolutePath)
     const names = []
     for await (const entry of directory) {
@@ -221,37 +357,29 @@ async function walkRegularPath(root, relativePath, depth, limits, state, {
       names.push(entry.name)
     }
     directory = undefined
-    const listedPath = await pathInfo(absolutePath)
-    const listedHandle = await directoryHandle.stat({ bigint: true })
-    if (!listedPath.isDirectory() || !sameIdentity(opened, listedPath) || !sameIdentity(opened, listedHandle)) {
-      throw new Error(`Editor build changed while fingerprinting: ${kind}: ${displayPath}`)
-    }
+    await opened.assertStable()
     for (const name of names.sort()) {
-      await walkRegularPath(root, path.join(relativePath, name), depth + 1, limits, state, { kind, exclude })
+      await walkRegularPath(authority, path.join(relativePath, name), depth + 1, limits, state, { kind, exclude })
     }
-    const finalPath = await pathInfo(absolutePath)
-    const finalHandle = await directoryHandle.stat({ bigint: true })
-    if (!finalPath.isDirectory() || !sameIdentity(opened, finalPath) || !sameIdentity(opened, finalHandle)) {
-      throw new Error(`Editor build changed while fingerprinting: ${kind}: ${displayPath}`)
-    }
+    await opened.assertStable()
   } finally {
     if (directory) await directory.close().catch(() => undefined)
-    if (directoryHandle) await directoryHandle.close().catch(() => undefined)
+    await opened.close()
   }
 }
 
-async function sourceInventory(root, limits) {
+async function sourceInventory(authority, limits) {
   const state = inventoryState()
   for (const entry of SOURCE_ENTRIES) {
-    await walkRegularPath(root, entry, 0, limits, state, { optional: true, kind: 'input' })
+    await walkRegularPath(authority, entry, 0, limits, state, { optional: true, kind: 'input' })
   }
   state.files.sort((left, right) => left.path.localeCompare(right.path))
   return state
 }
 
-async function distInventory(root, limits) {
+async function distInventory(authority, limits) {
   const state = inventoryState()
-  await walkRegularPath(root, '', 0, limits, state, {
+  await walkRegularPath(authority, '', 0, limits, state, {
     kind: 'output',
     exclude(relativePath, info) {
       if (relativePath !== EDITOR_BUILD_FINGERPRINT_FILE) return false
@@ -273,9 +401,15 @@ function sameInventory(left, right) {
 }
 
 function createSnapshotReader(assets) {
-  const state = { assets, disposed: false }
+  const state = { assets, disposeRequested: false, disposed: false, activeLeases: 0 }
   const assertActive = () => {
-    if (state.disposed) throw new Error('Editor asset snapshot reader is disposed')
+    if (state.disposeRequested || state.disposed) throw new Error('Editor asset snapshot reader is disposed')
+  }
+  const finishDisposal = () => {
+    if (!state.disposeRequested || state.disposed || state.activeLeases !== 0) return
+    state.disposed = true
+    for (const bytes of state.assets.values()) bytes.fill(0)
+    state.assets.clear()
   }
   return Object.freeze({
     has(relativePath) {
@@ -287,15 +421,41 @@ function createSnapshotReader(assets) {
       const bytes = state.assets.get(relativePath)
       return bytes ? Buffer.from(bytes) : undefined
     },
+    size(relativePath) {
+      assertActive()
+      return state.assets.get(relativePath)?.byteLength
+    },
+    retain(relativePath) {
+      assertActive()
+      const bytes = state.assets.get(relativePath)
+      if (!bytes) return undefined
+      state.activeLeases += 1
+      let released = false
+      let written = false
+      return Object.freeze({
+        byteLength: bytes.byteLength,
+        writeTo(response) {
+          if (released) throw new Error('Editor asset snapshot lease is released')
+          if (written) throw new Error('Editor asset snapshot lease is already written')
+          written = true
+          response.end(bytes)
+        },
+        release() {
+          if (released) return
+          released = true
+          state.activeLeases -= 1
+          finishDisposal()
+        },
+      })
+    },
     paths() {
       assertActive()
       return Object.freeze([...state.assets.keys()])
     },
     dispose() {
-      if (state.disposed) return
-      state.disposed = true
-      for (const bytes of state.assets.values()) bytes.fill(0)
-      state.assets.clear()
+      if (state.disposeRequested || state.disposed) return
+      state.disposeRequested = true
+      finishDisposal()
     },
   })
 }
@@ -303,47 +463,51 @@ function createSnapshotReader(assets) {
 async function collectEditorDist(editorRoot, options = {}, retainBytes = false) {
   const root = path.resolve(editorRoot)
   const limits = editorAssetLimits(options)
-  const first = await distInventory(root, limits)
-  const inventory = []
-  const assets = retainBytes ? new Map() : undefined
-  let totalBytes = 0
-  for (const entry of first.files) {
-    const bytes = await readStableRegularFile(entry.absolutePath, `output: ${entry.path}`, {
-      maxFileBytes: limits.maxEditorAssetBytes,
-      maxAggregateBytes: limits.maxEditorSnapshotBytes - totalBytes,
-      expected: entry.info,
-      onOpened: options.onEditorAssetOpened,
-      relativePath: entry.path,
-      kind: 'output',
-    })
-    totalBytes += bytes.byteLength
-    if (totalBytes > limits.maxEditorSnapshotBytes) throw new Error('Editor snapshot byte limit exceeded')
-    inventory.push({ path: entry.path, byteLength: bytes.byteLength, sha256: sha256(bytes) })
-    if (assets) assets.set(entry.path, bytes)
+  const authority = await createRootAuthority(root, 'output')
+  try {
+    const first = await distInventory(authority, limits)
+    const inventory = []
+    const assets = retainBytes ? new Map() : undefined
+    let totalBytes = 0
+    for (const entry of first.files) {
+      const bytes = await readStableRegularFile(authority, entry.path, `output: ${entry.path}`, {
+        maxFileBytes: limits.maxEditorAssetBytes,
+        maxAggregateBytes: limits.maxEditorSnapshotBytes - totalBytes,
+        expected: entry.info,
+        onOpened: options.onEditorAssetOpened,
+        kind: 'output',
+      })
+      totalBytes += bytes.byteLength
+      if (totalBytes > limits.maxEditorSnapshotBytes) throw new Error('Editor snapshot byte limit exceeded')
+      inventory.push({ path: entry.path, byteLength: bytes.byteLength, sha256: sha256(bytes) })
+      if (assets) assets.set(entry.path, bytes)
+    }
+    const final = await distInventory(authority, limits)
+    if (!sameInventory(inventory, final.files)) {
+      throw new Error('Editor build output inventory changed while fingerprinting')
+    }
+    const digest = createHash('sha256')
+    for (const entry of inventory) {
+      digest.update(entry.path)
+      digest.update('\0')
+      digest.update(String(entry.byteLength))
+      digest.update('\0')
+      digest.update(entry.sha256)
+      digest.update('\0')
+    }
+    const result = {
+      distSha256: digest.digest('hex'),
+      distFileCount: inventory.length,
+      distFiles: inventory,
+      ...(assets ? { totalBytes } : {}),
+    }
+    if (!assets) return result
+    const snapshot = Object.freeze({})
+    EDITOR_ASSET_SNAPSHOTS.set(snapshot, assets)
+    return { ...result, snapshot }
+  } finally {
+    await closeRootAuthority(authority)
   }
-  const final = await distInventory(root, limits)
-  if (!sameInventory(inventory, final.files)) {
-    throw new Error('Editor build output inventory changed while fingerprinting')
-  }
-  const digest = createHash('sha256')
-  for (const entry of inventory) {
-    digest.update(entry.path)
-    digest.update('\0')
-    digest.update(String(entry.byteLength))
-    digest.update('\0')
-    digest.update(entry.sha256)
-    digest.update('\0')
-  }
-  const result = {
-    distSha256: digest.digest('hex'),
-    distFileCount: inventory.length,
-    distFiles: inventory,
-    ...(assets ? { totalBytes } : {}),
-  }
-  if (!assets) return result
-  const snapshot = Object.freeze({})
-  EDITOR_ASSET_SNAPSHOTS.set(snapshot, assets)
-  return { ...result, snapshot }
 }
 
 export async function editorDistFingerprint(editorRoot, options = {}) {
@@ -364,33 +528,37 @@ export function takeEditorDistSnapshot(snapshot) {
 export async function editorSourceFingerprint(pluginRoot, options = {}) {
   const root = path.resolve(pluginRoot)
   const limits = editorAssetLimits(options)
-  const first = await sourceInventory(root, limits)
-  if (first.files.length === 0) throw new Error(`Editor source files are missing: ${root}`)
-  const digest = createHash('sha256')
-  let totalBytes = 0
-  const readInventory = []
-  for (const entry of first.files) {
-    const bytes = await readStableRegularFile(entry.absolutePath, `input: ${entry.path}`, {
-      maxFileBytes: limits.maxEditorAssetBytes,
-      maxAggregateBytes: limits.maxEditorSnapshotBytes - totalBytes,
-      expected: entry.info,
-      onOpened: options.onEditorAssetOpened,
-      relativePath: entry.path,
-      kind: 'input',
-    })
-    totalBytes += bytes.byteLength
-    if (totalBytes > limits.maxEditorSnapshotBytes) throw new Error('Editor snapshot byte limit exceeded')
-    digest.update(entry.path)
-    digest.update('\0')
-    digest.update(bytes)
-    digest.update('\0')
-    readInventory.push({ path: entry.path, byteLength: bytes.byteLength })
+  const authority = await createRootAuthority(root, 'input')
+  try {
+    const first = await sourceInventory(authority, limits)
+    if (first.files.length === 0) throw new Error(`Editor source files are missing: ${root}`)
+    const digest = createHash('sha256')
+    let totalBytes = 0
+    const readInventory = []
+    for (const entry of first.files) {
+      const bytes = await readStableRegularFile(authority, entry.path, `input: ${entry.path}`, {
+        maxFileBytes: limits.maxEditorAssetBytes,
+        maxAggregateBytes: limits.maxEditorSnapshotBytes - totalBytes,
+        expected: entry.info,
+        onOpened: options.onEditorAssetOpened,
+        kind: 'input',
+      })
+      totalBytes += bytes.byteLength
+      if (totalBytes > limits.maxEditorSnapshotBytes) throw new Error('Editor snapshot byte limit exceeded')
+      digest.update(entry.path)
+      digest.update('\0')
+      digest.update(bytes)
+      digest.update('\0')
+      readInventory.push({ path: entry.path, byteLength: bytes.byteLength })
+    }
+    const final = await sourceInventory(authority, limits)
+    if (!sameInventory(readInventory, final.files)) {
+      throw new Error('Editor build input inventory changed while fingerprinting')
+    }
+    return { sourceSha256: digest.digest('hex'), sourceFileCount: first.files.length }
+  } finally {
+    await closeRootAuthority(authority)
   }
-  const final = await sourceInventory(root, limits)
-  if (!sameInventory(readInventory, final.files)) {
-    throw new Error('Editor build input inventory changed while fingerprinting')
-  }
-  return { sourceSha256: digest.digest('hex'), sourceFileCount: first.files.length }
 }
 
 export async function writeEditorBuildFingerprint(pluginRoot, editorRoot, options = {}) {
@@ -413,9 +581,10 @@ export async function writeEditorBuildFingerprint(pluginRoot, editorRoot, option
 }
 
 async function readBuildFingerprint(root) {
+  let authority
   try {
-    const markerPath = path.join(root, EDITOR_BUILD_FINGERPRINT_FILE)
-    const bytes = await readStableRegularFile(markerPath, 'marker', {
+    authority = await createRootAuthority(root, 'marker')
+    const bytes = await readStableRegularFile(authority, EDITOR_BUILD_FINGERPRINT_FILE, 'marker', {
       maxFileBytes: 1024 * 1024,
       maxAggregateBytes: 1024 * 1024,
     })
@@ -426,6 +595,8 @@ async function readBuildFingerprint(root) {
       throw new Error('Editor build fingerprint is invalid')
     }
     throw new Error('Editor build fingerprint is missing; run the editor build before browser execution')
+  } finally {
+    if (authority) await closeRootAuthority(authority)
   }
 }
 

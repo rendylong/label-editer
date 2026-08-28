@@ -1,4 +1,4 @@
-import { request } from 'node:http'
+import { request, type ClientRequest, type IncomingMessage } from 'node:http'
 import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -33,6 +33,42 @@ function rawStatus(origin: string, requestPath: string): Promise<number> {
   })
 }
 
+function pausedRequest(origin: string, requestPath: string, method: 'GET' | 'HEAD' = 'GET'): Promise<{
+  outgoing: ClientRequest
+  incoming: IncomingMessage
+  status: number
+}> {
+  const target = new URL(origin)
+  return new Promise((resolve, reject) => {
+    const outgoing = request({
+      hostname: target.hostname,
+      port: target.port,
+      method,
+      path: requestPath,
+    }, (incoming) => {
+      incoming.pause()
+      resolve({ outgoing, incoming, status: incoming.statusCode ?? 0 })
+    })
+    outgoing.once('error', reject)
+    outgoing.end()
+  })
+}
+
+function abortPaused(entry: { outgoing: ClientRequest, incoming: IncomingMessage }) {
+  entry.incoming.destroy()
+  entry.outgoing.destroy()
+}
+
+async function eventually<T>(operation: () => Promise<T>, accept: (value: T) => boolean, timeoutMs = 2_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  let value = await operation()
+  while (!accept(value) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    value = await operation()
+  }
+  return value
+}
+
 describe('editor static byte snapshot', () => {
   it('consumes an opaque snapshot once and returns copies instead of mutable internal Map bytes', async () => {
     const root = await fixture()
@@ -47,8 +83,16 @@ describe('editor static byte snapshot', () => {
     expect(assets.read('index.html')?.toString('utf8')).toBe('<main>verified</main>')
     expect(Reflect.set(assets, 'read', () => Buffer.from('tampered'))).toBe(false)
 
+    const lease = assets.retain('index.html')
+    expect(lease).toBeDefined()
+    expect(Reflect.has(lease!, 'bytes')).toBe(false)
     assets.dispose()
     expect(() => assets.read('index.html')).toThrow(/disposed/i)
+    let delivered: Buffer | undefined
+    lease!.writeTo({ end(bytes: Buffer) { delivered = Buffer.from(bytes) } })
+    expect(delivered?.toString('utf8')).toBe('<main>verified</main>')
+    lease!.release()
+    lease!.release()
   })
 
   it('serves every current dist extension with an explicit nosniff MIME, including SVG', async () => {
@@ -147,4 +191,79 @@ describe('editor static byte snapshot', () => {
       await server.close()
     }
   })
+
+  it('bounds paused static GETs by count and bytes while HEAD stays body-free and abort releases exactly once', async () => {
+    const root = await fixture()
+    const maxAssetBytes = 16_708_168
+    await writeFile(path.join(root, 'assets', 'maximum.js'), Buffer.alloc(maxAssetBytes, 0x61))
+    const server = await createSessionServer({
+      editorRoot: root,
+      maxStaticResponseConcurrency: 16,
+      maxStaticResponseOutstandingBytes: maxAssetBytes * 2,
+    })
+    const paused: Array<Awaited<ReturnType<typeof pausedRequest>>> = []
+    try {
+      for (let index = 0; index < 2; index += 1) {
+        const entry = await pausedRequest(server.origin, '/assets/maximum.js')
+        expect(entry.status).toBe(200)
+        paused.push(entry)
+      }
+
+      const rejected = await Promise.all(Array.from({ length: 16 }, () => (
+        pausedRequest(server.origin, '/assets/maximum.js')
+      )))
+      expect(rejected.map((entry) => entry.status)).toEqual(Array(16).fill(503))
+      for (const entry of rejected) entry.incoming.resume()
+
+      for (let index = 0; index < 18; index += 1) {
+        const head = await pausedRequest(server.origin, '/assets/maximum.js', 'HEAD')
+        expect(head.status).toBe(200)
+        head.incoming.resume()
+      }
+
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        const aborted = paused.shift()!
+        abortPaused(aborted)
+        abortPaused(aborted)
+        const replacement = await eventually(
+          async () => {
+            const entry = await pausedRequest(server.origin, '/assets/maximum.js')
+            if (entry.status !== 200) entry.incoming.resume()
+            return entry
+          },
+          (entry) => entry.status === 200,
+        )
+        expect(replacement.status).toBe(200)
+        paused.push(replacement)
+
+        const noDoubleRelease = await pausedRequest(server.origin, '/assets/maximum.js')
+        expect(noDoubleRelease.status).toBe(503)
+        noDoubleRelease.incoming.resume()
+      }
+    } finally {
+      for (const entry of paused) abortPaused(entry)
+      await server.close()
+    }
+  }, 30_000)
+
+  it('closes safely with paused static responses and rejects new traffic without retaining response leases', async () => {
+    const root = await fixture()
+    await writeFile(path.join(root, 'assets', 'maximum.js'), Buffer.alloc(16_708_168, 0x61))
+    const server = await createSessionServer({
+      editorRoot: root,
+      maxStaticResponseConcurrency: 3,
+      maxStaticResponseOutstandingBytes: 16_708_168 * 4,
+    })
+    const paused = await Promise.all(Array.from({ length: 4 }, () => (
+      pausedRequest(server.origin, '/assets/maximum.js')
+    )))
+    expect(paused.map((entry) => entry.status)).toEqual([200, 200, 200, 503])
+
+    await expect(Promise.race([
+      server.close().then(() => 'closed'),
+      new Promise((resolve) => setTimeout(() => resolve('timed-out'), 2_000)),
+    ])).resolves.toBe('closed')
+    for (const entry of paused) abortPaused(entry)
+    await expect(fetch(`${server.origin}/editor/`)).rejects.toThrow()
+  }, 30_000)
 })

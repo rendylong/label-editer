@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { access, appendFile, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { access, appendFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -91,6 +91,16 @@ describe('editor build freshness', () => {
     ['file-directory replacement', async (root: string, filePath: string) => {
       await rename(filePath, `${filePath}.original`)
       await mkdir(filePath)
+    }],
+    ['parent rename-swap-restore', async (root: string, filePath: string) => {
+      const parent = path.dirname(filePath)
+      const preserved = `${parent}.original`
+      const external = path.join(root, 'external-assets')
+      await cp(parent, external, { recursive: true })
+      await rename(parent, preserved)
+      await symlink(external, parent)
+      await rm(parent)
+      await rename(preserved, parent)
     }],
   ])('rejects a %s after opening but before retaining dist bytes', async (_name, mutate) => {
     const root = await fixtureRoot()
@@ -313,6 +323,79 @@ describe('editor build freshness', () => {
 
     await expect(writeEditorBuildFingerprint(root, editorRoot)).rejects.toThrow(/symbolic link/i)
     await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each([
+    ['src parent', async (root: string) => {
+      await rename(path.join(root, 'src'), path.join(root, 'src.real'))
+      await symlink(path.join(root, 'src.real'), path.join(root, 'src'))
+    }],
+    ['nested public parent', async (root: string) => {
+      await rename(path.join(root, 'public', 'nested'), path.join(root, 'public', 'nested.real'))
+      await symlink(path.join(root, 'public', 'nested.real'), path.join(root, 'public', 'nested'))
+    }],
+    ['config leaf', async (root: string) => {
+      await rename(path.join(root, 'vite.config.ts'), path.join(root, 'vite.config.real'))
+      await symlink(path.join(root, 'vite.config.real'), path.join(root, 'vite.config.ts'))
+    }],
+    ['package leaf', async (root: string) => {
+      await rename(path.join(root, 'package.json'), path.join(root, 'package.real'))
+      await symlink(path.join(root, 'package.real'), path.join(root, 'package.json'))
+    }],
+    ['installed lock leaf', async (root: string) => {
+      await rename(path.join(root, 'npm-shrinkwrap.json'), path.join(root, 'npm-shrinkwrap.real'))
+      await symlink(path.join(root, 'npm-shrinkwrap.real'), path.join(root, 'npm-shrinkwrap.json'))
+    }],
+  ])('rejects a symlink at the %s fingerprint boundary', async (_name, mutate) => {
+    const root = await fixtureRoot()
+    await mutate(root)
+    await expect(editorSourceFingerprint(root)).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('rejects a symlinked intermediate source parent even when every selected leaf is byte-identical', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    await writeEditorBuildFingerprint(root, editorRoot)
+
+    const originalScripts = path.join(root, 'scripts')
+    const preservedScripts = path.join(root, 'scripts.original')
+    const externalScripts = path.join(root, 'external-scripts')
+    await cp(originalScripts, externalScripts, { recursive: true })
+    await writeFile(path.join(externalScripts, 'unselected-malicious-runtime.mjs'), 'globalThis.compromised = true\n')
+    await rename(originalScripts, preservedScripts)
+    await symlink(externalScripts, originalScripts)
+
+    await expect(assertFreshEditorBuild(root, editorRoot)).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('rejects a symlinked fingerprint root instead of treating its target as repository authority', async () => {
+    const root = await fixtureRoot()
+    const aliasParent = await mkdtemp(path.join(tmpdir(), 'glb-label-build-alias-'))
+    const alias = path.join(aliasParent, 'plugin')
+    const distAlias = path.join(aliasParent, 'dist')
+    await symlink(root, alias)
+    await symlink(path.join(root, 'dist'), distAlias)
+
+    await expect(editorSourceFingerprint(alias)).rejects.toThrow(/symbolic link/i)
+    await expect(snapshotEditorDist(distAlias)).rejects.toThrow(/symbolic link/i)
+  })
+
+  it('detects a source parent rename-swap-restore completed while a selected leaf is open', async () => {
+    const root = await fixtureRoot()
+    const scripts = path.join(root, 'scripts')
+    const preservedScripts = path.join(root, 'scripts.original')
+    const externalScripts = path.join(root, 'external-scripts')
+    await cp(scripts, externalScripts, { recursive: true })
+
+    await expect(editorSourceFingerprint(root, {
+      onEditorAssetOpened: async ({ relativePath }: { relativePath: string }) => {
+        if (relativePath !== 'scripts/lib/browser-core.mjs') return
+        await rename(scripts, preservedScripts)
+        await symlink(externalScripts, scripts)
+        await rm(scripts)
+        await rename(preservedScripts, scripts)
+      },
+    })).rejects.toThrow(/changed while fingerprinting/i)
   })
 
   it('makes standalone plugin E2E build first and plugin verification reuse that build', async () => {
