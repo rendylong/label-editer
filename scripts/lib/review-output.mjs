@@ -9,12 +9,12 @@ import {
   productionReviewPlan,
   validateManifestSemantics,
 } from './design-manifest-core.mjs'
+import { areaArtifactToken } from '../../src/agent/areaArtifactToken.mjs'
 import { parsePortablePng } from './png-core.mjs'
 
 const MAX_PNG_BYTES = 32 * 1024 * 1024
 const MAX_DIMENSION = 4_096
 const MAX_PIXELS = 16 * 1024 * 1024
-const encoder = new TextEncoder()
 const ajv = new Ajv2020({ allErrors: true, strict: true })
 ajv.addFormat('date-time', { type: 'string', validate: isStrictRfc3339DateTime })
 const validateSchema = ajv.compile(reviewManifestSchema)
@@ -81,8 +81,7 @@ export function reviewArtifactRelativePath(view, areas) {
   if (!area) fail(`Review view references unknown area: ${String(view.areaId)}`)
   const prefix = view.kind === 'flat-artwork' ? 'label' : 'surface'
   if (sideIsUnique(area, areas)) return `${prefix}-${area.side}.png`
-  const suffix = createHash('sha256').update(encoder.encode(area.id)).digest('hex').slice(0, 16)
-  return `${prefix}-area-${suffix}.png`
+  return `${prefix}-${areaArtifactToken(area.id)}.png`
 }
 
 function artifactFromView(view, sealed, areas) {

@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { buildQcCapturePlan } from '../src/agent/qcCapturePlan'
 import type { CraftType, LabelAreaConfig } from '../src/label/types'
 
+const FRONT_TOKEN = 'front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a'
+const UPPER_FRONT_TOKEN = 'Front-uylvsaqcrgecccp2skwxmxqsac3ksbu3tamqreosor6gkr2gnhra'
+
 function area(id: string, crafts: CraftType[] = []): LabelAreaConfig {
   return {
     id,
@@ -66,14 +69,14 @@ describe('QC capture plan', () => {
     }
   })
 
-  it('disambiguates case-fold-colliding area ids without changing an isolated safe token', () => {
+  it('keeps case-fold-distinct cryptographic tokens stable across batch order and isolation', () => {
     const build = (ids: string[]) => buildQcCapturePlan({
       preset: 'qc-standard', width: 1440, height: 1440,
       areas: ids.map((id) => area(id)), customViews: [],
     }).filter((view) => view.areaId !== undefined)
     const expected = new Map([
-      ['Front', ['area-Front-6de898785ca4f504-face', 'area-Front-6de898785ca4f504-craft']],
-      ['front', ['area-front-e179dbd83ca4c2a4-face', 'area-front-e179dbd83ca4c2a4-craft']],
+      ['Front', [`area-${UPPER_FRONT_TOKEN}-face`, `area-${UPPER_FRONT_TOKEN}-craft`]],
+      ['front', [`area-${FRONT_TOKEN}-face`, `area-${FRONT_TOKEN}-craft`]],
     ])
 
     for (const views of [build(['Front', 'front']), build(['front', 'Front'])]) {
@@ -82,7 +85,9 @@ describe('QC capture plan', () => {
       }
       expect(new Set(views.map((view) => view.id.normalize('NFKC').toLowerCase())).size).toBe(views.length)
     }
-    expect(build(['Front']).map((view) => view.id)).toEqual(['area-Front-face', 'area-Front-craft'])
+    expect(build(['Front']).map((view) => view.id)).toEqual([
+      `area-${UPPER_FRONT_TOKEN}-face`, `area-${UPPER_FRONT_TOKEN}-craft`,
+    ])
   })
 
   it('allows a safe custom view id to target a known opaque area id', () => {
@@ -125,7 +130,7 @@ describe('QC capture plan', () => {
       'model-front-right', 'model-back-left',
     ])
     expect(plan.filter((view) => view.areaId === 'front' && view.channel === 'color').map((view) => view.id)).toEqual([
-      'area-front-face', 'area-front-craft',
+      `area-${FRONT_TOKEN}-face`, `area-${FRONT_TOKEN}-craft`,
     ])
     expect(plan).toHaveLength(10)
   })
@@ -136,11 +141,11 @@ describe('QC capture plan', () => {
       areas: [area('front', ['foil', 'emboss'])], customViews: [],
     })
     expect(plan.filter((view) => view.areaId === 'front').map((view) => [view.id, view.channel])).toEqual([
-      ['area-front-face', 'color'],
-      ['area-front-craft', 'color'],
-      ['area-front-metalness', 'metalness'],
-      ['area-front-roughness', 'roughness'],
-      ['area-front-bump', 'bump'],
+      [`area-${FRONT_TOKEN}-face`, 'color'],
+      [`area-${FRONT_TOKEN}-craft`, 'color'],
+      [`area-${FRONT_TOKEN}-metalness`, 'metalness'],
+      [`area-${FRONT_TOKEN}-roughness`, 'roughness'],
+      [`area-${FRONT_TOKEN}-bump`, 'bump'],
     ])
     expect(plan.filter((view) => view.areaId === 'front').map((view) => [view.channel, view.pose.kind])).toEqual([
       ['color', 'area-face'],

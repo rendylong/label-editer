@@ -9,7 +9,10 @@ import { hasRenderableWhiteUnderbaseDeclaration } from '../label/whiteUnderbase'
 import {
   snapshotRendererProvenWhiteUnderbase,
 } from '../label/craft'
-import { deriveQcAreaTokens } from './qcCapturePlan'
+import {
+  areaArtifactToken,
+  deriveAreaArtifactTokens,
+} from './areaArtifactToken.mjs'
 
 export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase'
 
@@ -65,15 +68,14 @@ function createPrintArtifactWithToken(area: LabelAreaConfig, areaToken: string, 
 }
 
 export function createPrintArtifact(area: LabelAreaConfig, bake?: BakeInput): BrowserArtifact {
-  const areaToken = deriveQcAreaTokens([area.id]).get(area.id)!
-  return createPrintArtifactWithToken(area, areaToken, bake)
+  return createPrintArtifactWithToken(area, areaArtifactToken(area.id), bake)
 }
 
 export function createPrintArtifacts(
   areas: LabelAreaConfig[],
   bakeMap?: Record<string, BakeInput>,
 ): BrowserArtifact[] {
-  const areaTokens = deriveQcAreaTokens(areas.map((area) => area.id))
+  const areaTokens = deriveAreaArtifactTokens(areas.map((area) => area.id)) as Map<string, string>
   return areas.map((area) => createPrintArtifactWithToken(area, areaTokens.get(area.id)!, bakeMap?.[area.id]))
 }
 
@@ -97,8 +99,7 @@ export async function createChannelArtifact(
   bake: BakeInput,
   channel: ArtifactChannel,
 ): Promise<BrowserArtifact> {
-  const areaToken = deriveQcAreaTokens([area.id]).get(area.id)!
-  return createChannelArtifactWithToken(area, areaToken, bake, channel)
+  return createChannelArtifactWithToken(area, areaArtifactToken(area.id), bake, channel)
 }
 
 async function createChannelArtifactWithToken(
@@ -141,7 +142,7 @@ async function createAreaPublication(
 ): Promise<{ artifacts: BrowserArtifact[]; manifests: PrintManifest[] }> {
   const artifacts: BrowserArtifact[] = []
   const manifests: PrintManifest[] = []
-  const areaTokens = deriveQcAreaTokens(areas.map((area) => area.id))
+  const areaTokens = deriveAreaArtifactTokens(areas.map((area) => area.id)) as Map<string, string>
   for (const area of areas) {
     const areaToken = areaTokens.get(area.id)!
     const bake = bakeMap[area.id]

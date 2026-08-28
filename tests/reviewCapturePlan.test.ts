@@ -8,6 +8,9 @@ import {
   reviewSheetLabel,
 } from '../src/agent/reviewCapturePlan'
 
+const FRONT_TOKEN = 'front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a'
+const BACK_TOKEN = 'back-hrecgrxtoubhm572rigwqmfde4knj4j7t2kmfwpccxqkyic22tsq'
+
 function area(id: string, side: LabelSide, carrier: CarrierMode) {
   return { id, side, carrier }
 }
@@ -23,7 +26,7 @@ describe('clean production review capture plan', () => {
     })
 
     expect(plan.map((view) => view.id)).toEqual([
-      'label-front', 'surface-front', 'label-back', 'surface-back',
+      `label-${FRONT_TOKEN}`, `surface-${FRONT_TOKEN}`, `label-${BACK_TOKEN}`, `surface-${BACK_TOKEN}`,
       'model-front', 'model-back', 'review-sheet',
     ])
     expect(plan.some((view) => view.areaId === 'top')).toBe(false)
@@ -31,7 +34,7 @@ describe('clean production review capture plan', () => {
     expect(plan.at(-1)).toMatchObject({
       kind: 'review-sheet',
       sourceViewIds: [
-        'label-front', 'surface-front', 'label-back', 'surface-back',
+        `label-${FRONT_TOKEN}`, `surface-${FRONT_TOKEN}`, `label-${BACK_TOKEN}`, `surface-${BACK_TOKEN}`,
         'model-front', 'model-back',
       ],
     })

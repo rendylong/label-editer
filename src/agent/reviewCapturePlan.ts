@@ -1,6 +1,7 @@
 import type { CarrierMode, LabelSide } from './designContracts'
 import type { ReviewViewKind, ReviewViewRequest } from './contracts'
 import { compareOrdinalText } from '../label/layerOrder'
+import { deriveAreaArtifactTokens } from './areaArtifactToken.mjs'
 
 const DEFAULT_REVIEW_DIMENSION = 1600
 const MAX_REVIEW_DIMENSION = 4096
@@ -8,7 +9,6 @@ export const MAX_REVIEW_CAPTURE_PIXELS = 128 * 1024 * 1024
 export const MAX_REVIEW_DECODED_WORK_BYTES = MAX_REVIEW_CAPTURE_PIXELS * 4
 export const MAX_REVIEW_ENCODED_BYTES = 128 * 1024 * 1024
 export const MAX_REVIEW_SHEET_SOURCES = 130
-const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
 const SIDE_ORDER: readonly LabelSide[] = [
   'front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom',
@@ -37,42 +37,8 @@ function stableHash(value: string, seed: number): string {
   return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
-function tokenHash(value: string, attempt = 0): string {
-  const input = attempt === 0 ? value : `${value}\u0000${attempt}`
-  return `${stableHash(input, 2166136261)}${stableHash([...input].reverse().join(''), 0x9e3779b9)}`
-}
-
-function baseAreaToken(areaId: string): string {
-  if (areaId.length <= 48 && SAFE_TOKEN_PATTERN.test(areaId)) return areaId
-  const stem = areaId.normalize('NFKC')
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
-    .replace(/^[-._]+|[-._]+$/g, '')
-    .slice(0, 31) || 'area'
-  return `${stem}-${tokenHash(areaId)}`
-}
-
 function publicationKey(value: string): string {
   return value.normalize('NFKC').toLowerCase()
-}
-
-function areaTokens(areaIds: readonly string[]): Map<string, string> {
-  const bases = new Map(areaIds.map((areaId) => [areaId, baseAreaToken(areaId)]))
-  const resolved = new Map(bases)
-  for (let attempt = 0; attempt <= 8; attempt += 1) {
-    const groups = new Map<string, string[]>()
-    for (const [areaId, token] of resolved) {
-      const key = publicationKey(token)
-      groups.set(key, [...(groups.get(key) ?? []), areaId])
-    }
-    const collisions = [...groups.values()].filter((group) => group.length > 1)
-    if (collisions.length === 0) return resolved
-    for (const group of collisions) {
-      for (const areaId of group) {
-        resolved.set(areaId, `${bases.get(areaId)!.slice(0, 45)}-${tokenHash(areaId, attempt + 1)}`)
-      }
-    }
-  }
-  return invalidUsage('Review area tokens cannot be made publication-safe and unique')
 }
 
 function assertResultId(id: string, ids: Set<string>): void {
@@ -135,7 +101,7 @@ export function buildReviewCapturePlan(input: {
   const ordered = [...input.areas]
     .sort((left, right) => SIDE_ORDER.indexOf(left.side) - SIDE_ORDER.indexOf(right.side)
       || compareOrdinalText(left.id, right.id))
-  const tokens = areaTokens(ordered.map((area) => area.id))
+  const tokens = deriveAreaArtifactTokens(ordered.map((area) => area.id)) as Map<string, string>
   const resultIds = new Set<string>()
   const plan: ReviewViewRequest[] = []
   const add = (view: ReviewViewRequest) => {

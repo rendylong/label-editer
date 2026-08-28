@@ -27,6 +27,11 @@ vi.mock('../src/app/projectImportRuntime', () => ({
 }))
 
 const token = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+const FRONT_TOKEN = 'front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a'
+const FRONT_LABEL_TOKEN = 'front-cldpnspqxcncblahmc6qg3lvrcroueizghizw7cj4fldwhcqrmfa'
+const QC_FRONT_LABEL_PREFIX = `area-${FRONT_LABEL_TOKEN}`
+const REVIEW_FRONT_ID = `label-${FRONT_TOKEN}`
+const REVIEW_SURFACE_ID = `surface-${FRONT_TOKEN}`
 
 it('requires elapsed settle time and multiple unchanged frames before capture readiness', () => {
   expect(isBakeSettleWindowReady(400, 1)).toBe(false)
@@ -355,15 +360,15 @@ describe('browser Agent QC runtime', () => {
     const requestIds = [
       'model-front', 'model-back', 'model-left', 'model-right',
       'model-front-right', 'model-back-left',
-      'area-front-label-face', 'area-front-label-craft',
-      'area-front-label-metalness', 'area-front-label-roughness', 'area-front-label-bump',
+      `${QC_FRONT_LABEL_PREFIX}-face`, `${QC_FRONT_LABEL_PREFIX}-craft`,
+      `${QC_FRONT_LABEL_PREFIX}-metalness`, `${QC_FRONT_LABEL_PREFIX}-roughness`, `${QC_FRONT_LABEL_PREFIX}-bump`,
     ]
     expect(events).toEqual(requestIds.flatMap((id) => [`capture:${id}`, `upload:${id}`]))
     expect(uploads.map(({ id, fileName }) => [id, fileName])).toEqual(
       requestIds.map((id) => [`qc-${id}`, `${id}.png`]),
     )
     expect(uploads.at(-1)).toEqual({
-      id: 'qc-area-front-label-bump', fileName: 'area-front-label-bump.png',
+      id: `qc-${QC_FRONT_LABEL_PREFIX}-bump`, fileName: `${QC_FRONT_LABEL_PREFIX}-bump.png`,
       width: '640', height: '480', areaId: 'front-label', channel: 'bump',
     })
     expect(result).toMatchObject({
@@ -377,9 +382,9 @@ describe('browser Agent QC runtime', () => {
           side: 'front', surfaceMode: 'replace',
           requiredChannels: ['metalness', 'roughness', 'bump'],
           viewIds: [
-            'area-front-label-face', 'area-front-label-craft',
-            'area-front-label-metalness', 'area-front-label-roughness',
-            'area-front-label-bump',
+            `${QC_FRONT_LABEL_PREFIX}-face`, `${QC_FRONT_LABEL_PREFIX}-craft`,
+            `${QC_FRONT_LABEL_PREFIX}-metalness`, `${QC_FRONT_LABEL_PREFIX}-roughness`,
+            `${QC_FRONT_LABEL_PREFIX}-bump`,
           ],
         }],
       },
@@ -680,7 +685,7 @@ describe('browser Agent QC runtime', () => {
         uploadEntered.resolve()
         await releaseUpload.promise
       }
-      if (id === 'qc-area-front-label-bump') activeBatches -= 1
+      if (id === `qc-${QC_FRONT_LABEL_PREFIX}-bump`) activeBatches -= 1
       return { ok: true, json: async () => exactUploadDescriptor(input, init) } as Response
     }))
     const bridge = createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
@@ -938,7 +943,7 @@ describe('browser Agent clean production review runtime', () => {
     const result = await createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
       .renderReviewEvidence(request)
 
-    const ids = ['label-front', 'surface-front', 'model-front', 'model-back', 'review-sheet']
+    const ids = [REVIEW_FRONT_ID, REVIEW_SURFACE_ID, 'model-front', 'model-back', 'review-sheet']
     expect(events).toEqual([...ids.map((id) => `capture:${id}`), ...ids.map((id) => `upload:${id}`)])
     expect(result).toMatchObject({
       ok: true, operation: 'render_review_evidence',
@@ -1015,8 +1020,8 @@ describe('browser Agent clean production review runtime', () => {
           generation: 1,
           expiresAt: expect.any(Number),
           artifacts: expect.arrayContaining([expect.objectContaining({
-            id: expect.stringMatching(/--label-front$/),
-            resultId: 'label-front',
+            id: expect.stringMatching(new RegExp(`--${REVIEW_FRONT_ID}$`)),
+            resultId: REVIEW_FRONT_ID,
             byteLength: expect.any(Number),
             mimeType: 'image/png',
             width: 640,

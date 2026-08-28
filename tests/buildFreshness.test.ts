@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -10,10 +10,14 @@ import { createPluginRuntime } from '../scripts/plugin-runtime.mjs'
 async function fixtureRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'glb-label-build-fingerprint-'))
   await mkdir(path.join(root, 'src'), { recursive: true })
+  await mkdir(path.join(root, 'public', 'nested'), { recursive: true })
   await mkdir(path.join(root, 'dist'), { recursive: true })
   await writeFile(path.join(root, 'src', 'main.ts'), 'export const version = 1\n')
+  await writeFile(path.join(root, 'public', 'nested', 'runtime.bin'), 'public-v1')
   await writeFile(path.join(root, 'index.html'), '<main>source</main>')
   await writeFile(path.join(root, 'package.json'), '{"type":"module"}\n')
+  await writeFile(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n')
+  await writeFile(path.join(root, 'npm-shrinkwrap.json'), '{"lockfileVersion":3}\n')
   await writeFile(path.join(root, 'vite.config.ts'), 'export default {}\n')
   await writeFile(path.join(root, 'tsconfig.json'), '{}\n')
   await writeFile(path.join(root, 'dist', 'index.html'), '<main>built</main>')
@@ -39,6 +43,37 @@ describe('editor build freshness', () => {
       .rejects.toThrow(/stale editor build/i)
     await expect(createPluginRuntime({ pluginRoot: root }))
       .rejects.toThrow(/stale editor build/i)
+  })
+
+  it('invalidates an existing build when recursive public assets or supported lockfiles change, appear, or disappear', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    const expectStaleAfter = async (mutate: () => Promise<void>) => {
+      await writeEditorBuildFingerprint(root, editorRoot)
+      await expect(assertFreshEditorBuild(root, editorRoot)).resolves.toBeDefined()
+      await mutate()
+      await expect(assertFreshEditorBuild(root, editorRoot)).rejects.toThrow(/stale editor build/i)
+    }
+
+    await expectStaleAfter(() => writeFile(path.join(root, 'public', 'nested', 'runtime.bin'), 'public-v2'))
+    await expectStaleAfter(() => writeFile(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\npatched: true\n'))
+    await expectStaleAfter(() => writeFile(path.join(root, 'npm-shrinkwrap.json'), '{"lockfileVersion":3,"patched":true}\n'))
+    await expectStaleAfter(() => writeFile(path.join(root, 'public', 'added.bin'), 'added'))
+    await expectStaleAfter(() => rm(path.join(root, 'public', 'added.bin')))
+    await expectStaleAfter(() => writeFile(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}\n'))
+    await expectStaleAfter(() => rm(path.join(root, 'package-lock.json')))
+  })
+
+  it('fails closed on symlinked build inputs and does not write a marker for that failed fingerprint', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    const outside = path.join(root, 'outside.bin')
+    const marker = path.join(editorRoot, 'build-fingerprint.json')
+    await writeFile(outside, 'outside')
+    await symlink(outside, path.join(root, 'public', 'nested', 'linked.bin'))
+
+    await expect(writeEditorBuildFingerprint(root, editorRoot)).rejects.toThrow(/symbolic link/i)
+    await expect(access(marker)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('makes standalone plugin E2E build first and plugin verification reuse that build', async () => {

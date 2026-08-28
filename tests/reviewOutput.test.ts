@@ -85,8 +85,8 @@ describe('production review manifest', () => {
     expect(reviewArtifactRelativePath({ id: 'back', kind: 'flat-artwork', areaId: '唯一背面' }, areas)).toBe('label-back.png')
     const first = reviewArtifactRelativePath({ id: 'b', kind: 'flat-artwork', areaId: 'Front' }, areas)
     const second = reviewArtifactRelativePath({ id: 'c', kind: 'flat-artwork', areaId: 'front' }, areas)
-    expect(first).toMatch(/^label-area-[a-f0-9]{16}\.png$/)
-    expect(second).toMatch(/^label-area-[a-f0-9]{16}\.png$/)
+    expect(first).toBe('label-Front-uylvsaqcrgecccp2skwxmxqsac3ksbu3tamqreosor6gkr2gnhra.png')
+    expect(second).toBe('label-front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a.png')
     expect(first).not.toBe(second)
   })
 

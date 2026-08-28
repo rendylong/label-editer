@@ -57,6 +57,9 @@ const QC_MODEL_VIEW_IDS = [
   'model-front', 'model-back', 'model-left', 'model-right',
   'model-front-right', 'model-back-left',
 ] as const
+const FRONT_TOKEN = 'front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a'
+const BACK_TOKEN = 'back-hrecgrxtoubhm572rigwqmfde4knj4j7t2kmfwpccxqkyic22tsq'
+const UPPER_FRONT_TOKEN = 'Front-uylvsaqcrgecccp2skwxmxqsac3ksbu3tamqreosor6gkr2gnhra'
 
 function qcView(id: string, areaId?: string, channel: 'color' | 'metalness' | 'roughness' | 'bump' = 'color') {
   return {
@@ -360,14 +363,18 @@ describe('label-cli protocol', () => {
     })
     expect(harness.publications[0].artifacts.map((artifact) => artifact.id)).toEqual([
       ...QC_MODEL_VIEW_IDS.map((id) => `qc-${id}`),
-      'qc-area-front-face', 'qc-area-front-craft', 'qc-area-front-metalness', 'qc-area-front-roughness',
-      'qc-area-back-face', 'qc-area-back-craft', 'qc-manifest',
+      `qc-area-${FRONT_TOKEN}-face`, `qc-area-${FRONT_TOKEN}-craft`,
+      `qc-area-${FRONT_TOKEN}-metalness`, `qc-area-${FRONT_TOKEN}-roughness`,
+      `qc-area-${BACK_TOKEN}-face`, `qc-area-${BACK_TOKEN}-craft`, 'qc-manifest',
     ])
     expect(harness.publications[0].artifacts.map((artifact) => artifact.relativePath)).toEqual([
       ...QC_MODEL_VIEW_IDS.map((id) => `model/${id}.png`),
-      'areas/front/area-front-face.png', 'areas/front/area-front-craft.png',
-      'areas/front/area-front-metalness.png', 'areas/front/area-front-roughness.png',
-      'areas/back/area-back-face.png', 'areas/back/area-back-craft.png', 'qc-manifest.json',
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-face.png`,
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-craft.png`,
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-metalness.png`,
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-roughness.png`,
+      `areas/${BACK_TOKEN}/area-${BACK_TOKEN}-face.png`,
+      `areas/${BACK_TOKEN}/area-${BACK_TOKEN}-craft.png`, 'qc-manifest.json',
     ])
     expect(harness.publications[0].artifacts.some((artifact) => [
       'labeled-glb', 'project', 'normalized-spec', 'print-manifest', 'preview-3d',
@@ -379,8 +386,8 @@ describe('label-cli protocol', () => {
       requiredChannels: ['metalness', 'roughness'],
     })
     expect(qcManifest.artifacts.filter((artifact: { channel: string }) => artifact.channel !== 'color')).toEqual([
-      expect.objectContaining({ viewId: 'area-front-metalness', reason: 'Area metalness craft channel', view: expect.objectContaining({ kind: 'area-face' }) }),
-      expect.objectContaining({ viewId: 'area-front-roughness', reason: 'Area roughness craft channel', view: expect.objectContaining({ kind: 'area-face' }) }),
+      expect.objectContaining({ viewId: `area-${FRONT_TOKEN}-metalness`, reason: 'Area metalness craft channel', view: expect.objectContaining({ kind: 'area-face' }) }),
+      expect.objectContaining({ viewId: `area-${FRONT_TOKEN}-roughness`, reason: 'Area roughness craft channel', view: expect.objectContaining({ kind: 'area-face' }) }),
     ])
     expect((await readdir(directory)).some((name) => name.startsWith('.qc-output.'))).toBe(false)
     if (!result.ok) throw new Error(result.error.message)
@@ -551,14 +558,7 @@ describe('label-cli protocol', () => {
     const outputDir = path.join(directory, 'qc-output')
     await writeFile(inputPath, JSON.stringify(input))
     await writeFile(glbPath, 'glb')
-    const harness = qcRuntime({
-      areaIds,
-      requiredChannelsByArea: {},
-      areaTokensByArea: {
-        Front: 'Front-6de898785ca4f504',
-        front: 'front-e179dbd83ca4c2a4',
-      },
-    })
+    const harness = qcRuntime({ areaIds, requiredChannelsByArea: {} })
     harness.runtime.allowedRoots = [directory]
 
     const result = await createOperations(harness.runtime).qc({ inputPath, glbPath, outputDir })
@@ -567,12 +567,12 @@ describe('label-cli protocol', () => {
     const manifest = JSON.parse(Buffer.from(harness.publications[0].artifacts.at(-1).bytes).toString('utf8'))
     expect(manifest.areas.map((area: { id: string }) => area.id)).toEqual(areaIds)
     expect(manifest.artifacts.filter((artifact: { areaId?: string }) => artifact.areaId === 'Front').map((artifact: { path: string }) => artifact.path)).toEqual([
-      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-face.png',
-      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-craft.png',
+      `areas/${UPPER_FRONT_TOKEN}/area-${UPPER_FRONT_TOKEN}-face.png`,
+      `areas/${UPPER_FRONT_TOKEN}/area-${UPPER_FRONT_TOKEN}-craft.png`,
     ])
     expect(manifest.artifacts.filter((artifact: { areaId?: string }) => artifact.areaId === 'front').map((artifact: { path: string }) => artifact.path)).toEqual([
-      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-face.png',
-      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-craft.png',
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-face.png`,
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-craft.png`,
     ])
   })
 

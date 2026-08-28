@@ -2,6 +2,36 @@ import { createServer as createHttpServer } from 'node:http'
 import { chromium } from 'playwright'
 import { createServer as createViteServer } from 'vite'
 import { describe, expect, it } from 'vitest'
+import { isTransparentCssColor } from '../src/label/cssColor'
+
+const CORPUS = [
+  ['transparent', true],
+  ['rgb(10 20 30 / 0)', true],
+  ['hsl(120deg 40% 50% / 0)', true],
+  ['color(display-p3 1 0 0 / 0)', true],
+  ['color(display-p3 calc(1) 0 0 / 0)', true],
+  ['rgb(calc(10) 20 30 / 0)', true],
+  ['rgb(10 20 30 / calc(0))', true],
+  ['color-mix(in srgb, transparent 100%, red 0%)', true],
+  ['rgb(from transparent r g b / 0)', true],
+  ['hsl(from transparent h s l / 0)', true],
+  ['lab(from transparent l a b / 0)', true],
+  ['oklch(from transparent l c h / 0)', true],
+  ['color(from transparent srgb r g b / 0)', true],
+  ['lch(50% 20 30deg / 0)', true],
+  ['rgb(none none none / none)', true],
+  ['color(display-p3 1 0 0 / 0.01)', false],
+  ['color-mix(in srgb, transparent 99%, red 1%)', false],
+  ['rgb(from transparent r g b / 0.01)', false],
+  ['rgb(garbage / 0)', false],
+  ['rgb(calc(nope) 20 30 / 0)', false],
+  ['rgb(10 20 / 0)', false],
+  ['hsl(120deg nope 50% / 0)', false],
+  ['color(display-p3 1 0 / 0)', false],
+  ['color-mix(in srgb, nonsense 100%, red 0%)', false],
+  ['rgb(from nonsense r g b / 0)', false],
+  ['color(from transparent srgb r g / 0)', false],
+] as const
 
 describe('browser-authoritative CSS transparency', () => {
   it('classifies the production color corpus exactly like Chromium pixels', async () => {
@@ -35,19 +65,7 @@ describe('browser-authoritative CSS transparency', () => {
       await page.waitForFunction(() => typeof (globalThis as typeof globalThis & {
         testCssTransparency?: unknown
       }).testCssTransparency === 'function')
-      const corpus = [
-        'transparent',
-        'rgb(10 20 30 / 0)',
-        'hsl(120deg 40% 50% / 0)',
-        'color(display-p3 1 0 0 / 0)',
-        'lch(50% 20 30deg / 0)',
-        'rgb(none none none / none)',
-        'color(display-p3 1 0 0 / 0.01)',
-        'rgb(garbage / 0)',
-        'rgb(10 20 / 0)',
-        'hsl(120deg nope 50% / 0)',
-        'color(display-p3 1 0 / 0)',
-      ]
+      const corpus = CORPUS.map(([value]) => value)
       const results = await page.evaluate(async (values) => {
         const isTransparentCssColor = (globalThis as typeof globalThis & {
           testCssTransparency: (value: string) => boolean
@@ -70,9 +88,9 @@ describe('browser-authoritative CSS transparency', () => {
         }))
       }, corpus)
 
-      expect(results.map(({ actual }) => actual)).toEqual([
-        true, true, true, true, true, true, false, false, false, false, false,
-      ])
+      const expected = CORPUS.map(([, transparent]) => transparent)
+      expect(CORPUS.map(([value]) => isTransparentCssColor(value))).toEqual(expected)
+      expect(results.map(({ actual }) => actual)).toEqual(expected)
       expect(results.every(({ actual, rendered }) => actual === rendered)).toBe(true)
     } finally {
       await browser.close()

@@ -1,5 +1,9 @@
 import type { LabelAreaConfig, CraftType } from '../label/types'
 import type { QcChannel, QcCustomView, QcDiagnosticChannel, QcViewRequest, QcVector3 } from './contracts'
+import {
+  areaArtifactToken,
+  deriveAreaArtifactTokens,
+} from './areaArtifactToken.mjs'
 
 const MODEL_VIEWS = [
   ['model-front', [0, 0, 1]],
@@ -20,7 +24,6 @@ const CRAFT_CHANNELS: Record<CraftType, QcDiagnosticChannel[]> = {
 }
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
-const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const CRAFT_CHANNEL_ORDER: QcDiagnosticChannel[] = ['metalness', 'roughness', 'bump']
 
 function invalidUsage(message: string): never {
@@ -29,67 +32,13 @@ function invalidUsage(message: string): never {
   throw error
 }
 
-function stableAreaHash(areaId: string, seed: number, reverse = false): string {
-  let hash = seed
-  for (let offset = 0; offset < areaId.length; offset += 1) {
-    const index = reverse ? areaId.length - 1 - offset : offset
-    hash ^= areaId.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
-}
-
-function areaFingerprint(areaId: string, attempt = 0): string {
-  const value = attempt === 0 ? areaId : `${areaId}\u0000${attempt}`
-  return `${stableAreaHash(value, 2166136261)}${stableAreaHash(value, 0x9e3779b9, true)}`
-}
-
 function assertOpaqueAreaId(areaId: unknown): asserts areaId is string {
   if (typeof areaId !== 'string' || areaId.length === 0) invalidUsage('Area id must be a non-empty string')
 }
 
-/** Deterministic ASCII token for paths/view ids; the canonical area id stays opaque. */
-export function qcAreaToken(areaId: string): string {
-  assertOpaqueAreaId(areaId)
-  if (areaId.length <= 48 && SAFE_TOKEN_PATTERN.test(areaId)) return areaId
-  const stem = areaId.normalize('NFKC')
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
-    .replace(/^[-._]+|[-._]+$/g, '')
-    .slice(0, 31) || 'area'
-  return `${stem}-${areaFingerprint(areaId)}`
-}
-
-function publicationTokenKey(value: string): string {
-  return value.normalize('NFKC').toLowerCase()
-}
-
-/** Resolve all publication tokens as one case/normalization-insensitive batch. */
-export function deriveQcAreaTokens(areaIds: Iterable<string>): Map<string, string> {
-  const baseTokens = new Map<string, string>()
-  for (const areaId of areaIds) {
-    if (baseTokens.has(areaId)) invalidUsage(`Duplicate area id: ${areaId}`)
-    baseTokens.set(areaId, qcAreaToken(areaId))
-  }
-  const tokens = new Map(baseTokens)
-  const attempts = new Map<string, number>()
-  for (let pass = 0; pass <= 8; pass += 1) {
-    const groups = new Map<string, string[]>()
-    for (const [areaId, token] of tokens) {
-      const key = publicationTokenKey(token)
-      groups.set(key, [...(groups.get(key) ?? []), areaId])
-    }
-    const collisions = [...groups.values()].filter((group) => group.length > 1)
-    if (collisions.length === 0) return tokens
-    for (const group of collisions) {
-      for (const areaId of group) {
-        const attempt = (attempts.get(areaId) ?? -1) + 1
-        attempts.set(areaId, attempt)
-        tokens.set(areaId, `${baseTokens.get(areaId)!.slice(0, 48)}-${areaFingerprint(areaId, attempt)}`)
-      }
-    }
-  }
-  invalidUsage('QC area tokens cannot be made publication-safe and unique')
-}
+/** Compatibility names over the single Node/browser area artifact token core. */
+export const qcAreaToken = areaArtifactToken as (areaId: string) => string
+export const deriveQcAreaTokens = deriveAreaArtifactTokens as (areaIds: Iterable<string>) => Map<string, string>
 
 function areaViewId(areaToken: string, suffix: string): string {
   return `area-${areaToken}-${suffix}`

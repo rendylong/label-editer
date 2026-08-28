@@ -47,6 +47,9 @@
     "plugin:verify": "pnpm build && pnpm test && pnpm test:plugin-e2e:built"
   },
   "dependencies": {
+    "@csstools/css-color-parser": "4.2.0",
+    "@csstools/css-parser-algorithms": "4.0.0",
+    "@csstools/css-tokenizer": "4.0.0",
     "@gltf-transform/core": "^4.4.2",
     "@gltf-transform/extensions": "^4.4.2",
     "@gltf-transform/functions": "^4.4.2",

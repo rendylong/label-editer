@@ -10,6 +10,11 @@ const PNG_BYTES = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])
 const DIGEST = (character: string) => `sha256:${character.repeat(64)}`
 const fixturePath = path.resolve(import.meta.dirname, 'fixtures/specs/perfume-front-back-v2.json')
 const opaqueFixturePath = path.resolve(import.meta.dirname, 'fixtures/specs/qc-opaque-area-ids-v2.json')
+const FRONT_TOKEN = 'front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a'
+const BACK_TOKEN = 'back-hrecgrxtoubhm572rigwqmfde4knj4j7t2kmfwpccxqkyic22tsq'
+const UPPER_FRONT_TOKEN = 'Front-uylvsaqcrgecccp2skwxmxqsac3ksbu3tamqreosor6gkr2gnhra'
+const FRONT_FACE_ID = `area-${FRONT_TOKEN}-face`
+const FRONT_CRAFT_ID = `area-${FRONT_TOKEN}-craft`
 
 async function fixture() {
   return JSON.parse(await readFile(fixturePath, 'utf8'))
@@ -122,17 +127,17 @@ describe('QC output manifest', () => {
   it('retains exact dimensions, hashes, channels, and camera metadata', async () => {
     const manifest = buildQcManifest(inputFor(await fixture()))
 
-    const frontFace = manifest.artifacts.find((artifact: { id: string }) => artifact.id === 'qc-area-front-face')
+    const frontFace = manifest.artifacts.find((artifact: { id: string }) => artifact.id === `qc-${FRONT_FACE_ID}`)
     expect(frontFace).toMatchObject({
       sha256: DIGEST('a'), mimeType: 'image/png', byteLength: PNG_BYTES.byteLength,
       width: 1440, height: 1440, areaId: 'front', channel: 'color',
-      viewId: 'area-front-face', reason: 'QC evidence',
+      viewId: FRONT_FACE_ID, reason: 'QC evidence',
       view: { kind: 'area-face', framing: 'fit-area', target: 'front' },
       camera: camera(),
     })
     expect(manifest.areas).toEqual([
-      expect.objectContaining({ id: 'front', meshIndex: 7, stableSelector: 'mesh:7', artifactIds: ['qc-area-front-face', 'qc-area-front-craft'] }),
-      expect.objectContaining({ id: 'back', meshIndex: 7, stableSelector: 'mesh:7', artifactIds: ['qc-area-back-face', 'qc-area-back-craft'] }),
+      expect.objectContaining({ id: 'front', meshIndex: 7, stableSelector: 'mesh:7', artifactIds: [`qc-${FRONT_FACE_ID}`, `qc-${FRONT_CRAFT_ID}`] }),
+      expect.objectContaining({ id: 'back', meshIndex: 7, stableSelector: 'mesh:7', artifactIds: [`qc-area-${BACK_TOKEN}-face`, `qc-area-${BACK_TOKEN}-craft`] }),
     ])
     expect(validateQcManifest(manifest)).toEqual(manifest)
   })
@@ -199,10 +204,7 @@ describe('QC output manifest', () => {
     const spec = await fixture()
     spec.areas[0].id = 'Front'
     spec.areas[1].id = 'front'
-    const manifest = buildQcManifest(inputFor(spec, {
-      Front: 'Front-6de898785ca4f504',
-      front: 'front-e179dbd83ca4c2a4',
-    }))
+    const manifest = buildQcManifest(inputFor(spec))
 
     expect(manifest.areas.map((area: { id: string }) => area.id)).toEqual(['Front', 'front'])
     const pathsByArea = new Map(manifest.areas.map((area: { id: string; artifactIds: string[] }) => [
@@ -210,19 +212,19 @@ describe('QC output manifest', () => {
       area.artifactIds.map((artifactId) => manifest.artifacts.find((artifact: { id: string }) => artifact.id === artifactId)?.path),
     ]))
     expect(pathsByArea.get('Front')).toEqual([
-      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-face.png',
-      'areas/Front-6de898785ca4f504/area-Front-6de898785ca4f504-craft.png',
+      `areas/${UPPER_FRONT_TOKEN}/area-${UPPER_FRONT_TOKEN}-face.png`,
+      `areas/${UPPER_FRONT_TOKEN}/area-${UPPER_FRONT_TOKEN}-craft.png`,
     ])
     expect(pathsByArea.get('front')).toEqual([
-      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-face.png',
-      'areas/front-e179dbd83ca4c2a4/area-front-e179dbd83ca4c2a4-craft.png',
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-face.png`,
+      `areas/${FRONT_TOKEN}/area-${FRONT_TOKEN}-craft.png`,
     ])
     expect(validateQcManifest(manifest)).toEqual(manifest)
 
     const rawCaseOnlyDirectories = structuredClone(manifest)
     for (const artifact of rawCaseOnlyDirectories.artifacts) {
-      if (artifact.areaId === 'Front') artifact.path = artifact.path.replace('areas/Front-6de898785ca4f504/', 'areas/Front/')
-      if (artifact.areaId === 'front') artifact.path = artifact.path.replace('areas/front-e179dbd83ca4c2a4/', 'areas/front/')
+      if (artifact.areaId === 'Front') artifact.path = artifact.path.replace(`areas/${UPPER_FRONT_TOKEN}/`, 'areas/Front/')
+      if (artifact.areaId === 'front') artifact.path = artifact.path.replace(`areas/${FRONT_TOKEN}/`, 'areas/front/')
     }
     expect(() => validateQcManifest(rawCaseOnlyDirectories)).toThrow()
   })
@@ -250,9 +252,9 @@ describe('QC output manifest', () => {
     ['duplicate artifact ids', (input: ReturnType<typeof inputFor>) => { input.artifacts[1].id = input.artifacts[0].id }],
     ['unexpected uploaded artifact', (input: ReturnType<typeof inputFor>) => { input.artifacts.push({ ...descriptor('qc-unexpected', 'unexpected'), bytes: PNG_BYTES }) }],
     ['missing area-face image', (input: ReturnType<typeof inputFor>) => {
-      input.evidence.views = input.evidence.views.filter((entry) => entry.view.id !== 'area-front-face')
-      input.artifacts = input.artifacts.filter((artifact) => artifact.id !== 'qc-area-front-face')
-      input.evidence.areas[0].viewIds = ['area-front-craft']
+      input.evidence.views = input.evidence.views.filter((entry) => entry.view.id !== FRONT_FACE_ID)
+      input.artifacts = input.artifacts.filter((artifact) => artifact.id !== `qc-${FRONT_FACE_ID}`)
+      input.evidence.areas[0].viewIds = [FRONT_CRAFT_ID]
     }],
     ['mismatched project revision', (input: ReturnType<typeof inputFor>) => { input.project.revision = DIGEST('c') }],
     ['unsafe uploaded filename', (input: ReturnType<typeof inputFor>) => { input.artifacts[0].fileName = '../escape.png' }],
@@ -384,7 +386,8 @@ describe('QC output manifest', () => {
 
   it('creates safe area and model paths from capture view ids', () => {
     expect(qcArtifactRelativePath({ view: view('model-front') })).toBe('model/model-front.png')
-    expect(qcArtifactRelativePath({ view: view('area-front-face', 'front') })).toBe('areas/front/area-front-face.png')
+    expect(qcArtifactRelativePath({ view: view('area-front-face', 'front') }))
+      .toBe(`areas/${FRONT_TOKEN}/area-front-face.png`)
   })
 
   it('derives distinct ASCII publication paths while preserving opaque area targets', () => {
@@ -438,7 +441,7 @@ describe('QC output manifest', () => {
       { id: 'same', direction: [0, 1, 0], target: 'model', framing: 'fit-model', channel: 'color' },
     ]],
     ['reserved model id', [{ id: 'model-front', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
-    ['reserved area id', [{ id: 'area-front-face', direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
+    ['reserved area id', [{ id: FRONT_FACE_ID, direction: [1, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
     ['non-finite direction', [{ id: 'nan', direction: [Number.NaN, 0, 1], target: 'model', framing: 'fit-model', channel: 'color' }]],
     ['zero direction', [{ id: 'zero', direction: [0, 0, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],
     ['short direction', [{ id: 'short', direction: [1, 0], target: 'model', framing: 'fit-model', channel: 'color' }]],

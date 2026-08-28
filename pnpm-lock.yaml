@@ -8,6 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@csstools/css-color-parser':
+        specifier: 4.2.0
+        version: 4.2.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)
+      '@csstools/css-parser-algorithms':
+        specifier: 4.0.0
+        version: 4.0.0(@csstools/css-tokenizer@4.0.0)
+      '@csstools/css-tokenizer':
+        specifier: 4.0.0
+        version: 4.0.0
       '@gltf-transform/core':
         specifier: ^4.4.2
         version: 4.4.2

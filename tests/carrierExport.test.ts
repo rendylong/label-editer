@@ -28,6 +28,8 @@ import { renderCarrierMasks } from '../src/label/craft'
 import { buildPrintManifest } from '../src/label/printReadiness'
 import { whiteUnderbaseIntentKey } from '../src/label/whiteUnderbase'
 
+const FRONT_TOKEN = 'front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a'
+
 class NeutralContext {
   fillStyle: string | CanvasGradient | CanvasPattern = '#000000'
   tone: number | undefined
@@ -242,8 +244,8 @@ describe('carrier-aware channel export', () => {
     const artifacts = await createAreaChannelArtifacts([target], { front: bake })
 
     expect(artifacts.map((artifact) => [artifact.id, artifact.fileName, artifact.channel])).toEqual([
-      ['area-front-channel-color', 'color.png', 'color'],
-      ['area-front-channel-white_underbase', 'white-underbase.png', 'white_underbase'],
+      [`area-${FRONT_TOKEN}-channel-color`, 'color.png', 'color'],
+      [`area-${FRONT_TOKEN}-channel-white_underbase`, 'white-underbase.png', 'white_underbase'],
     ])
     expect(buildPrintManifest(target, bake).separations).toEqual(['white_underbase', 'WHITE'])
     expect(external.canvasToPngBytes).toHaveBeenCalledTimes(2)

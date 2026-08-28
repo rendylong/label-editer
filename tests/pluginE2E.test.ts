@@ -1103,7 +1103,8 @@ describe('GLB label plugin E2E', () => {
           inputKind: 'label-project-v3', blueprintRevision: 'task9-browser-review-v1',
           validation: { ready: true }, fidelity: { pass: true },
           views: [
-            { id: 'label-front' }, { id: 'surface-front' },
+            { id: 'label-front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a' },
+            { id: 'surface-front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a' },
             { id: 'model-front' }, { id: 'model-back' }, { id: 'review-sheet' },
           ],
         },
@@ -1175,8 +1176,14 @@ describe('GLB label plugin E2E', () => {
       input: { kind: 'label-spec-v2', revision: revisionOf(fixture.spec), sha256: hash(new TextEncoder().encode(inputBytes)) },
       blueprint: { revision: 'task9-browser-review-v1' },
       artifacts: [
-        { id: 'label-front', path: 'label-front.png', width: 1600, height: 1600 },
-        { id: 'surface-front', path: 'surface-front.png', width: 1600, height: 1600 },
+        {
+          id: 'label-front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a',
+          path: 'label-front.png', width: 1600, height: 1600,
+        },
+        {
+          id: 'surface-front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a',
+          path: 'surface-front.png', width: 1600, height: 1600,
+        },
         { id: 'model-front', path: 'model-front.png', width: 1600, height: 1600 },
         { id: 'model-back', path: 'model-back.png', width: 1600, height: 1600 },
         { id: 'review-sheet', path: 'review-sheet.png', width: 1600, height: 1600 },

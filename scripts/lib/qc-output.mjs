@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { sanitizeArtifactName } from './files.mjs'
 import { inspectProject } from './project-control.mjs'
+import { areaArtifactToken, deriveAreaArtifactTokens } from '../../src/agent/areaArtifactToken.mjs'
 
 const DIGEST_PATTERN = /^sha256:([a-f0-9]{64})$/
 const HEX_PATTERN = /^[a-f0-9]{64}$/
@@ -12,7 +13,6 @@ const FRAMINGS = new Set(['fit-model', 'fit-area'])
 const UNSAFE_CONTENT = /(?:\b(?:https?|file):\/\/|\bbearer\s+)/i
 const ASCII_PUBLICATION_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const QC_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/
-const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 const STANDARD_MODEL_VIEW_IDS = [
   'model-front', 'model-back', 'model-left', 'model-right',
   'model-front-right', 'model-back-left',
@@ -108,52 +108,17 @@ function assertOpaqueAreaId(value, label = 'QC area id') {
   return value
 }
 
-function stableAreaHash(areaId, seed, reverse = false) {
-  let hash = seed
-  for (let offset = 0; offset < areaId.length; offset += 1) {
-    const index = reverse ? areaId.length - 1 - offset : offset
-    hash ^= areaId.charCodeAt(index)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
-}
-
-function areaFingerprint(areaId, attempt = 0) {
-  const value = attempt === 0 ? areaId : `${areaId}\u0000${attempt}`
-  return `${stableAreaHash(value, 2166136261)}${stableAreaHash(value, 0x9e3779b9, true)}`
-}
-
 export function qcAreaToken(areaId) {
   assertOpaqueAreaId(areaId)
-  if (areaId.length <= 48 && SAFE_TOKEN_PATTERN.test(areaId)) return areaId
-  const stem = areaId.normalize('NFKC')
-    .replace(/[^A-Za-z0-9._-]+/g, '-')
-    .replace(/^[-._]+|[-._]+$/g, '')
-    .slice(0, 31) || 'area'
-  return `${stem}-${areaFingerprint(areaId)}`
+  return areaArtifactToken(areaId)
 }
 
 function deriveQcAreaTokens(areaIds) {
-  const baseTokens = new Map(areaIds.map((areaId) => [areaId, qcAreaToken(areaId)]))
-  const tokens = new Map(baseTokens)
-  const attempts = new Map()
-  for (let pass = 0; pass <= 8; pass += 1) {
-    const groups = new Map()
-    for (const [areaId, token] of tokens) {
-      const key = publicationPathKey(token)
-      groups.set(key, [...(groups.get(key) ?? []), areaId])
-    }
-    const collisions = [...groups.values()].filter((group) => group.length > 1)
-    if (collisions.length === 0) return tokens
-    for (const group of collisions) {
-      for (const areaId of group) {
-        const attempt = (attempts.get(areaId) ?? -1) + 1
-        attempts.set(areaId, attempt)
-        tokens.set(areaId, `${baseTokens.get(areaId).slice(0, 48)}-${areaFingerprint(areaId, attempt)}`)
-      }
-    }
+  try {
+    return deriveAreaArtifactTokens(areaIds)
+  } catch (error) {
+    throw invalid(error instanceof Error ? error.message : 'Invalid QC area token batch')
   }
-  throw invalid('QC area tokens cannot be made publication-safe and unique')
 }
 
 function standardAreaViewId(areaToken, suffix) {
