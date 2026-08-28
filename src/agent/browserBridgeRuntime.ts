@@ -9,7 +9,7 @@ import type { LabelAreaConfig, LabelLayer } from '../label/types'
 import { designAssetReadinessKey, isBakeAssetReadyForArea } from '../label/exportReadiness'
 import { validatePrintReadiness } from '../label/printReadiness'
 import { useLabelStore, useModelStore, useUiStore } from '../state/stores'
-import { createExportBundle, type BrowserArtifact } from './artifactExport'
+import { createAreaChannelArtifacts, createExportBundle, type BrowserArtifact } from './artifactExport'
 import { createAgentBridge, type AgentBridgeBootstrap } from './bridge'
 import {
   captureAgentPreview,
@@ -1253,11 +1253,22 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         restoreReviewUi(uiSnapshot)
       }
     }),
-    exportArtifacts: async () => {
-      await waitForBakes()
+    exportArtifacts: async (input) => {
+      const channelsOnly = input?.artifacts?.length === 1 && input.artifacts[0] === 'channels'
+      await waitForBakes(30_000, channelsOnly ? (area) => area.carrier !== 'bare' : () => true)
       const model = useModelStore.getState()
       const labels = useLabelStore.getState()
       if (!model.glbBytes) throw new Error('No model is loaded')
+      if (channelsOnly) {
+        const channelArtifacts = await createAreaChannelArtifacts(
+          labels.areas.filter((area) => area.carrier !== 'bare'),
+          labels.bakeMap,
+        )
+        const uploaded: ArtifactDescriptor[] = []
+        for (const artifact of channelArtifacts) uploaded.push(await uploadArtifact(bootstrap, artifact))
+        const validation = designValidation()
+        return { artifacts: uploaded, validation, warnings: [] } satisfies ExportManifest
+      }
       const bundle = await createExportBundle({
         glbBytes: model.glbBytes,
         modelName: model.modelName,

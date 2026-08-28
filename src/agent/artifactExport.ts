@@ -84,7 +84,7 @@ export async function createChannelArtifact(
   const canvas = channel === 'white_underbase' ? verifiedWhiteUnderbase : bake[channel]
   if (!canvas) throw new Error(`贴标区域「${area.name}」没有 ${channel} 烘焙通道`)
   return {
-    id: `${area.id}-${channel}`,
+    id: `${sanitizeArtifactBaseName(area.id)}-${channel}`,
     fileName: channel === 'white_underbase' ? 'white-underbase.png' : `${channel}.png`,
     mimeType: 'image/png',
     bytes: await canvasToPngBytes(canvas),

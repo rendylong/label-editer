@@ -226,6 +226,17 @@ export interface GenericShapePaintProps {
   strokeLinearGradientColorStops?: Array<number | string>
 }
 
+function isTransparentShapeFill(fill: string): boolean {
+  const value = fill.trim().toLowerCase().replace(/\s+/g, '')
+  if (value === 'transparent') return true
+  if (/^#[0-9a-f]{3}0$/i.test(value) || /^#[0-9a-f]{6}00$/i.test(value)) return true
+  return /^(?:rgba|hsla)\([^)]*(?:,|\/)0(?:\.0+)?%?\)$/.test(value)
+}
+
+function layerMaskMode(layer: LabelLayer): MaskDrawMode {
+  return layer.kind === 'shape' && isTransparentShapeFill(layer.fill) ? 'stroke' : 'fill'
+}
+
 /** Craft stroke is a presentation override shared by text, image and shape layers. */
 export function craftStrokePaint(layer: {
   craft: CraftEffect[]
@@ -263,7 +274,8 @@ export function genericShapePaintProps(layer: ShapeLayer, foil: CraftEffect | un
     x: gradient.end.x - normalized.width / 2,
     y: gradient.end.y - normalized.height / 2,
   }
-  if (partitions.open.length > 0 && partitions.closed.length === 0) {
+  if (isTransparentShapeFill(normalized.fill)
+    || (partitions.open.length > 0 && partitions.closed.length === 0)) {
     return {
       ...base,
       strokeLinearGradientStartPoint: start,
@@ -541,17 +553,18 @@ function clamp01(value: number): number {
 /** 将用户参数转换为 PBR 通道强度，作为预览与导出的单一规则。 */
 export function layerMaskContributions(layer: LabelLayer): MaskContribution[] {
   const out: MaskContribution[] = []
+  const mode = layerMaskMode(layer)
   const foil = layer.craft.find((effect) => effect.type === 'foil')
-  if (foil) out.push({ channel: 'metalness', tone: 255, mode: 'fill' })
+  if (foil) out.push({ channel: 'metalness', tone: 255, mode })
   const uv = layer.craft.find((effect) => effect.type === 'uv')
   const matte = layer.craft.find((effect) => effect.type === 'matte')
-  if (uv) out.push({ channel: 'roughness', tone: Math.round(8 + 96 * (1 - clamp01(uv.params.gloss ?? 0.5))), mode: 'fill' })
-  else if (foil) out.push({ channel: 'roughness', tone: 42, mode: 'fill' })
-  else if (matte) out.push({ channel: 'roughness', tone: Math.round(217 + 38 * clamp01(matte.params.intensity ?? 0.3)), mode: 'fill' })
+  if (uv) out.push({ channel: 'roughness', tone: Math.round(8 + 96 * (1 - clamp01(uv.params.gloss ?? 0.5))), mode })
+  else if (foil) out.push({ channel: 'roughness', tone: 42, mode })
+  else if (matte) out.push({ channel: 'roughness', tone: Math.round(217 + 38 * clamp01(matte.params.intensity ?? 0.3)), mode })
   const emboss = layer.craft.find((effect) => effect.type === 'emboss')
   const deboss = layer.craft.find((effect) => effect.type === 'deboss')
-  if (emboss) out.push({ channel: 'bump', tone: Math.round(128 + 127 * clamp01((emboss.params.depth ?? 0.08) / 0.4)), mode: 'fill' })
-  else if (deboss) out.push({ channel: 'bump', tone: Math.round(128 - 127 * clamp01((deboss.params.depth ?? 0.08) / 0.4)), mode: 'fill' })
+  if (emboss) out.push({ channel: 'bump', tone: Math.round(128 + 127 * clamp01((emboss.params.depth ?? 0.08) / 0.4)), mode })
+  else if (deboss) out.push({ channel: 'bump', tone: Math.round(128 - 127 * clamp01((deboss.params.depth ?? 0.08) / 0.4)), mode })
   return out
 }
 
@@ -583,7 +596,7 @@ function applyLayerMatteSurface(
   mask.height = height
   const maskContext = mask.getContext('2d')!
   maskContext.clearRect(0, 0, width, height)
-  drawLayer(maskContext, layer, 255, 'fill')
+  drawLayer(maskContext, layer, 255, layerMaskMode(layer))
   const coverage = maskContext.getImageData(0, 0, width, height).data
   const roughImage = roughness.getImageData(0, 0, width, height)
   const bumpImage = bump.getImageData(0, 0, width, height)
@@ -985,7 +998,7 @@ export function renderCarrierMasks(
       let drawFailed = false
       for (const layer of underbaseLayers) {
         try {
-          if (drawLayer(context, layer, 255, 'fill') === false) drawFailed = true
+          if (drawLayer(context, layer, 255, layerMaskMode(layer)) === false) drawFailed = true
         } catch {
           drawFailed = true
         }
@@ -1051,12 +1064,12 @@ export function renderCarrierMasks(
         const context = contexts.get(channel)!
         if (channel === 'whiteUnderbase') {
           try {
-            if (drawLayer(context, layer, 255, 'fill') === false) whiteUnderbaseDrawFailed = true
+            if (drawLayer(context, layer, 255, layerMaskMode(layer)) === false) whiteUnderbaseDrawFailed = true
           } catch {
             whiteUnderbaseDrawFailed = true
           }
         } else {
-          safeDrawLayer(context, layer, channel === 'roughness' ? 0 : 255, 'fill')
+          safeDrawLayer(context, layer, channel === 'roughness' ? 0 : 255, layerMaskMode(layer))
         }
       }
     }

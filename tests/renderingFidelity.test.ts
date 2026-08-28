@@ -703,6 +703,45 @@ describe('形状预览与工艺遮罩保真', () => {
     expect(props?.fillLinearGradientStartPoint).toBeUndefined()
   })
 
+  it('keeps a transparent closed foil frame hollow in color and routes its PBR contribution to the stroke', () => {
+    const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
+    const frame = makeShape({
+      shape: 'rectangle',
+      fill: 'transparent',
+      stroke: '#b76a3a',
+      strokeWidth: 2,
+      craft: [foil],
+    })
+    const props = paintProps?.(frame, foil)
+    const contributions = craft.layerMaskContributions(frame)
+    const mask = drawRecordedShape(frame, contributions[0].mode).mask
+
+    expect(props).toMatchObject({
+      fill: 'transparent',
+      fillPriority: 'color',
+      fillLinearGradientColorStops: [],
+    })
+    expect(props?.fillLinearGradientStartPoint).toBeUndefined()
+    expect(props?.strokeLinearGradientColorStops?.length).toBeGreaterThan(4)
+    expect(contributions).toEqual([
+      { channel: 'metalness', tone: 255, mode: 'stroke' },
+      { channel: 'roughness', tone: 42, mode: 'stroke' },
+    ])
+    expect(mask.paintCalls).toContain('stroke')
+    expect(mask.paintCalls).not.toContain('fill')
+  })
+
+  it('preserves foil fill routing for a filled closed mark', () => {
+    const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
+    const mark = makeShape({ shape: 'ellipse', fill: '#b76a3a', craft: [foil] })
+
+    expect(paintProps?.(mark, foil).fillPriority).toBe('linear-gradient')
+    expect(craft.layerMaskContributions(mark)).toEqual([
+      { channel: 'metalness', tone: 255, mode: 'fill' },
+      { channel: 'roughness', tone: 42, mode: 'fill' },
+    ])
+  })
+
   it.each<ShapeKind>(['star', 'ellipse', 'line'])('%s without foil retains normal fill and stroke colors', (shape) => {
     const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
     expect(paintProps).toBeTypeOf('function')
@@ -1110,27 +1149,40 @@ describe('Task 12 approved Lavira and carrier fixture fidelity', () => {
 
   it('keeps the copper frame bottom open and every contour ellipse exact in renderer draw output', () => {
     const front = renderBlueprintAt(lavira, 1024).find((area) => area.side === 'front')!
+    const back = renderBlueprintAt(lavira, 1024).find((area) => area.side === 'back')!
     const frame = front.layers.find((layer) => layer.id === 'front.frame:open') as ShapeLayer
+    const backFrame = back.layers.find((layer) => layer.id === 'back.frame') as ShapeLayer
     const frameDraw = drawRecordedShape(frame)
+    const backFrameContributions = craft.layerMaskContributions(backFrame)
+    const backFrameDraw = drawRecordedShape(backFrame, backFrameContributions[0].mode)
     const contourLayers = front.layers.filter((layer) => layer.id.startsWith('front.contour.')) as ShapeLayer[]
 
-    expect(frame.pathData).toBe('M 0 56 L 0 0 L 42 0 L 42 56')
+    expect(frame.designMetrics?.boundsMm).toEqual({ x: 2.4, y: 2.4, width: 43.2, height: 57.2 })
+    expect(frame.pathData).toBe('M 0 57.2 L 0 1.2 Q 0 0 1.2 0 L 42 0 Q 43.2 0 43.2 1.2 L 43.2 57.2')
+    expect(frame.pathViewBox).toEqual([0, 0, 43.2, 57.2])
     expect(frame.pathData).not.toMatch(/[zZ]\s*$/)
     expect(frameDraw.preview.pathCalls.some(([operation]) => operation === 'closePath')).toBe(false)
     expect(frameDraw.preview.paintCalls).toEqual(['strokeShape'])
     expect(frameDraw.mask.paintCalls).toContain('stroke')
     expect(frameDraw.mask.paintCalls).not.toContain('fill')
+    expect(backFrame.designMetrics).toMatchObject({
+      boundsMm: { x: 2.4, y: 2.4, width: 45.2, height: 61.2 },
+      cornerRadiusMm: 1.2,
+    })
+    expect(backFrameContributions.every((contribution) => contribution.mode === 'stroke')).toBe(true)
+    expect(backFrameDraw.mask.paintCalls).toContain('stroke')
+    expect(backFrameDraw.mask.paintCalls).not.toContain('fill')
     expect(contourLayers.map((layer) => ({
       bounds: layer.designMetrics?.boundsMm,
       rotation: layer.rotation,
       strokeWidthMm: layer.designMetrics?.strokeWidthMm,
       opacity: layer.opacity,
     }))).toEqual([
-      { bounds: { x: 2, y: 5, width: 44, height: 24 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
-      { bounds: { x: 5, y: 7, width: 38, height: 20 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
-      { bounds: { x: 8, y: 9, width: 32, height: 16 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
-      { bounds: { x: 11, y: 11, width: 26, height: 12 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
-      { bounds: { x: 14, y: 13, width: 20, height: 8 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 1.4, y: 4.6, width: 45.2, height: 35.8 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 4.2, y: 6.6, width: 39.6, height: 31.8 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 7.2, y: 8.6, width: 33.6, height: 27.8 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 10.2, y: 10.8, width: 27.6, height: 23.4 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
+      { bounds: { x: 13.2, y: 13.2, width: 21.6, height: 18.6 }, rotation: -8, strokeWidthMm: 0.2, opacity: 0.26 },
     ])
     expect(contourLayers.every((layer) => {
       const calls = drawRecordedShape(layer).preview.pathCalls

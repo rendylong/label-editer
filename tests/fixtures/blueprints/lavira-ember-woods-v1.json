@@ -39,7 +39,7 @@
         {
           "id": "front.frame:open",
           "kind": "shape",
-          "boundsMm": { "x": 3, "y": 3, "width": 42, "height": 56 },
+          "boundsMm": { "x": 2.4, "y": 2.4, "width": 43.2, "height": 57.2 },
           "anchor": "top_left",
           "rotation": 0,
           "opacity": 0.9,
@@ -49,8 +49,8 @@
             { "process": "hot_stamp_foil", "spotName": "COPPER_FOIL_PLACEHOLDER", "requiredMask": "metalness" }
           ],
           "shape": "path",
-          "pathData": "M 0 56 L 0 0 L 42 0 L 42 56",
-          "pathViewBox": [0, 0, 42, 56],
+          "pathData": "M 0 57.2 L 0 1.2 Q 0 0 1.2 0 L 42 0 Q 43.2 0 43.2 1.2 L 43.2 57.2",
+          "pathViewBox": [0, 0, 43.2, 57.2],
           "fillRule": "nonzero",
           "fill": "transparent",
           "stroke": "#B76A3A",
@@ -59,7 +59,7 @@
         {
           "id": "front.contour.01",
           "kind": "shape",
-          "boundsMm": { "x": 2, "y": 5, "width": 44, "height": 24 },
+          "boundsMm": { "x": 1.4, "y": 4.6, "width": 45.2, "height": 35.8 },
           "anchor": "center",
           "rotation": -8,
           "opacity": 0.26,
@@ -76,7 +76,7 @@
         {
           "id": "front.contour.02",
           "kind": "shape",
-          "boundsMm": { "x": 5, "y": 7, "width": 38, "height": 20 },
+          "boundsMm": { "x": 4.2, "y": 6.6, "width": 39.6, "height": 31.8 },
           "anchor": "center",
           "rotation": -8,
           "opacity": 0.26,
@@ -93,7 +93,7 @@
         {
           "id": "front.contour.03",
           "kind": "shape",
-          "boundsMm": { "x": 8, "y": 9, "width": 32, "height": 16 },
+          "boundsMm": { "x": 7.2, "y": 8.6, "width": 33.6, "height": 27.8 },
           "anchor": "center",
           "rotation": -8,
           "opacity": 0.26,
@@ -110,7 +110,7 @@
         {
           "id": "front.contour.04",
           "kind": "shape",
-          "boundsMm": { "x": 11, "y": 11, "width": 26, "height": 12 },
+          "boundsMm": { "x": 10.2, "y": 10.8, "width": 27.6, "height": 23.4 },
           "anchor": "center",
           "rotation": -8,
           "opacity": 0.26,
@@ -127,7 +127,7 @@
         {
           "id": "front.contour.05",
           "kind": "shape",
-          "boundsMm": { "x": 14, "y": 13, "width": 20, "height": 8 },
+          "boundsMm": { "x": 13.2, "y": 13.2, "width": 21.6, "height": 18.6 },
           "anchor": "center",
           "rotation": -8,
           "opacity": 0.26,
@@ -362,7 +362,7 @@
         {
           "id": "back.frame",
           "kind": "shape",
-          "boundsMm": { "x": 3, "y": 3, "width": 44, "height": 60 },
+          "boundsMm": { "x": 2.4, "y": 2.4, "width": 45.2, "height": 61.2 },
           "anchor": "top_left",
           "rotation": 0,
           "opacity": 0.9,

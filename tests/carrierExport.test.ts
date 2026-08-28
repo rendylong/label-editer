@@ -197,6 +197,21 @@ describe('carrier-aware channel export', () => {
     expect(buildPrintManifest(target, { color: canvas(1), whiteUnderbase: canvas(5) }).separations).not.toContain('white_underbase')
   })
 
+  it('publishes portable channel ids for blueprint area ids containing separators', async () => {
+    const target = { ...area('foil_or_ink_only'), id: 'carrier.foil:sparse', name: 'Sparse foil' }
+    const artifacts = await createAreaChannelArtifacts([target], {
+      'carrier.foil:sparse': { color: canvas(8), metalness: canvas(8), roughness: canvas(8), bump: canvas(8) },
+    })
+
+    expect(artifacts.map((artifact) => artifact.id)).toEqual([
+      'carrier.foil-sparse-color',
+      'carrier.foil-sparse-metalness',
+      'carrier.foil-sparse-roughness',
+      'carrier.foil-sparse-bump',
+    ])
+    expect(artifacts.every((artifact) => /^[A-Za-z0-9._-]+$/.test(artifact.id))).toBe(true)
+  })
+
   it('rejects an injected unproven white-underbase canvas despite a current declaration', async () => {
     const target = area('clear_label', [whiteLayer()])
     const bake = { color: canvas(1), whiteUnderbase: canvas(5) }

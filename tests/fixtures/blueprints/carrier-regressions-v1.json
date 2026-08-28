@@ -162,7 +162,8 @@
           "visible": true,
           "zIndex": 0,
           "processes": [
-            { "process": "hot_stamp_foil", "spotName": "FOIL_COPPER", "requiredMask": "metalness" }
+            { "process": "hot_stamp_foil", "spotName": "FOIL_COPPER", "requiredMask": "metalness" },
+            { "process": "emboss", "spotName": "FOIL_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
           ],
           "shape": "path",
           "pathData": "M 0 15 L 0 0 L 22 0 L 22 15",
@@ -182,7 +183,8 @@
           "visible": true,
           "zIndex": 1,
           "processes": [
-            { "process": "hot_stamp_foil", "spotName": "FOIL_COPPER", "requiredMask": "metalness" }
+            { "process": "hot_stamp_foil", "spotName": "FOIL_COPPER", "requiredMask": "metalness" },
+            { "process": "emboss", "spotName": "FOIL_EMBOSS_PLACEHOLDER", "requiredMask": "bump" }
           ],
           "text": "FOIL ONLY",
           "language": "en",

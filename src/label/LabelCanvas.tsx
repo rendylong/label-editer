@@ -549,8 +549,7 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                     anchor: layer.designMetrics?.anchor,
                   })
               const foilProps = textLayout ? foilFillProps(foil, textLayout.width, textLayout.height) : foilFillProps(undefined, 1, 1)
-              const shapeFoilProps = shapeLayout ? foilFillProps(foil, shapeLayout.width, shapeLayout.height) : null
-              const genericShapePaint = shapeLayout && layer.kind === 'shape' && layer.shape !== 'rectangle'
+              const genericShapePaint = shapeLayout && layer.kind === 'shape'
                 ? genericShapePaintProps(shapeLayout, foil)
                 : null
               const relief = emboss ?? deboss
@@ -645,10 +644,13 @@ export function LabelCanvas({ displayWidth, readOnly = false }: Props): React.JS
                       {...rectangleRenderProps(layer)}
                       stroke={strokePaint.stroke}
                       strokeWidth={strokePaint.strokeWidth}
-                      fillPriority={shapeFoilProps?.fillPriority}
-                      fillLinearGradientStartPoint={shapeFoilProps?.fillLinearGradientStartPoint}
-                      fillLinearGradientEndPoint={shapeFoilProps?.fillLinearGradientEndPoint}
-                      fillLinearGradientColorStops={shapeFoilProps?.fillLinearGradientColorStops}
+                      fillPriority={genericShapePaint?.fillPriority}
+                      fillLinearGradientStartPoint={genericShapePaint?.fillLinearGradientStartPoint}
+                      fillLinearGradientEndPoint={genericShapePaint?.fillLinearGradientEndPoint}
+                      fillLinearGradientColorStops={genericShapePaint?.fillLinearGradientColorStops}
+                      strokeLinearGradientStartPoint={genericShapePaint?.strokeLinearGradientStartPoint}
+                      strokeLinearGradientEndPoint={genericShapePaint?.strokeLinearGradientEndPoint}
+                      strokeLinearGradientColorStops={genericShapePaint?.strokeLinearGradientColorStops}
                       shadowColor={emboss ? 'rgba(0,0,0,0.35)' : deboss ? 'rgba(255,255,255,0.3)' : 'transparent'}
                       shadowOffsetX={Math.cos(reliefAngle) * reliefDepth * reliefSign}
                       shadowOffsetY={Math.sin(reliefAngle) * reliefDepth * reliefSign}

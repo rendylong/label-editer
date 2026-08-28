@@ -8,7 +8,9 @@ import type {
 } from '../label/types'
 import type { PhysicalBounds } from '../agent/designContracts'
 
-const ASPECT_EPSILON = 1e-9
+// Target UVs and their measured UV→geometry Jacobian are Float32. Treat one
+// part per million as numerical equality while still blocking visible stretch.
+const ASPECT_EPSILON = 1e-6
 
 type LayerAnchor = LayerDesignMetrics['anchor']
 

@@ -33,8 +33,15 @@ const laviraModelPath = '/Users/apple/realibox/cosmetic-bottles-glb/07_luxury_pe
 const laviraMockupPath = '/Users/apple/realibox/cosmetic-bottles-glb/lavira-ember-woods-20260826/label-mockup.html'
 const laviraBlueprintPath = path.resolve('tests/fixtures/blueprints/lavira-ember-woods-v1.json')
 const carrierBlueprintPath = path.resolve('tests/fixtures/blueprints/carrier-regressions-v1.json')
-const runTask12E2E = existsSync(laviraModelPath) && existsSync(laviraMockupPath)
+// The 4096 browser bake is an external-fixture stress test and must not contend
+// with the parallel unit suite. Run it deliberately, like the existing live E2E.
+const runTask12E2E = process.env.GLB_LABEL_TASK12_E2E === '1'
+  && existsSync(laviraModelPath) && existsSync(laviraMockupPath)
   && existsSync(laviraBlueprintPath) && existsSync(carrierBlueprintPath)
+// The source UVs are Float32 and the surface aspect comes from the median UV→geometry
+// Jacobian. One part per million is strict enough to catch a physical-layout mismatch
+// without pretending repeated remaps can recover precision that is absent in the GLB.
+const TASK12_ASPECT_TOLERANCE = 1e-6
 
 function hash(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -94,7 +101,7 @@ async function task12Shells(blueprint: LayoutBlueprintV1) {
     remap.offset = back ? 0.25 : 0.75
     remap.mirrorU = false
     let uWidth = sourceRange.uWidth * artboardAspect / sourceRange.aspect
-    for (let iteration = 0; iteration < 3; iteration += 1) {
+    for (let iteration = 0; iteration < 8; iteration += 1) {
       const candidate = {
         uStart: centerU - uWidth / 2,
         uWidth,
@@ -102,8 +109,18 @@ async function task12Shells(blueprint: LayoutBlueprintV1) {
         vHeight: sourceRange.vHeight,
       }
       const actualAspect = computeLabelSetup(mesh, remap, candidate, 'overlay').spec.aspect
-      if (Math.abs(actualAspect - artboardAspect) <= 1e-10) break
+      if (Math.abs(actualAspect - artboardAspect) <= TASK12_ASPECT_TOLERANCE) break
       uWidth *= artboardAspect / actualAspect
+    }
+    const range = {
+      uStart: centerU - uWidth / 2,
+      uWidth,
+      vStart: sourceRange.vStart,
+      vHeight: sourceRange.vHeight,
+    }
+    const actualAspect = computeLabelSetup(mesh, remap, range, 'overlay').spec.aspect
+    if (Math.abs(actualAspect - artboardAspect) > TASK12_ASPECT_TOLERANCE) {
+      throw new Error(`Task 12 UV aspect mismatch for ${area.id}: ${actualAspect} != ${artboardAspect}`)
     }
     return {
       blueprintAreaId: area.id,
@@ -111,14 +128,68 @@ async function task12Shells(blueprint: LayoutBlueprintV1) {
       target: { stableSelector: 'mesh:1/node:6' },
       surfaceMode: 'overlay' as const,
       // Preserve the evidence placement center/height while narrowing the UV span to the exact physical artboard aspect.
-      range: {
-        uStart: centerU - uWidth / 2,
-        uWidth,
-        vStart: sourceRange.vStart,
-        vHeight: sourceRange.vHeight,
-      },
+      range,
       remap: { mode: 'cylindrical' as const, wrap: 1, offset: back ? 0.25 : 0.75, mirrorU: false },
     }
+  })
+}
+
+async function task12ProjectAreas(
+  blueprint: LayoutBlueprintV1,
+  options: {
+    bakeWidth?: number
+    binding?: { blueprintRevision: string; blueprintSha256: string; reviewManifestSha256: string }
+    shells?: Awaited<ReturnType<typeof task12Shells>>
+  } = {},
+) {
+  const areas = compileBlueprintToSpecAreas(blueprint, options.shells ?? await task12Shells(blueprint))
+  if (options.binding) for (const area of areas) area.designBinding = { ...options.binding }
+  const { mesh, mirrored, frontDirection } = await task12Geometry()
+  return areas.map((area) => {
+    const artboard = area.artboard
+    if (!artboard) throw new Error(`Compiled Task 12 area is missing its physical artboard: ${area.id}`)
+    const remap = makeDefaultRemap(mesh, mirrored, frontDirection)
+    const requestedRemap = area.remap as {
+      mode?: 'auto' | 'cylindrical' | 'planar'
+      wrap?: number
+      offset?: number
+      mirrorU?: boolean
+    } | undefined
+    if (requestedRemap?.mode && requestedRemap.mode !== 'auto') remap.mode = requestedRemap.mode
+    if (requestedRemap?.wrap !== undefined) remap.wrap = requestedRemap.wrap
+    if (requestedRemap?.offset !== undefined) remap.offset = requestedRemap.offset
+    if (requestedRemap?.mirrorU !== undefined) remap.mirrorU = requestedRemap.mirrorU
+    const setup = computeLabelSetup(mesh, remap, area.range, 'overlay')
+    const physicalAspect = artboard.widthMm / artboard.heightMm
+    if (Math.abs(setup.spec.aspect - physicalAspect) > TASK12_ASPECT_TOLERANCE) {
+      throw new Error(`Task 12 canvas aspect mismatch for ${area.id}: ${setup.spec.aspect} != ${physicalAspect}`)
+    }
+    const bakeWidth = options.bakeWidth
+      ?? (artboard.widthMm === 50 && artboard.heightMm === 66 ? 513 : 512)
+    const base = {
+      id: area.id,
+      name: area.name,
+      meshIndex: 1,
+      nodeName: 'Circle.002_Logo_0',
+      surfaceMode: 'overlay' as const,
+      side: area.side,
+      remap,
+      range: structuredClone(area.range),
+      canvas: {
+        width: bakeWidth,
+        height: canonicalRasterHeight(bakeWidth, setup.spec.aspect),
+        aspect: setup.spec.aspect,
+      },
+      axisMin: setup.axisMin,
+      axisMax: setup.axisMax,
+      layers: [],
+      globalCraft: { craft: [] },
+      fonts: [],
+      referenceVisible: false,
+      undoStack: [],
+      redoStack: [],
+    }
+    return applyStructuredLabelSpec(base, { version: 2, areas: [area] }, area.id).areas[0]
   })
 }
 
@@ -145,56 +216,12 @@ async function prepareTask12Package(
   const designManifestBytes = await readFile(designManifestPath)
   const blueprintSha256 = hash(blueprintBytes)
   const designManifestSha256 = hash(designManifestBytes)
-  const areas = compileBlueprintToSpecAreas(blueprint, await task12Shells(blueprint))
-  for (const area of areas) {
-    area.designBinding = {
+  const projectAreas = await task12ProjectAreas(blueprint, {
+    binding: {
       blueprintRevision: blueprint.revision,
       blueprintSha256,
       reviewManifestSha256: designManifestSha256,
-    }
-  }
-  const { mesh, mirrored, frontDirection } = await task12Geometry()
-  const projectAreas = areas.map((area) => {
-    const artboard = area.artboard
-    if (!artboard) throw new Error(`Compiled Task 12 area is missing its physical artboard: ${area.id}`)
-    const remap = makeDefaultRemap(mesh, mirrored, frontDirection)
-    const requestedRemap = area.remap as {
-      mode?: 'auto' | 'cylindrical' | 'planar'
-      wrap?: number
-      offset?: number
-      mirrorU?: boolean
-    } | undefined
-    if (requestedRemap?.mode && requestedRemap.mode !== 'auto') remap.mode = requestedRemap.mode
-    if (requestedRemap?.wrap !== undefined) remap.wrap = requestedRemap.wrap
-    if (requestedRemap?.offset !== undefined) remap.offset = requestedRemap.offset
-    if (requestedRemap?.mirrorU !== undefined) remap.mirrorU = requestedRemap.mirrorU
-    const setup = computeLabelSetup(mesh, remap, area.range, 'overlay')
-    const targetAspect = artboard.widthMm / artboard.heightMm
-    const bakeWidth = artboard.widthMm === 50 && artboard.heightMm === 66 ? 513 : 512
-    const base = {
-      id: area.id,
-      name: area.name,
-      meshIndex: 1,
-      nodeName: 'Circle.002_Logo_0',
-      surfaceMode: 'overlay' as const,
-      side: area.side,
-      remap,
-      range: structuredClone(area.range),
-      canvas: {
-        width: bakeWidth,
-        height: canonicalRasterHeight(bakeWidth, targetAspect),
-        aspect: targetAspect,
-      },
-      axisMin: setup.axisMin,
-      axisMax: setup.axisMax,
-      layers: [],
-      globalCraft: { craft: [] },
-      fonts: [],
-      referenceVisible: false,
-      undoStack: [],
-      redoStack: [],
-    }
-    return applyStructuredLabelSpec(base, { version: 2, areas: [area] }, area.id).areas[0]
+    },
   })
   const spec = serializeLabelProject(path.basename(laviraModelPath), projectAreas)
   const inputBytes = Buffer.from(`${JSON.stringify(spec, null, 2)}\n`)
@@ -304,9 +331,20 @@ async function browserPngStats(filePaths: string[]): Promise<Array<{
   height: number
   transparent: number
   opaque: number
+  visible: number
+  charcoal: number
+  copper: number
+  light: number
+  black: number
+  white: number
+  neutral128: number
+  notNeutral128: number
   colorBuckets: number
   corners: number[][]
   center: number[]
+  regions: Record<'topFrame' | 'leftFrame' | 'bottomCenter' | 'upperArtwork', {
+    pixels: number; visible: number; charcoal: number; copper: number; light: number
+  }>
 }>> {
   const browser = await chromium.launch({ headless: true })
   try {
@@ -326,10 +364,29 @@ async function browserPngStats(filePaths: string[]): Promise<Array<{
         const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data
         let transparent = 0
         let opaque = 0
+        let visible = 0
+        let charcoal = 0
+        let copper = 0
+        let light = 0
+        let black = 0
+        let white = 0
+        let neutral128 = 0
+        let notNeutral128 = 0
         const buckets = new Set<number>()
         for (let offset = 0; offset < pixels.length; offset += 4) {
-          if (pixels[offset + 3] === 0) transparent += 1
-          if (pixels[offset + 3] === 255) opaque += 1
+          const [red, green, blue, alpha] = pixels.slice(offset, offset + 4)
+          if (alpha === 0) transparent += 1
+          if (alpha === 255) opaque += 1
+          if (alpha > 0) {
+            visible += 1
+            if (red < 55 && green < 55 && blue < 55) charcoal += 1
+            if (red >= 90 && red > green * 1.15 && green > blue * 1.05) copper += 1
+            if (red > 135 && green > 125 && blue > 105) light += 1
+            if (red < 10 && green < 10 && blue < 10) black += 1
+            if (red > 245 && green > 245 && blue > 245) white += 1
+            if (Math.abs(red - 128) <= 2 && Math.abs(green - 128) <= 2 && Math.abs(blue - 128) <= 2) neutral128 += 1
+            if (Math.abs(red - 128) > 5 || Math.abs(green - 128) > 5 || Math.abs(blue - 128) > 5) notNeutral128 += 1
+          }
           buckets.add((pixels[offset] >> 5) << 12 | (pixels[offset + 1] >> 5) << 8
             | (pixels[offset + 2] >> 5) << 4 | (pixels[offset + 3] >> 6))
         }
@@ -337,17 +394,53 @@ async function browserPngStats(filePaths: string[]): Promise<Array<{
           const offset = (y * canvas.width + x) * 4
           return Array.from(pixels.slice(offset, offset + 4))
         }
+        const region = (x0: number, y0: number, x1: number, y1: number) => {
+          const startX = Math.floor(canvas.width * x0)
+          const startY = Math.floor(canvas.height * y0)
+          const endX = Math.ceil(canvas.width * x1)
+          const endY = Math.ceil(canvas.height * y1)
+          const result = { pixels: 0, visible: 0, charcoal: 0, copper: 0, light: 0 }
+          for (let y = startY; y < endY; y += 1) for (let x = startX; x < endX; x += 1) {
+            const offset = (y * canvas.width + x) * 4
+            const red = pixels[offset]
+            const green = pixels[offset + 1]
+            const blue = pixels[offset + 2]
+            const alpha = pixels[offset + 3]
+            result.pixels += 1
+            if (alpha > 0) {
+              result.visible += 1
+              if (red < 55 && green < 55 && blue < 55) result.charcoal += 1
+              if (red >= 90 && red > green * 1.15 && green > blue * 1.05) result.copper += 1
+              if (red > 135 && green > 125 && blue > 105) result.light += 1
+            }
+          }
+          return result
+        }
         return {
           width: canvas.width,
           height: canvas.height,
           transparent,
           opaque,
+          visible,
+          charcoal,
+          copper,
+          light,
+          black,
+          white,
+          neutral128,
+          notNeutral128,
           colorBuckets: buckets.size,
           corners: [
             at(0, 0), at(canvas.width - 1, 0),
             at(0, canvas.height - 1), at(canvas.width - 1, canvas.height - 1),
           ],
           center: at(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2)),
+          regions: {
+            topFrame: region(0.1, 0.025, 0.9, 0.065),
+            leftFrame: region(0.035, 0.2, 0.075, 0.85),
+            bottomCenter: region(0.1, 0.93, 0.9, 0.98),
+            upperArtwork: region(0.08, 0.08, 0.92, 0.62),
+          },
         }
       }, png))
     }
@@ -389,6 +482,66 @@ async function browserHtmlFacts(html: string, areaId: string) {
     }, areaId)
   } finally {
     await browser.close()
+  }
+}
+
+function bridgeData<T>(result: { ok?: boolean; data?: T; error?: { code?: string; message?: string } }, stage: string): T {
+  if (result.ok !== true || result.data === undefined) {
+    throw new Error(`${stage} failed: ${result.error?.code ?? 'UNKNOWN'} ${result.error?.message ?? ''}`)
+  }
+  return result.data
+}
+
+async function task12NativeChannelExport(
+  runtime: Awaited<ReturnType<typeof createPluginRuntime>>,
+  project: ReturnType<typeof serializeLabelProject>,
+  outputRoot: string,
+) {
+  const session = await runtime.createSession({ glbPath: laviraModelPath })
+  const call = async (method: string, input: unknown) => {
+    let lastError: unknown
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        return await runtime.callBridge(session, method, input)
+      } catch (error) {
+        lastError = error
+        if (!(error instanceof Error) || !error.message.includes('Agent Bridge is unavailable')) throw error
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+    }
+    throw lastError
+  }
+  try {
+    bridgeData(await call('loadModel', { name: session.modelName, url: session.inputUrl }), 'load model')
+    const applied = bridgeData<{ project: ReturnType<typeof serializeLabelProject> }>(
+      await call('applyProject', { project }),
+      'apply native project',
+    )
+    const exported = bridgeData<{ artifacts: Array<{
+      id: string; areaId?: string; channel?: string; width?: number; height?: number; sha256: string
+    }> }>(
+      await call('exportArtifacts', { artifacts: ['channels'] }),
+      'export native channels',
+    )
+    expect(exported.artifacts.length).toBeGreaterThan(0)
+    expect(exported.artifacts.every((artifact) => artifact.areaId && artifact.channel)).toBe(true)
+    const uploaded = runtime.getArtifacts(session.id)
+    const files = new Map<string, string>()
+    for (const descriptor of exported.artifacts) {
+      const artifact = uploaded.find((candidate: { id: string }) => candidate.id === descriptor.id)
+      if (!artifact) throw new Error(`Missing native channel bytes: ${descriptor.id}`)
+      const areaToken = String(descriptor.areaId).replace(/[^A-Za-z0-9._-]+/g, '-')
+      const filePath = path.join(outputRoot, areaToken, `${descriptor.channel}.png`)
+      await mkdir(path.dirname(filePath), { recursive: true })
+      await writeFile(filePath, artifact.bytes)
+      expect(hash(artifact.bytes)).toBe(descriptor.sha256)
+      expect(Buffer.from(artifact.bytes).readUInt32BE(16)).toBe(descriptor.width)
+      expect(Buffer.from(artifact.bytes).readUInt32BE(20)).toBe(descriptor.height)
+      files.set(`${descriptor.areaId}:${descriptor.channel}`, filePath)
+    }
+    return { project: applied.project, artifacts: exported.artifacts, files }
+  } finally {
+    await runtime.disposeSession(session.id)
   }
 }
 
@@ -478,6 +631,201 @@ function reviewEvidenceFixture(): { spec: Record<string, unknown>; request: Revi
 }
 
 describe('GLB label plugin E2E', () => {
+  it.runIf(runTask12E2E)('renders native Lavira 1024/4096 bakes and every carrier channel through real Konva in Chromium', async () => {
+    const evidenceRoot = await task12PackageRoot()
+    const [laviraBlueprint, carrierBlueprint] = await Promise.all([
+      readFile(laviraBlueprintPath, 'utf8').then((value) => JSON.parse(value) as LayoutBlueprintV1),
+      readFile(carrierBlueprintPath, 'utf8').then((value) => JSON.parse(value) as LayoutBlueprintV1),
+    ])
+    const [laviraShells, carrierShells] = await Promise.all([
+      task12Shells(laviraBlueprint), task12Shells(carrierBlueprint),
+    ])
+    const [lavira1024Areas, lavira4096Areas, carrierAreas] = await Promise.all([
+      task12ProjectAreas(laviraBlueprint, { bakeWidth: 1024, shells: laviraShells }),
+      task12ProjectAreas(laviraBlueprint, { bakeWidth: 4096, shells: laviraShells }),
+      task12ProjectAreas(carrierBlueprint, { bakeWidth: 256, shells: carrierShells }),
+    ])
+    const lavira1024 = serializeLabelProject(path.basename(laviraModelPath), lavira1024Areas)
+    const lavira4096 = serializeLabelProject(
+      path.basename(laviraModelPath),
+      lavira4096Areas.filter((area) => area.id === 'lavira.front:approved'),
+    )
+    const carriers = serializeLabelProject(path.basename(laviraModelPath), carrierAreas)
+    expect(lavira1024.areas.map((area) => area.canvas)).toEqual([
+      { width: 1024, height: 1323, aspect: expect.closeTo(48 / 62, 6) },
+      { width: 1024, height: 1352, aspect: expect.closeTo(50 / 66, 6) },
+    ])
+    expect(lavira4096.areas[0].canvas).toEqual({
+      width: 4096, height: 5291, aspect: expect.closeTo(48 / 62, 6),
+    })
+    for (const project of [lavira1024, lavira4096]) {
+      const copy = project.areas.flatMap((area) => area.layers)
+        .filter((layer) => layer.kind === 'text')
+        .map((layer) => layer.kind === 'text' ? layer.text : '')
+      expect(copy).toEqual(expect.arrayContaining(['LAVIRA', '余烬森林', 'EMBER WOODS']))
+      expect(copy).not.toContain('烬木之息')
+    }
+
+    const runtime = await createPluginRuntime({
+      allowedRoots: [process.cwd(), path.dirname(laviraModelPath), evidenceRoot],
+    })
+    try {
+      const carrierResult = await task12NativeChannelExport(
+        runtime, carriers, path.join(evidenceRoot, 'native-carriers-256'),
+      )
+      expect(carrierResult.artifacts.some((artifact) => artifact.areaId === 'carrier.bare:front')).toBe(false)
+      expect(new Set(carrierResult.artifacts.map((artifact) => artifact.areaId))).toEqual(new Set([
+        'carrier.direct:curved', 'carrier.applied:paper',
+        'carrier.clear:selective-white', 'carrier.foil:marks-only',
+      ]))
+
+      const lavira1024Result = await task12NativeChannelExport(
+        runtime, lavira1024, path.join(evidenceRoot, 'native-lavira-1024'),
+      )
+      const lavira4096Result = await task12NativeChannelExport(
+        runtime, lavira4096, path.join(evidenceRoot, 'native-lavira-4096'),
+      )
+      expect(lavira1024Result.artifacts.filter((artifact) => artifact.channel === 'color'))
+        .toEqual(expect.arrayContaining([
+          expect.objectContaining({ areaId: 'lavira.front:approved', width: 1024, height: 1323 }),
+          expect.objectContaining({ areaId: 'lavira.back:approved', width: 1024, height: 1352 }),
+        ]))
+      expect(lavira4096Result.artifacts.filter((artifact) => artifact.channel === 'color')).toEqual([
+        expect.objectContaining({ areaId: 'lavira.front:approved', width: 4096, height: 5291 }),
+      ])
+
+      const carrierKeys = [
+        'carrier.direct:curved:color',
+        'carrier.applied:paper:color',
+        'carrier.applied:paper:metalness',
+        'carrier.applied:paper:roughness',
+        'carrier.applied:paper:bump',
+        'carrier.clear:selective-white:color',
+        'carrier.clear:selective-white:white_underbase',
+        'carrier.foil:marks-only:color',
+        'carrier.foil:marks-only:metalness',
+        'carrier.foil:marks-only:roughness',
+        'carrier.foil:marks-only:bump',
+      ]
+      expect([...carrierResult.files.keys()].sort()).toEqual([...carrierKeys].sort())
+      const carrierStats = await browserPngStats(carrierKeys.map((key) => carrierResult.files.get(key)!))
+      const byCarrierKey = new Map(carrierKeys.map((key, index) => [key, carrierStats[index]]))
+      const carrierPixels = 256 * 256
+      const directColor = byCarrierKey.get('carrier.direct:curved:color')!
+      expect(directColor.transparent).toBeGreaterThan(carrierPixels / 2)
+      expect(directColor.copper).toBeGreaterThan(100)
+      expect(directColor.light).toBeGreaterThan(100)
+      const appliedColor = byCarrierKey.get('carrier.applied:paper:color')!
+      expect(appliedColor.opaque).toBeGreaterThan(carrierPixels * 0.95)
+      expect(appliedColor.transparent).toBeGreaterThan(0)
+      expect(appliedColor.light).toBeGreaterThan(carrierPixels / 2)
+      expect(appliedColor.charcoal).toBeGreaterThan(100)
+      for (const channel of ['metalness', 'roughness', 'bump'] as const) {
+        const stats = byCarrierKey.get(`carrier.applied:paper:${channel}`)!
+        expect(stats.opaque).toBe(carrierPixels)
+        expect(stats.colorBuckets).toBe(1)
+      }
+      const clearColor = byCarrierKey.get('carrier.clear:selective-white:color')!
+      const clearWhite = byCarrierKey.get('carrier.clear:selective-white:white_underbase')!
+      expect(clearColor.transparent).toBeGreaterThan(carrierPixels / 2)
+      expect(clearColor.copper).toBeGreaterThan(1_000)
+      expect(clearWhite.black).toBeGreaterThan(carrierPixels / 2)
+      expect(clearWhite.white).toBeGreaterThan(1_000)
+      const foilColor = byCarrierKey.get('carrier.foil:marks-only:color')!
+      const foilMetal = byCarrierKey.get('carrier.foil:marks-only:metalness')!
+      const foilRough = byCarrierKey.get('carrier.foil:marks-only:roughness')!
+      const foilBump = byCarrierKey.get('carrier.foil:marks-only:bump')!
+      expect(foilColor.transparent).toBeGreaterThan(carrierPixels / 2)
+      expect(foilColor.copper).toBeGreaterThan(100)
+      expect(foilMetal.black).toBeGreaterThan(carrierPixels / 2)
+      expect(foilMetal.white).toBeGreaterThan(100)
+      expect(foilRough.white).toBeGreaterThan(carrierPixels / 2)
+      expect(foilRough.charcoal).toBeGreaterThan(100)
+      expect(foilBump.neutral128).toBeGreaterThan(carrierPixels / 2)
+      expect(foilBump.notNeutral128).toBeGreaterThan(100)
+
+      const laviraKeys = [
+        'lavira.front:approved:color', 'lavira.front:approved:metalness',
+        'lavira.front:approved:roughness', 'lavira.front:approved:bump',
+        'lavira.back:approved:color', 'lavira.back:approved:metalness',
+        'lavira.back:approved:roughness', 'lavira.back:approved:bump',
+      ]
+      expect([...lavira1024Result.files.keys()].sort()).toEqual([...laviraKeys].sort())
+      const front4096Keys = laviraKeys.filter((key) => key.startsWith('lavira.front:'))
+      expect([...lavira4096Result.files.keys()].sort()).toEqual([...front4096Keys].sort())
+      const [front1024Stats, front4096Stats, back1024Stats] = await browserPngStats([
+        lavira1024Result.files.get('lavira.front:approved:color')!,
+        lavira4096Result.files.get('lavira.front:approved:color')!,
+        lavira1024Result.files.get('lavira.back:approved:color')!,
+      ])
+      for (const stats of [front1024Stats, front4096Stats]) {
+        expect(stats.opaque).toBeGreaterThan(stats.width * stats.height * 0.98)
+        expect(stats.transparent).toBeGreaterThan(0)
+        expect(stats.charcoal).toBeGreaterThan(stats.width * stats.height * 0.65)
+        expect(stats.copper).toBeGreaterThan(1_000)
+        expect(stats.light).toBeGreaterThan(1_000)
+        expect(stats.regions.topFrame.copper).toBeGreaterThan(0)
+        expect(stats.regions.leftFrame.copper).toBeGreaterThan(0)
+        expect(stats.regions.bottomCenter.copper).toBeLessThan(stats.regions.topFrame.copper / 10)
+        expect(stats.regions.upperArtwork.light).toBeGreaterThan(100)
+      }
+      const normalized = (value: number, stats: { width: number; height: number }) => value / (stats.width * stats.height)
+      expect(Math.abs(normalized(front1024Stats.copper, front1024Stats)
+        - normalized(front4096Stats.copper, front4096Stats))).toBeLessThan(0.003)
+      expect(Math.abs(normalized(front1024Stats.light, front1024Stats)
+        - normalized(front4096Stats.light, front4096Stats))).toBeLessThan(0.003)
+      expect(back1024Stats.opaque).toBeGreaterThan(back1024Stats.width * back1024Stats.height * 0.98)
+      expect(back1024Stats.transparent).toBeGreaterThan(0)
+      expect(back1024Stats.charcoal).toBeGreaterThan(back1024Stats.width * back1024Stats.height * 0.8)
+      expect(back1024Stats.copper).toBeGreaterThan(1_000)
+      expect(back1024Stats.copper).toBeLessThan(back1024Stats.width * back1024Stats.height * 0.08)
+      expect(back1024Stats.center.slice(0, 3).every((channel) => channel < 55)).toBe(true)
+
+      for (const [result, areaId] of [
+        [lavira1024Result, 'lavira.front:approved'],
+        [lavira1024Result, 'lavira.back:approved'],
+        [lavira4096Result, 'lavira.front:approved'],
+      ] as const) {
+        const [metal, rough, bump] = await browserPngStats([
+          result.files.get(`${areaId}:metalness`)!,
+          result.files.get(`${areaId}:roughness`)!,
+          result.files.get(`${areaId}:bump`)!,
+        ])
+        expect(metal.black).toBeGreaterThan(0)
+        expect(metal.white).toBeGreaterThan(0)
+        expect(rough.light).toBeGreaterThan(0)
+        expect(rough.colorBuckets).toBeGreaterThan(1)
+        expect(bump.neutral128).toBeGreaterThan(0)
+        if (areaId === 'lavira.back:approved') {
+          expect(bump.neutral128).toBe(bump.width * bump.height)
+          expect(bump.notNeutral128).toBe(0)
+        } else {
+          expect(bump.notNeutral128).toBeGreaterThan(0)
+        }
+      }
+
+      const parityReviewDir = path.join(evidenceRoot, 'native-parity-design-review')
+      await renderDesignReview({
+        blueprintPath: laviraBlueprintPath,
+        outputDir: parityReviewDir,
+        width: 960,
+        height: 720,
+        pxPerMm: 5,
+        createdAt: '2026-08-28T00:00:00.000Z',
+      })
+      const [reviewBackStats] = await browserPngStats([
+        path.join(parityReviewDir, 'areas/lavira.back-approved.png'),
+      ])
+      expect(reviewBackStats.center.slice(0, 3).every((channel) => channel < 55)).toBe(true)
+      expect(reviewBackStats.copper).toBeGreaterThan(100)
+      expect(reviewBackStats.copper).toBeLessThan(reviewBackStats.width * reviewBackStats.height * 0.08)
+      expect(Math.abs(normalized(back1024Stats.copper, back1024Stats)
+        - normalized(reviewBackStats.copper, reviewBackStats))).toBeLessThan(0.03)
+    } finally {
+      await runtime.close()
+    }
+  }, 600_000)
+
   it.runIf(runTask12E2E)('renders approved Lavira and direct-print fixtures through real design and production browsers', async () => {
     const evidenceRoot = await task12PackageRoot()
     const laviraBytes = await readFile(laviraBlueprintPath)
@@ -529,7 +877,6 @@ describe('GLB label plugin E2E', () => {
       boxShadow: 'none',
       diagnosticDisplay: 'none',
     })
-
     for (const fixture of [lavira, direct]) {
       const designManifest = JSON.parse(fixture.designManifestBytes.toString('utf8'))
       expect(designManifest.blueprint).toEqual({
@@ -619,6 +966,16 @@ describe('GLB label plugin E2E', () => {
     const laviraStats = await browserPngStats(laviraPngs)
     expect(laviraStats.every((stats) => stats.width === 640 && stats.height === 640)).toBe(true)
     expect(laviraStats.every((stats) => stats.opaque > 0 && stats.colorBuckets > 4)).toBe(true)
+    const [laviraDesignBackStats] = await browserPngStats([
+      path.join(lavira.designReviewDir, 'areas/lavira.back-approved.png'),
+    ])
+    const laviraProductionBackStats = laviraStats[2]
+    for (const stats of [laviraDesignBackStats, laviraProductionBackStats]) {
+      expect(stats.center.slice(0, 3).every((channel) => channel < 55)).toBe(true)
+      expect(stats.copper).toBeGreaterThan(100)
+      expect(stats.copper).toBeLessThan(stats.width * stats.height * 0.08)
+      expect(stats.charcoal).toBeGreaterThan(stats.width * stats.height * 0.55)
+    }
     const [directAreaStats, directFlatStats, directSurfaceStats] = await browserPngStats([
       path.join(direct.designReviewDir, 'areas/carrier.direct-curved.png'),
       path.join(directReview.outputDir, 'label-front.png'),
@@ -630,7 +987,6 @@ describe('GLB label plugin E2E', () => {
     expect(directFlatStats.colorBuckets).toBeGreaterThan(4)
     expect(directSurfaceStats.colorBuckets).toBeGreaterThan(8)
     expect(directSurfaceStats.center).not.toEqual(directSurfaceStats.corners[0])
-
     const previousManifest = Buffer.from(laviraReview.manifestBytes)
     const conflictStdout: string[] = []
     const conflictCode = await runCli([

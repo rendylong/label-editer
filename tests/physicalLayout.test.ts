@@ -150,4 +150,11 @@ describe('physical label layout', () => {
     expect(resolveTargetAspect({ artboardAspect: 2 / 3, targetAspect: 1, policy: 'block' }))
       .toEqual({ status: 'blocked', code: 'TARGET_ASPECT_MISMATCH' })
   })
+
+  it('accepts Float32-derived target aspect noise within one ppm but blocks a larger mismatch', () => {
+    expect(resolveTargetAspect({ artboardAspect: 1, targetAspect: 1 + 0.9e-6, policy: 'block' }))
+      .toEqual({ status: 'resolved', scale: { x: 1, y: 1 }, offsets: { x: 0, y: 0 } })
+    expect(resolveTargetAspect({ artboardAspect: 1, targetAspect: 1 + 1.1e-6, policy: 'block' }))
+      .toEqual({ status: 'blocked', code: 'TARGET_ASPECT_MISMATCH' })
+  })
 })
