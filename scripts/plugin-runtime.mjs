@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { createBrowserSessionManager } from './lib/browser-session.mjs'
+import { assertFreshEditorBuild } from './lib/build-fingerprint.mjs'
 import { normalizeGlb } from './lib/codec.mjs'
 import { publishAtomically, publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath } from './lib/files.mjs'
 import { createSessionServer } from './lib/session-server.mjs'
@@ -9,7 +10,9 @@ import { createSessionServer } from './lib/session-server.mjs'
 export async function createPluginRuntime(options = {}) {
   const pluginRoot = path.resolve(options.pluginRoot ?? path.join(import.meta.dirname, '..'))
   const allowedRoots = options.allowedRoots?.length ? options.allowedRoots : [process.cwd()]
-  const server = await createSessionServer({ editorRoot: options.editorRoot ?? path.join(pluginRoot, 'dist') })
+  const editorRoot = path.resolve(options.editorRoot ?? path.join(pluginRoot, 'dist'))
+  if (options.editorRoot === undefined) await assertFreshEditorBuild(pluginRoot, editorRoot)
+  const server = await createSessionServer({ editorRoot })
   const browser = await createBrowserSessionManager({
     server,
     headless: options.headless !== false,

@@ -63,9 +63,13 @@ function publicationTokenKey(value: string): string {
   return value.normalize('NFKC').toLowerCase()
 }
 
-function deriveQcAreaTokens(areaIds: Iterable<string>): Map<string, string> {
+/** Resolve all publication tokens as one case/normalization-insensitive batch. */
+export function deriveQcAreaTokens(areaIds: Iterable<string>): Map<string, string> {
   const baseTokens = new Map<string, string>()
-  for (const areaId of areaIds) baseTokens.set(areaId, qcAreaToken(areaId))
+  for (const areaId of areaIds) {
+    if (baseTokens.has(areaId)) invalidUsage(`Duplicate area id: ${areaId}`)
+    baseTokens.set(areaId, qcAreaToken(areaId))
+  }
   const tokens = new Map(baseTokens)
   const attempts = new Map<string, number>()
   for (let pass = 0; pass <= 8; pass += 1) {

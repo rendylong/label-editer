@@ -36,14 +36,15 @@
     "dev": "vite",
     "generate:label-validator": "node scripts/generate-label-validator.mjs",
     "prebuild": "node scripts/generate-label-validator.mjs",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/write-build-fingerprint.mjs",
     "install:browser": "playwright install chromium",
     "preview": "vite preview",
     "pretest": "node scripts/generate-label-validator.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:plugin-e2e": "vitest run tests/pluginE2E.test.ts --testTimeout=180000",
-    "plugin:verify": "pnpm test && pnpm build && pnpm test:plugin-e2e"
+    "test:plugin-e2e": "pnpm build && pnpm test:plugin-e2e:built",
+    "test:plugin-e2e:built": "vitest run tests/pluginE2E.test.ts --testTimeout=180000",
+    "plugin:verify": "pnpm build && pnpm test && pnpm test:plugin-e2e:built"
   },
   "dependencies": {
     "@gltf-transform/core": "^4.4.2",

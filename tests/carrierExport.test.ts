@@ -23,7 +23,7 @@ vi.mock('../src/glb/textures', () => external)
 vi.mock('../src/glb/rebuild', () => ({ exportGlb: external.exportGlb }))
 
 import { prepareAllAreas } from '../src/app/areaExporter'
-import { createAreaChannelArtifacts, createChannelArtifact, createExportBundle, createPrintArtifact } from '../src/agent/artifactExport'
+import { createAreaChannelArtifacts, createChannelArtifact, createExportBundle, createPrintArtifact, createPrintArtifacts } from '../src/agent/artifactExport'
 import { renderCarrierMasks } from '../src/label/craft'
 import { buildPrintManifest } from '../src/label/printReadiness'
 import { whiteUnderbaseIntentKey } from '../src/label/whiteUnderbase'
@@ -198,11 +198,22 @@ describe('carrier-aware channel export', () => {
   })
 
   it('publishes unique server-safe ids for colon, hyphen, and Unicode area ids across every area-derived artifact', async () => {
-    const ids = ['same:token', 'same-token', '同名区域']
+    const ids = [
+      'same:token',
+      'same-token',
+      '同名区域',
+      // This is the exact singleton token of 同名区域 and used to collide with it.
+      'area-a60c59e5db5f5219',
+      'Area',
+      'area',
+      // These two exercise the former print/channel suffix namespace ambiguity.
+      'print-manifest-x',
+      'x-color',
+    ]
     const targets = ids.map((id) => ({ ...area('direct_surface_print'), id, name: id }))
     const bakeMap = Object.fromEntries(ids.map((id) => [id, { color: canvas(8) }]))
     const channelArtifacts = await createAreaChannelArtifacts(targets, bakeMap)
-    const printArtifacts = targets.map((target) => createPrintArtifact(target, bakeMap[target.id]))
+    const printArtifacts = createPrintArtifacts(targets, bakeMap)
     const artifactIds = [...channelArtifacts, ...printArtifacts].map((artifact) => artifact.id)
 
     expect(new Set(artifactIds).size).toBe(artifactIds.length)
@@ -210,6 +221,10 @@ describe('carrier-aware channel export', () => {
     expect(channelArtifacts.map((artifact) => artifact.areaId)).toEqual(ids)
     expect(channelArtifacts.find((artifact) => artifact.areaId === 'same:token')?.id)
       .not.toBe(channelArtifacts.find((artifact) => artifact.areaId === 'same-token')?.id)
+    expect(channelArtifacts.find((artifact) => artifact.areaId === '同名区域')?.id)
+      .not.toBe(channelArtifacts.find((artifact) => artifact.areaId === 'area-a60c59e5db5f5219')?.id)
+    expect(channelArtifacts.find((artifact) => artifact.areaId === 'Area')?.id.toLowerCase())
+      .not.toBe(channelArtifacts.find((artifact) => artifact.areaId === 'area')?.id.toLowerCase())
   })
 
   it('rejects an injected unproven white-underbase canvas despite a current declaration', async () => {
@@ -227,8 +242,8 @@ describe('carrier-aware channel export', () => {
     const artifacts = await createAreaChannelArtifacts([target], { front: bake })
 
     expect(artifacts.map((artifact) => [artifact.id, artifact.fileName, artifact.channel])).toEqual([
-      ['front-color', 'color.png', 'color'],
-      ['front-white_underbase', 'white-underbase.png', 'white_underbase'],
+      ['area-front-channel-color', 'color.png', 'color'],
+      ['area-front-channel-white_underbase', 'white-underbase.png', 'white_underbase'],
     ])
     expect(buildPrintManifest(target, bake).separations).toEqual(['white_underbase', 'WHITE'])
     expect(external.canvasToPngBytes).toHaveBeenCalledTimes(2)

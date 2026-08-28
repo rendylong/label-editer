@@ -9,7 +9,7 @@ import { hasRenderableWhiteUnderbaseDeclaration } from '../label/whiteUnderbase'
 import {
   snapshotRendererProvenWhiteUnderbase,
 } from '../label/craft'
-import { qcAreaToken } from './qcCapturePlan'
+import { deriveQcAreaTokens } from './qcCapturePlan'
 
 export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase'
 
@@ -46,14 +46,35 @@ export function createProjectArtifact(modelFileName: string, areas: LabelAreaCon
   }
 }
 
-export function createPrintArtifact(area: LabelAreaConfig, bake?: BakeInput): BrowserArtifact {
+function areaPrintArtifactId(areaToken: string): string {
+  return `area-${areaToken}-print-manifest`
+}
+
+function areaChannelArtifactId(areaToken: string, channel: ArtifactChannel): string {
+  return `area-${areaToken}-channel-${channel}`
+}
+
+function createPrintArtifactWithToken(area: LabelAreaConfig, areaToken: string, bake?: BakeInput): BrowserArtifact {
   return {
-    id: `print-manifest-${qcAreaToken(area.id)}`,
+    id: areaPrintArtifactId(areaToken),
     fileName: `${sanitizeArtifactBaseName(area.name)}-print-manifest.json`,
     mimeType: 'application/json',
     bytes: jsonBytes(buildPrintManifest(area, bake)),
     areaId: area.id,
   }
+}
+
+export function createPrintArtifact(area: LabelAreaConfig, bake?: BakeInput): BrowserArtifact {
+  const areaToken = deriveQcAreaTokens([area.id]).get(area.id)!
+  return createPrintArtifactWithToken(area, areaToken, bake)
+}
+
+export function createPrintArtifacts(
+  areas: LabelAreaConfig[],
+  bakeMap?: Record<string, BakeInput>,
+): BrowserArtifact[] {
+  const areaTokens = deriveQcAreaTokens(areas.map((area) => area.id))
+  return areas.map((area) => createPrintArtifactWithToken(area, areaTokens.get(area.id)!, bakeMap?.[area.id]))
 }
 
 export function createAggregatePrintArtifact(areas: LabelAreaConfig[], bakeMap?: Record<string, BakeInput>): BrowserArtifact {
@@ -76,6 +97,16 @@ export async function createChannelArtifact(
   bake: BakeInput,
   channel: ArtifactChannel,
 ): Promise<BrowserArtifact> {
+  const areaToken = deriveQcAreaTokens([area.id]).get(area.id)!
+  return createChannelArtifactWithToken(area, areaToken, bake, channel)
+}
+
+async function createChannelArtifactWithToken(
+  area: LabelAreaConfig,
+  areaToken: string,
+  bake: BakeInput,
+  channel: ArtifactChannel,
+): Promise<BrowserArtifact> {
   const verifiedWhiteUnderbase = channel === 'white_underbase'
     ? snapshotRendererProvenWhiteUnderbase(area, bake)
     : undefined
@@ -85,7 +116,7 @@ export async function createChannelArtifact(
   const canvas = channel === 'white_underbase' ? verifiedWhiteUnderbase : bake[channel]
   if (!canvas) throw new Error(`贴标区域「${area.name}」没有 ${channel} 烘焙通道`)
   return {
-    id: `${qcAreaToken(area.id)}-${channel}`,
+    id: areaChannelArtifactId(areaToken, channel),
     fileName: channel === 'white_underbase' ? 'white-underbase.png' : `${channel}.png`,
     mimeType: 'image/png',
     bytes: await canvasToPngBytes(canvas),
@@ -110,16 +141,18 @@ async function createAreaPublication(
 ): Promise<{ artifacts: BrowserArtifact[]; manifests: PrintManifest[] }> {
   const artifacts: BrowserArtifact[] = []
   const manifests: PrintManifest[] = []
+  const areaTokens = deriveQcAreaTokens(areas.map((area) => area.id))
   for (const area of areas) {
+    const areaToken = areaTokens.get(area.id)!
     const bake = bakeMap[area.id]
     if (!bake) throw new Error(`贴标区域「${area.name}」缺少烘焙结果`)
     for (const channel of ['color', 'metalness', 'roughness', 'bump'] as const) {
-      if (bake[channel]) artifacts.push(await createChannelArtifact(area, bake, channel))
+      if (bake[channel]) artifacts.push(await createChannelArtifactWithToken(area, areaToken, bake, channel))
     }
     let whiteUnderbaseArtifact: BrowserArtifact | undefined
     if (bake.whiteUnderbase && hasRenderableWhiteUnderbaseDeclaration(area)) {
       try {
-        whiteUnderbaseArtifact = await createChannelArtifact(area, bake, 'white_underbase')
+        whiteUnderbaseArtifact = await createChannelArtifactWithToken(area, areaToken, bake, 'white_underbase')
       } catch (error) {
         if (!(error instanceof Error) || !error.message.includes('缺少当前 renderer proof')) throw error
       }

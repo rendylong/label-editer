@@ -8,6 +8,7 @@ import { validateLayoutBlueprint, type LayoutBlueprintV1 } from '../src/agent/de
 import { readGlb } from '../src/glb/analyze'
 import { renderCarrierMasks, renderMasks } from '../src/label/craft'
 import * as craft from '../src/label/craft'
+import { isTransparentCssColor } from '../src/label/cssColor'
 import type { ShapeGeometry, ShapeKind, ShapeLayer } from '../src/label/types'
 import * as labelCanvas from '../src/label/LabelCanvas'
 import * as labelTextures from '../src/glb/textures'
@@ -740,6 +741,14 @@ describe('形状预览与工艺遮罩保真', () => {
     'rgba(10, 20, 30, +0)',
     'hsl(120deg 40% 50% / -0)',
     'HSLA(120, 40%, 50%, 0.00%)',
+    'color(display-p3 1 0 0 / 0)',
+    'hwb(120 20% 30% / 0)',
+    'lab(50% 0 0 / 0)',
+    'lch(50% 20 30deg / 0)',
+    'oklab(50% 0 0 / 0)',
+    'oklch(50% .2 30deg / 0)',
+    'rgb(none none none / none)',
+    'color(display-p3 none 0 0 / none)',
   ])('treats schema-valid zero-alpha CSS fill %s as stroke-only', (fill) => {
     const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
     const frame = makeShape({ shape: 'rectangle', fill, stroke: '#b76a3a', strokeWidth: 2, craft: [foil] })
@@ -747,6 +756,22 @@ describe('形状预览与工艺遮罩保真', () => {
     expect(paintProps?.(frame, foil).fillPriority).toBe('color')
     expect(craft.layerMaskContributions(frame).map((contribution) => contribution.mode))
       .toEqual(['stroke', 'stroke'])
+  })
+
+  it.each([
+    'rgb(garbage / 0)',
+    'rgb(10 20 / 0)',
+    'hsl(120deg nope 50% / 0)',
+    'color(display-p3 1 0 / 0)',
+    'rgb(10, 20%, 30, 0)',
+  ])('rejects invalid zero-alpha-looking CSS fill %s across color and mask routing', (fill) => {
+    const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
+    const mark = makeShape({ shape: 'rectangle', fill, stroke: '#b76a3a', strokeWidth: 2, craft: [foil] })
+
+    expect(isTransparentCssColor(fill)).toBe(false)
+    expect(paintProps?.(mark, foil).fillPriority).toBe('linear-gradient')
+    expect(craft.layerMaskContributions(mark).map((contribution) => contribution.mode))
+      .toEqual(['fill', 'fill'])
   })
 
   it.each([

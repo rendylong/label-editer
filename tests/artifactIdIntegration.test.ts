@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createPrintArtifact } from '../src/agent/artifactExport'
+import { createAreaChannelArtifacts, createPrintArtifacts } from '../src/agent/artifactExport'
 import type { LabelAreaConfig } from '../src/label/types'
 // @ts-expect-error Node plugin server is intentionally authored as directly executable ESM.
 import { createSessionServer } from '../scripts/lib/session-server.mjs'
@@ -30,14 +30,38 @@ function area(id: string): LabelAreaConfig {
   }
 }
 
+const ONE_PIXEL_PNG = Uint8Array.from(Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+))
+
+function canvas(): HTMLCanvasElement {
+  return {
+    width: 1,
+    height: 1,
+    toBlob(callback: BlobCallback) {
+      callback(new Blob([ONE_PIXEL_PNG], { type: 'image/png' }))
+    },
+  } as HTMLCanvasElement
+}
+
 describe('area-derived artifact ids against the real session server', () => {
-  it('uploads colon, hyphen, and Unicode multi-area artifacts without collision or regex rejection', async () => {
+  it('uploads every real multi-area print and channel artifact uniquely with opaque ASCII ids', async () => {
     const editorRoot = await mkdtemp(path.join(tmpdir(), 'glb-label-artifact-id-'))
     await writeFile(path.join(editorRoot, 'index.html'), '<main>editor</main>')
     const server = await createSessionServer({ editorRoot })
     try {
       const session = server.createSession()
-      const artifacts = ['same:token', 'same-token', '同名区域'].map((id) => createPrintArtifact(area(id)))
+      const ids = [
+        'same:token', 'same-token', '同名区域', 'area-a60c59e5db5f5219',
+        'Area', 'area', 'é', 'e\u0301', 'print-manifest-x', 'x-color',
+      ]
+      const areas = ids.map(area)
+      const bakeMap = Object.fromEntries(ids.map((id) => [id, { color: canvas() }]))
+      const artifacts = [
+        ...await createAreaChannelArtifacts(areas, bakeMap),
+        ...createPrintArtifacts(areas, bakeMap),
+      ]
       for (const artifact of artifacts) {
         const response = await fetch(
           `${server.origin}/session/${session.id}/artifact/${encodeURIComponent(artifact.id)}?token=${session.token}`,
@@ -54,7 +78,7 @@ describe('area-derived artifact ids against the real session server', () => {
         expect(response.status, artifact.id).toBe(201)
       }
       const uploadedIds = server.getArtifacts(session.id).map((artifact: { id: string }) => artifact.id)
-      expect(new Set(uploadedIds).size).toBe(3)
+      expect(new Set(uploadedIds).size).toBe(artifacts.length)
       expect(uploadedIds.every((id: string) => /^[A-Za-z0-9._-]{1,160}$/.test(id))).toBe(true)
     } finally {
       await server.close()

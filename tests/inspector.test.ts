@@ -177,6 +177,21 @@ describe('inspector routing', () => {
 })
 
 describe('shape fill semantics', () => {
+  it('shares display-p3 zero-alpha classification with the renderer and mask path', async () => {
+    const patches: Array<Partial<LabelLayer>> = []
+    const transparent: ShapeLayer = {
+      id: 'p3-frame', kind: 'shape', shape: 'frame', width: 240, height: 140,
+      fill: 'color(display-p3 1 0 0 / 0)', stroke: '#222222', strokeWidth: 2, cornerRadius: 0,
+      x: 200, y: 140, rotation: 0, opacity: 1, visible: true, locked: false, zIndex: 1, craft: [],
+    }
+
+    await withMountedDom(async ({ dom, root }) => {
+      await act(async () => root.render(createElement(ShapeFillHarness, { initial: transparent, patches })))
+      expect(dom.window.document.querySelector<HTMLInputElement>('input[aria-label="无填色（透明）"]')?.checked).toBe(true)
+      expect(dom.window.document.querySelector('[role="status"]')?.textContent).toBe('当前填色：透明')
+    })
+  })
+
   it('shows transparent as an explicit state and restores the last deliberate opaque fill', async () => {
     const patches: Array<Partial<LabelLayer>> = []
     const transparent: ShapeLayer = {
