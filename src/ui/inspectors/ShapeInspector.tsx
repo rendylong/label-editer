@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { isTransparentCssColor } from '../../label/cssColor'
 import { normalizeShapeLayer } from '../../label/shapeGeometry'
 import type { LabelLayer, ShapeGeometry, ShapeKind, ShapeLayer } from '../../label/types'
 import { CraftEditor } from '../CraftEditor'
@@ -17,7 +18,7 @@ export function ShapeInspector({ layer, patch }: { layer: ShapeLayer; patch: (pa
   const geometry = normalized.geometry!
   const ratio = layer.width / Math.max(layer.height, 1)
   const hasFill = !['line', 'wave', 'bracket'].includes(layer.shape)
-  const transparentFill = layer.fill === 'transparent'
+  const transparentFill = isTransparentCssColor(layer.fill)
   const opaqueFill = transparentFill ? null : layer.fill
   const [lastOpaqueFill, setLastOpaqueFill] = useState(opaqueFill ?? '#111111')
   useEffect(() => {
@@ -57,7 +58,7 @@ export function ShapeInspector({ layer, patch }: { layer: ShapeLayer; patch: (pa
         {hasFill && <>
           <label className="inline-toggle"><span>无填色（透明）</span><input aria-label="无填色（透明）" type="checkbox" checked={transparentFill} onChange={(event) => patch({ fill: event.target.checked ? 'transparent' : lastOpaqueFill })} /></label>
           {transparentFill && <span className="field-status" role="status">当前填色：透明</span>}
-          <CssColorField label="填色颜色" ariaLabel="填色颜色" value={layer.fill} onChange={(fill) => { if (fill && fill !== 'transparent') setLastOpaqueFill(fill); patch({ fill }) }} />
+          <CssColorField label="填色颜色" ariaLabel="填色颜色" value={layer.fill} onChange={(fill) => { if (fill && !isTransparentCssColor(fill)) setLastOpaqueFill(fill); patch({ fill }) }} />
         </>}
         <CssColorField label="描边" ariaLabel="描边颜色" value={layer.stroke} onChange={(stroke) => patch({ stroke })} />
         <label>描边宽度<input type="number" min={0} max={100} value={layer.strokeWidth} onChange={(event) => patch({ strokeWidth: Math.max(0, +event.target.value || 0) })} /></label>

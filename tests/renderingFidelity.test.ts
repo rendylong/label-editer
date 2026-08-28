@@ -731,6 +731,37 @@ describe('形状预览与工艺遮罩保真', () => {
     expect(mask.paintCalls).not.toContain('fill')
   })
 
+  it.each([
+    ' TRANSPARENT ',
+    '#abc0',
+    '#11223300',
+    'rgb(10 20 30 / 0)',
+    'RGB(10% 20% 30% / .0%)',
+    'rgba(10, 20, 30, +0)',
+    'hsl(120deg 40% 50% / -0)',
+    'HSLA(120, 40%, 50%, 0.00%)',
+  ])('treats schema-valid zero-alpha CSS fill %s as stroke-only', (fill) => {
+    const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
+    const frame = makeShape({ shape: 'rectangle', fill, stroke: '#b76a3a', strokeWidth: 2, craft: [foil] })
+
+    expect(paintProps?.(frame, foil).fillPriority).toBe('color')
+    expect(craft.layerMaskContributions(frame).map((contribution) => contribution.mode))
+      .toEqual(['stroke', 'stroke'])
+  })
+
+  it.each([
+    '#11223301',
+    'rgb(10 20 30 / 0.01)',
+    'hsl(120deg 40% 50% / 1%)',
+  ])('keeps nonzero-alpha CSS fill %s on the filled foil path', (fill) => {
+    const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
+    const mark = makeShape({ shape: 'rectangle', fill, stroke: '#b76a3a', strokeWidth: 2, craft: [foil] })
+
+    expect(paintProps?.(mark, foil).fillPriority).toBe('linear-gradient')
+    expect(craft.layerMaskContributions(mark).map((contribution) => contribution.mode))
+      .toEqual(['fill', 'fill'])
+  })
+
   it('preserves foil fill routing for a filled closed mark', () => {
     const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
     const mark = makeShape({ shape: 'ellipse', fill: '#b76a3a', craft: [foil] })

@@ -18,6 +18,7 @@ import {
   snapshotWhiteUnderbaseRaster,
   whiteUnderbaseIntentKey,
 } from './whiteUnderbase'
+import { isTransparentCssColor } from './cssColor'
 
 export type CraftScope = 'layer' | 'global'
 export type MaskChannel = 'metalness' | 'roughness' | 'bump'
@@ -226,15 +227,8 @@ export interface GenericShapePaintProps {
   strokeLinearGradientColorStops?: Array<number | string>
 }
 
-function isTransparentShapeFill(fill: string): boolean {
-  const value = fill.trim().toLowerCase().replace(/\s+/g, '')
-  if (value === 'transparent') return true
-  if (/^#[0-9a-f]{3}0$/i.test(value) || /^#[0-9a-f]{6}00$/i.test(value)) return true
-  return /^(?:rgba|hsla)\([^)]*(?:,|\/)0(?:\.0+)?%?\)$/.test(value)
-}
-
 function layerMaskMode(layer: LabelLayer): MaskDrawMode {
-  return layer.kind === 'shape' && isTransparentShapeFill(layer.fill) ? 'stroke' : 'fill'
+  return layer.kind === 'shape' && isTransparentCssColor(layer.fill) ? 'stroke' : 'fill'
 }
 
 /** Craft stroke is a presentation override shared by text, image and shape layers. */
@@ -274,7 +268,7 @@ export function genericShapePaintProps(layer: ShapeLayer, foil: CraftEffect | un
     x: gradient.end.x - normalized.width / 2,
     y: gradient.end.y - normalized.height / 2,
   }
-  if (isTransparentShapeFill(normalized.fill)
+  if (isTransparentCssColor(normalized.fill)
     || (partitions.open.length > 0 && partitions.closed.length === 0)) {
     return {
       ...base,
@@ -814,9 +808,7 @@ export function renderMasks(
   const [metal, mctx] = mk('#000000')
   const [rough, rctx] = mk('#ffffff')
   const [bump, bctx] = mk('#ffffff')
-  // 底值：粗糙纸面
-  rctx.fillStyle = '#d9d9d9'
-  rctx.fillRect(0, 0, width, height)
+  // Neutral applied-label PBR: dielectric black, maximally rough white, flat mid-gray.
   // bump 底值 = 中灰（平面）
   bctx.fillStyle = '#808080'
   bctx.fillRect(0, 0, width, height)

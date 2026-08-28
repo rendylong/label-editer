@@ -29,19 +29,31 @@ const defaultModel = '/Users/apple/realibox/cosmetic-bottles-glb/02_perfume_glas
 const modelPath = process.env.GLB_LABEL_E2E_MODEL ?? defaultModel
 const runRealE2E = existsSync(modelPath)
 const runLiveE2E = runRealE2E && process.env.GLB_LABEL_LIVE_E2E === '1'
-const laviraModelPath = '/Users/apple/realibox/cosmetic-bottles-glb/07_luxury_perfume_bottle_wood_glass.glb'
-const laviraMockupPath = '/Users/apple/realibox/cosmetic-bottles-glb/lavira-ember-woods-20260826/label-mockup.html'
+const laviraModelPath = process.env.GLB_LABEL_TASK12_MODEL
+  ?? '/Users/apple/realibox/cosmetic-bottles-glb/07_luxury_perfume_bottle_wood_glass.glb'
+const laviraMockupPath = process.env.GLB_LABEL_TASK12_MOCKUP
+  ?? '/Users/apple/realibox/cosmetic-bottles-glb/lavira-ember-woods-20260826/label-mockup.html'
 const laviraBlueprintPath = path.resolve('tests/fixtures/blueprints/lavira-ember-woods-v1.json')
 const carrierBlueprintPath = path.resolve('tests/fixtures/blueprints/carrier-regressions-v1.json')
-// The 4096 browser bake is an external-fixture stress test and must not contend
-// with the parallel unit suite. Run it deliberately, like the existing live E2E.
-const runTask12E2E = process.env.GLB_LABEL_TASK12_E2E === '1'
-  && existsSync(laviraModelPath) && existsSync(laviraMockupPath)
-  && existsSync(laviraBlueprintPath) && existsSync(carrierBlueprintPath)
+const task12RequiredPaths = [laviraModelPath, laviraMockupPath, laviraBlueprintPath, carrierBlueprintPath]
+const task12ExternalFilesPresent = task12RequiredPaths.every((filePath) => existsSync(filePath))
+// The normal suite runs a small real-browser smoke whenever the documented files
+// exist. The 4096 and review stress cases stay explicit to avoid suite contention.
+const task12StressRequested = process.env.GLB_LABEL_TASK12_E2E === '1'
 // The source UVs are Float32 and the surface aspect comes from the median UV→geometry
 // Jacobian. One part per million is strict enough to catch a physical-layout mismatch
 // without pretending repeated remaps can recover precision that is absent in the GLB.
 const TASK12_ASPECT_TOLERANCE = 1e-6
+const task12StressExecuted = new Set<string>()
+
+function task12AspectMatches(expected: number, actual: number): boolean {
+  return Math.abs(actual - expected) <= Math.abs(expected) * TASK12_ASPECT_TOLERANCE
+}
+
+function requireTask12ExternalFiles(): void {
+  const missing = task12RequiredPaths.filter((filePath) => !existsSync(filePath))
+  if (missing.length > 0) throw new Error(`Task 12 required external files are missing: ${missing.join(', ')}`)
+}
 
 function hash(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
@@ -109,7 +121,7 @@ async function task12Shells(blueprint: LayoutBlueprintV1) {
         vHeight: sourceRange.vHeight,
       }
       const actualAspect = computeLabelSetup(mesh, remap, candidate, 'overlay').spec.aspect
-      if (Math.abs(actualAspect - artboardAspect) <= TASK12_ASPECT_TOLERANCE) break
+      if (task12AspectMatches(artboardAspect, actualAspect)) break
       uWidth *= artboardAspect / actualAspect
     }
     const range = {
@@ -119,7 +131,7 @@ async function task12Shells(blueprint: LayoutBlueprintV1) {
       vHeight: sourceRange.vHeight,
     }
     const actualAspect = computeLabelSetup(mesh, remap, range, 'overlay').spec.aspect
-    if (Math.abs(actualAspect - artboardAspect) > TASK12_ASPECT_TOLERANCE) {
+    if (!task12AspectMatches(artboardAspect, actualAspect)) {
       throw new Error(`Task 12 UV aspect mismatch for ${area.id}: ${actualAspect} != ${artboardAspect}`)
     }
     return {
@@ -161,7 +173,7 @@ async function task12ProjectAreas(
     if (requestedRemap?.mirrorU !== undefined) remap.mirrorU = requestedRemap.mirrorU
     const setup = computeLabelSetup(mesh, remap, area.range, 'overlay')
     const physicalAspect = artboard.widthMm / artboard.heightMm
-    if (Math.abs(setup.spec.aspect - physicalAspect) > TASK12_ASPECT_TOLERANCE) {
+    if (!task12AspectMatches(physicalAspect, setup.spec.aspect)) {
       throw new Error(`Task 12 canvas aspect mismatch for ${area.id}: ${setup.spec.aspect} != ${physicalAspect}`)
     }
     const bakeWidth = options.bakeWidth
@@ -530,8 +542,7 @@ async function task12NativeChannelExport(
     for (const descriptor of exported.artifacts) {
       const artifact = uploaded.find((candidate: { id: string }) => candidate.id === descriptor.id)
       if (!artifact) throw new Error(`Missing native channel bytes: ${descriptor.id}`)
-      const areaToken = String(descriptor.areaId).replace(/[^A-Za-z0-9._-]+/g, '-')
-      const filePath = path.join(outputRoot, areaToken, `${descriptor.channel}.png`)
+      const filePath = path.join(outputRoot, descriptor.id, `${descriptor.channel}.png`)
       await mkdir(path.dirname(filePath), { recursive: true })
       await writeFile(filePath, artifact.bytes)
       expect(hash(artifact.bytes)).toBe(descriptor.sha256)
@@ -631,7 +642,42 @@ function reviewEvidenceFixture(): { spec: Record<string, unknown>; request: Revi
 }
 
 describe('GLB label plugin E2E', () => {
-  it.runIf(runTask12E2E)('renders native Lavira 1024/4096 bakes and every carrier channel through real Konva in Chromium', async () => {
+  it.runIf(task12ExternalFilesPresent)('runs a bounded Task12 external smoke through real Konva, Chromium PNG decode, and server upload', async () => {
+    const evidenceRoot = await task12PackageRoot()
+    const [mockupBytes, laviraBlueprint, carrierBlueprintBytes] = await Promise.all([
+      readFile(laviraMockupPath),
+      readFile(laviraBlueprintPath, 'utf8').then((value) => JSON.parse(value) as LayoutBlueprintV1),
+      readFile(carrierBlueprintPath),
+    ])
+    expect(hash(mockupBytes)).toBe('bde3f32fab1a653f81264189b094c23620eb534cfa255fd6ac7e39543f6eb10f')
+    expect(carrierBlueprintBytes.byteLength).toBeGreaterThan(1_000)
+    const laviraShells = await task12Shells(laviraBlueprint)
+    const laviraAreas = await task12ProjectAreas(laviraBlueprint, { bakeWidth: 128, shells: laviraShells })
+    const project = serializeLabelProject(path.basename(laviraModelPath), [
+      laviraAreas.find((area) => area.id === 'lavira.front:approved')!,
+    ])
+    const runtime = await createPluginRuntime({
+      allowedRoots: [process.cwd(), path.dirname(laviraModelPath), evidenceRoot],
+    })
+    try {
+      const result = await task12NativeChannelExport(runtime, project, path.join(evidenceRoot, 'bounded-smoke'))
+      expect(result.artifacts).toHaveLength(4)
+      expect(result.artifacts.every((artifact) => /^[A-Za-z0-9._-]{1,160}$/.test(artifact.id))).toBe(true)
+
+      const frontColor = result.files.get('lavira.front:approved:color')!
+      const [frontStats] = await browserPngStats([frontColor])
+      expect(frontStats).toMatchObject({ width: 128, height: 165 })
+      expect(frontStats.charcoal).toBeGreaterThan(frontStats.width * frontStats.height * 0.6)
+      expect(frontStats.copper).toBeGreaterThan(10)
+      expect(frontStats.light).toBeGreaterThan(10)
+      expect(frontStats.regions.bottomCenter.copper).toBeLessThan(frontStats.regions.topFrame.copper)
+    } finally {
+      await runtime.close()
+    }
+  }, 180_000)
+
+  it.runIf(task12StressRequested)('Task12 stress case 1 renders native Lavira 1024/4096 bakes and every carrier channel through real Konva in Chromium', async () => {
+    requireTask12ExternalFiles()
     const evidenceRoot = await task12PackageRoot()
     const [laviraBlueprint, carrierBlueprint] = await Promise.all([
       readFile(laviraBlueprintPath, 'utf8').then((value) => JSON.parse(value) as LayoutBlueprintV1),
@@ -720,11 +766,15 @@ describe('GLB label plugin E2E', () => {
       expect(appliedColor.transparent).toBeGreaterThan(0)
       expect(appliedColor.light).toBeGreaterThan(carrierPixels / 2)
       expect(appliedColor.charcoal).toBeGreaterThan(100)
-      for (const channel of ['metalness', 'roughness', 'bump'] as const) {
-        const stats = byCarrierKey.get(`carrier.applied:paper:${channel}`)!
-        expect(stats.opaque).toBe(carrierPixels)
-        expect(stats.colorBuckets).toBe(1)
-      }
+      const appliedMetal = byCarrierKey.get('carrier.applied:paper:metalness')!
+      const appliedRough = byCarrierKey.get('carrier.applied:paper:roughness')!
+      const appliedBump = byCarrierKey.get('carrier.applied:paper:bump')!
+      expect(appliedMetal.black).toBe(carrierPixels)
+      expect(appliedMetal.center).toEqual([0, 0, 0, 255])
+      expect(appliedRough.white).toBe(carrierPixels)
+      expect(appliedRough.center).toEqual([255, 255, 255, 255])
+      expect(appliedBump.neutral128).toBe(carrierPixels)
+      expect(appliedBump.center).toEqual([128, 128, 128, 255])
       const clearColor = byCarrierKey.get('carrier.clear:selective-white:color')!
       const clearWhite = byCarrierKey.get('carrier.clear:selective-white:white_underbase')!
       expect(clearColor.transparent).toBeGreaterThan(carrierPixels / 2)
@@ -821,12 +871,14 @@ describe('GLB label plugin E2E', () => {
       expect(reviewBackStats.copper).toBeLessThan(reviewBackStats.width * reviewBackStats.height * 0.08)
       expect(Math.abs(normalized(back1024Stats.copper, back1024Stats)
         - normalized(reviewBackStats.copper, reviewBackStats))).toBeLessThan(0.03)
+      task12StressExecuted.add('native-1024-4096-carriers')
     } finally {
       await runtime.close()
     }
   }, 600_000)
 
-  it.runIf(runTask12E2E)('renders approved Lavira and direct-print fixtures through real design and production browsers', async () => {
+  it.runIf(task12StressRequested)('Task12 stress case 2 renders approved Lavira and direct-print fixtures through real design and production browsers', async () => {
+    requireTask12ExternalFiles()
     const evidenceRoot = await task12PackageRoot()
     const laviraBytes = await readFile(laviraBlueprintPath)
     const carrierSource = JSON.parse(await readFile(carrierBlueprintPath, 'utf8')) as LayoutBlueprintV1
@@ -1002,7 +1054,16 @@ describe('GLB label plugin E2E', () => {
     expect(conflictCode).toBe(9)
     expect(JSON.parse(conflictStdout[0])).toMatchObject({ ok: false, error: { code: 'OUTPUT_CONFLICT' } })
     expect(await readFile(path.join(laviraReview.outputDir, 'review-manifest.json'))).toEqual(previousManifest)
+    task12StressExecuted.add('design-production-review')
   }, 300_000)
+
+  it.runIf(task12StressRequested)('Task12 stress proof records both required stress cases', () => {
+    requireTask12ExternalFiles()
+    expect([...task12StressExecuted]).toEqual([
+      'native-1024-4096-carriers',
+      'design-production-review',
+    ])
+  })
 
   it.runIf(runRealE2E)('captures a gate-bound clean review through the packaged browser bridge', async () => {
     const requestedEvidenceDir = process.env.GLB_LABEL_TASK9_EVIDENCE_DIR

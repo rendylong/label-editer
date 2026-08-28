@@ -321,8 +321,12 @@ describe('carrier mask raster production', () => {
   })
 
   it('retains the complete legacy/applied substrate mask set', () => {
-    expect(Object.keys(renderCarrierMasks(2, 2, drawLayer, area('applied_label', layer()))).sort()).toEqual([
+    const masks = renderCarrierMasks(2, 2, drawLayer, area('applied_label', layer()))
+    expect(Object.keys(masks).sort()).toEqual([
       'bump', 'metalness', 'roughness',
     ])
+    expect(pixel(masks.metalness, 1, 1)).toEqual([0, 0, 0])
+    expect(pixel(masks.roughness, 1, 1)).toEqual([255, 255, 255])
+    expect(pixel(masks.bump, 1, 1)).toEqual([128, 128, 128])
   })
 })

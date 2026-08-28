@@ -9,6 +9,7 @@ import { hasRenderableWhiteUnderbaseDeclaration } from '../label/whiteUnderbase'
 import {
   snapshotRendererProvenWhiteUnderbase,
 } from '../label/craft'
+import { qcAreaToken } from './qcCapturePlan'
 
 export type ArtifactChannel = 'color' | 'metalness' | 'roughness' | 'bump' | 'white_underbase'
 
@@ -47,7 +48,7 @@ export function createProjectArtifact(modelFileName: string, areas: LabelAreaCon
 
 export function createPrintArtifact(area: LabelAreaConfig, bake?: BakeInput): BrowserArtifact {
   return {
-    id: `print-manifest-${area.id}`,
+    id: `print-manifest-${qcAreaToken(area.id)}`,
     fileName: `${sanitizeArtifactBaseName(area.name)}-print-manifest.json`,
     mimeType: 'application/json',
     bytes: jsonBytes(buildPrintManifest(area, bake)),
@@ -84,7 +85,7 @@ export async function createChannelArtifact(
   const canvas = channel === 'white_underbase' ? verifiedWhiteUnderbase : bake[channel]
   if (!canvas) throw new Error(`贴标区域「${area.name}」没有 ${channel} 烘焙通道`)
   return {
-    id: `${sanitizeArtifactBaseName(area.id)}-${channel}`,
+    id: `${qcAreaToken(area.id)}-${channel}`,
     fileName: channel === 'white_underbase' ? 'white-underbase.png' : `${channel}.png`,
     mimeType: 'image/png',
     bytes: await canvasToPngBytes(canvas),

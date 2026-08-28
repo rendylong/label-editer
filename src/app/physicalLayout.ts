@@ -88,7 +88,7 @@ function nonNegativeFinite(value: number | undefined, label: string): number | u
 }
 
 function aspectMatches(left: number, right: number): boolean {
-  return Math.abs(left - right) <= ASPECT_EPSILON * Math.max(1, Math.abs(left), Math.abs(right))
+  return Math.abs(left - right) <= ASPECT_EPSILON * Math.abs(left)
 }
 
 function validCrop(crop: PhysicalBounds | undefined): crop is PhysicalBounds {

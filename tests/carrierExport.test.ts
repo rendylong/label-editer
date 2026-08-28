@@ -23,7 +23,7 @@ vi.mock('../src/glb/textures', () => external)
 vi.mock('../src/glb/rebuild', () => ({ exportGlb: external.exportGlb }))
 
 import { prepareAllAreas } from '../src/app/areaExporter'
-import { createAreaChannelArtifacts, createChannelArtifact, createExportBundle } from '../src/agent/artifactExport'
+import { createAreaChannelArtifacts, createChannelArtifact, createExportBundle, createPrintArtifact } from '../src/agent/artifactExport'
 import { renderCarrierMasks } from '../src/label/craft'
 import { buildPrintManifest } from '../src/label/printReadiness'
 import { whiteUnderbaseIntentKey } from '../src/label/whiteUnderbase'
@@ -197,19 +197,19 @@ describe('carrier-aware channel export', () => {
     expect(buildPrintManifest(target, { color: canvas(1), whiteUnderbase: canvas(5) }).separations).not.toContain('white_underbase')
   })
 
-  it('publishes portable channel ids for blueprint area ids containing separators', async () => {
-    const target = { ...area('foil_or_ink_only'), id: 'carrier.foil:sparse', name: 'Sparse foil' }
-    const artifacts = await createAreaChannelArtifacts([target], {
-      'carrier.foil:sparse': { color: canvas(8), metalness: canvas(8), roughness: canvas(8), bump: canvas(8) },
-    })
+  it('publishes unique server-safe ids for colon, hyphen, and Unicode area ids across every area-derived artifact', async () => {
+    const ids = ['same:token', 'same-token', '同名区域']
+    const targets = ids.map((id) => ({ ...area('direct_surface_print'), id, name: id }))
+    const bakeMap = Object.fromEntries(ids.map((id) => [id, { color: canvas(8) }]))
+    const channelArtifacts = await createAreaChannelArtifacts(targets, bakeMap)
+    const printArtifacts = targets.map((target) => createPrintArtifact(target, bakeMap[target.id]))
+    const artifactIds = [...channelArtifacts, ...printArtifacts].map((artifact) => artifact.id)
 
-    expect(artifacts.map((artifact) => artifact.id)).toEqual([
-      'carrier.foil-sparse-color',
-      'carrier.foil-sparse-metalness',
-      'carrier.foil-sparse-roughness',
-      'carrier.foil-sparse-bump',
-    ])
-    expect(artifacts.every((artifact) => /^[A-Za-z0-9._-]+$/.test(artifact.id))).toBe(true)
+    expect(new Set(artifactIds).size).toBe(artifactIds.length)
+    expect(artifactIds.every((id) => /^[A-Za-z0-9._-]{1,160}$/.test(id))).toBe(true)
+    expect(channelArtifacts.map((artifact) => artifact.areaId)).toEqual(ids)
+    expect(channelArtifacts.find((artifact) => artifact.areaId === 'same:token')?.id)
+      .not.toBe(channelArtifacts.find((artifact) => artifact.areaId === 'same-token')?.id)
   })
 
   it('rejects an injected unproven white-underbase canvas despite a current declaration', async () => {

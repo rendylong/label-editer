@@ -151,10 +151,31 @@ describe('physical label layout', () => {
       .toEqual({ status: 'blocked', code: 'TARGET_ASPECT_MISMATCH' })
   })
 
-  it('accepts Float32-derived target aspect noise within one ppm but blocks a larger mismatch', () => {
-    expect(resolveTargetAspect({ artboardAspect: 1, targetAspect: 1 + 0.9e-6, policy: 'block' }))
+  it('uses a scale-relative one ppm boundary for the physical Lavira aspect', () => {
+    const physicalAspect = 48 / 62
+    expect(resolveTargetAspect({
+      artboardAspect: physicalAspect,
+      targetAspect: physicalAspect * (1 + 0.9e-6),
+      policy: 'block',
+    }))
       .toEqual({ status: 'resolved', scale: { x: 1, y: 1 }, offsets: { x: 0, y: 0 } })
-    expect(resolveTargetAspect({ artboardAspect: 1, targetAspect: 1 + 1.1e-6, policy: 'block' }))
+    expect(resolveTargetAspect({
+      artboardAspect: physicalAspect,
+      targetAspect: physicalAspect * (1 + 1.1e-6),
+      policy: 'block',
+    }))
       .toEqual({ status: 'blocked', code: 'TARGET_ASPECT_MISMATCH' })
+
+    const resolved = resolvePhysicalLayout({
+      artboard: { widthMm: 48, heightMm: 62 },
+      canvas: { width: 1024, height: 1323, aspect: physicalAspect * (1 + 0.9e-6) },
+      boundsMm: { x: 1.4, y: 4.6, width: 45.2, height: 35.8 },
+      policy: 'block',
+    })
+    expect(resolved.status).toBe('resolved')
+    if (resolved.status === 'resolved') {
+      expect(resolved.scale).toEqual({ x: 1, y: 1 })
+      expect(resolved.normalizedBounds).toEqual({ x: 1.4 / 48, y: 4.6 / 62, width: 45.2 / 48, height: 35.8 / 62 })
+    }
   })
 })
