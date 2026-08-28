@@ -103,6 +103,24 @@ function operator(node: ComponentValue): string | undefined {
   return isTokenNode(node) && isTokenDelim(node.value) ? node.value[4].value : undefined
 }
 
+function hasRequiredBinaryWhitespace(values: ComponentValue[], operatorNode: ComponentValue): boolean {
+  const operatorIndex = values.indexOf(operatorNode)
+  if (operatorIndex < 0) return false
+  let whitespaceBefore = false
+  for (let index = operatorIndex - 1; index >= 0; index -= 1) {
+    const node = values[index]
+    if (isWhitespaceNode(node)) whitespaceBefore = true
+    else if (!isCommentNode(node)) break
+  }
+  let whitespaceAfter = false
+  for (let index = operatorIndex + 1; index < values.length; index += 1) {
+    const node = values[index]
+    if (isWhitespaceNode(node)) whitespaceAfter = true
+    else if (!isCommentNode(node)) break
+  }
+  return whitespaceBefore && whitespaceAfter
+}
+
 function evaluateMath(values: ComponentValue[], depth = 0): NumericValue | undefined {
   if (depth > MAX_COMPONENT_DEPTH) return undefined
   const nodes = significant(values)
@@ -161,7 +179,9 @@ function evaluateMath(values: ComponentValue[], depth = 0): NumericValue | undef
   let result = product()
   if (!result) return undefined
   while (index < nodes.length && ['+', '-'].includes(operator(nodes[index]) ?? '')) {
-    const op = operator(nodes[index++])
+    const operatorNode = nodes[index++]
+    if (!hasRequiredBinaryWhitespace(values, operatorNode)) return undefined
+    const op = operator(operatorNode)
     const right = product()
     if (!right || !sameDimensions(result.dimensions, right.dimensions)) return undefined
     result = { value: op === '+' ? result.value + right.value : result.value - right.value, dimensions: result.dimensions }
@@ -176,8 +196,8 @@ function percentageWeight(node: ComponentValue): { value: number, literal: boole
     if (!Number.isFinite(value) || value < 0 || value > 100) return undefined
     return { value, literal: true }
   }
-  if (!isFunctionNode(node) || node.getName().toLowerCase() !== 'calc') return undefined
-  const result = evaluateMath(node.value)
+  if (!isFunctionNode(node) || !['calc', 'min', 'max', 'clamp'].includes(node.getName().toLowerCase())) return undefined
+  const result = evaluateMath([node])
   if (!result || !sameDimensions(result.dimensions, new Map([['percentage', 1]]))) return undefined
   return { value: Math.min(100, Math.max(0, result.value)), literal: false }
 }

@@ -1,9 +1,11 @@
-import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { access, appendFile, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error Build freshness is directly executable Node ESM.
-import { assertFreshEditorBuild, writeEditorBuildFingerprint } from '../scripts/lib/build-fingerprint.mjs'
+import { assertFreshEditorBuild, editorSourceFingerprint, snapshotEditorDist, writeEditorBuildFingerprint } from '../scripts/lib/build-fingerprint.mjs'
 // @ts-expect-error Plugin runtime is directly executable ESM.
 import { createPluginRuntime } from '../scripts/plugin-runtime.mjs'
 
@@ -11,8 +13,11 @@ async function fixtureRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'glb-label-build-fingerprint-'))
   await mkdir(path.join(root, 'src'), { recursive: true })
   await mkdir(path.join(root, 'public', 'nested'), { recursive: true })
+  await mkdir(path.join(root, 'scripts', 'lib'), { recursive: true })
   await mkdir(path.join(root, 'dist', 'assets'), { recursive: true })
   await writeFile(path.join(root, 'src', 'main.ts'), 'export const version = 1\n')
+  await writeFile(path.join(root, 'scripts', 'lib', 'browser-core.mjs'), 'export const browserCore = 1\n')
+  await writeFile(path.join(root, 'scripts', 'generate-label-validator.mjs'), 'export {}\n')
   await writeFile(path.join(root, 'public', 'nested', 'runtime.bin'), 'public-v1')
   await writeFile(path.join(root, 'index.html'), '<main>source</main>')
   await writeFile(path.join(root, 'package.json'), '{"type":"module"}\n')
@@ -29,6 +34,90 @@ async function fixtureRoot(): Promise<string> {
 }
 
 describe('editor build freshness', () => {
+  it('bounds every source input and rejects deep, long, numerous, linked, and nonregular trees', async () => {
+    const oversized = await fixtureRoot()
+    await writeFile(path.join(oversized, 'public', 'too-large.bin'), Buffer.alloc(32 * 1024 * 1024 + 1))
+    await expect(editorSourceFingerprint(oversized)).rejects.toThrow(/byte limit/i)
+
+    const numerous = await fixtureRoot()
+    await Promise.all(Array.from({ length: 513 }, (_, index) => (
+      writeFile(path.join(numerous, 'public', `entry-${String(index).padStart(3, '0')}.txt`), 'x')
+    )))
+    await expect(editorSourceFingerprint(numerous)).rejects.toThrow(/count limit/i)
+
+    const deep = await fixtureRoot()
+    const deepDirectory = path.join(deep, 'public', 'a', 'b', 'c', 'd')
+    await mkdir(deepDirectory, { recursive: true })
+    await writeFile(path.join(deepDirectory, 'deep.txt'), 'deep')
+    await expect(editorSourceFingerprint(deep, { maxEditorTreeDepth: 3 }))
+      .rejects.toThrow(/depth limit/i)
+
+    const long = await fixtureRoot()
+    const longDirectory = path.join(long, 'public', 'x'.repeat(40))
+    await mkdir(longDirectory)
+    await writeFile(path.join(longDirectory, 'long.txt'), 'long')
+    await expect(editorSourceFingerprint(long, { maxEditorAssetPathBytes: 32 }))
+      .rejects.toThrow(/path byte limit/i)
+
+    const linked = await fixtureRoot()
+    await symlink(path.join(linked, 'index.html'), path.join(linked, 'public', 'linked.html'))
+    await expect(editorSourceFingerprint(linked)).rejects.toThrow(/symbolic link/i)
+
+    const fifo = await fixtureRoot()
+    await promisify(execFile)('mkfifo', [path.join(fifo, 'public', 'blocked.fifo')])
+    await expect(editorSourceFingerprint(fifo)).rejects.toThrow(/regular file|non-regular/i)
+  }, 30_000)
+
+  it('charges source aggregate bytes and the installed npm shrinkwrap to the same bounded fingerprint', async () => {
+    const root = await fixtureRoot()
+    await expect(editorSourceFingerprint(root, {
+      maxEditorAssetBytes: 64,
+      maxEditorSnapshotBytes: 64,
+    })).rejects.toThrow(/snapshot byte limit/i)
+
+    const original = await editorSourceFingerprint(root)
+    await writeFile(path.join(root, 'npm-shrinkwrap.json'), '{"lockfileVersion":3,"installed":true}\n')
+    await expect(editorSourceFingerprint(root)).resolves.not.toEqual(original)
+  })
+
+  it.each([
+    ['growing descriptor', async (root: string, filePath: string) => {
+      await appendFile(filePath, 'grown')
+    }],
+    ['path replacement', async (root: string, filePath: string) => {
+      await rename(filePath, `${filePath}.original`)
+      await writeFile(filePath, 'replacement')
+    }],
+    ['file-directory replacement', async (root: string, filePath: string) => {
+      await rename(filePath, `${filePath}.original`)
+      await mkdir(filePath)
+    }],
+  ])('rejects a %s after opening but before retaining dist bytes', async (_name, mutate) => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    const assetPath = path.join(editorRoot, 'assets', 'app.js')
+    await expect(snapshotEditorDist(editorRoot, {
+      onEditorAssetOpened: async ({ relativePath }: { relativePath: string }) => {
+        if (relativePath === 'assets/app.js') await mutate(root, assetPath)
+      },
+    })).rejects.toThrow(/changed|regular file|inventory/i)
+  })
+
+  it('charges bytes actually read after descriptor open against the aggregate cap', async () => {
+    const root = await fixtureRoot()
+    const editorRoot = path.join(root, 'dist')
+    const assetPath = path.join(editorRoot, 'assets', 'app.js')
+    const initialTotal = (await readFile(path.join(editorRoot, 'index.html'))).byteLength
+      + (await readFile(assetPath)).byteLength
+    await expect(snapshotEditorDist(editorRoot, {
+      maxEditorAssetBytes: initialTotal,
+      maxEditorSnapshotBytes: initialTotal + 2,
+      onEditorAssetOpened: async ({ relativePath }: { relativePath: string }) => {
+        if (relativePath === 'index.html') await appendFile(path.join(editorRoot, 'index.html'), 'actual-growth')
+      },
+    })).rejects.toThrow(/snapshot byte limit/i)
+  })
+
   it('treats a fresh checkout with no dist fingerprint as unavailable before browser launch', async () => {
     const root = await fixtureRoot()
     await expect(assertFreshEditorBuild(root, path.join(root, 'dist')))
@@ -202,8 +291,12 @@ describe('editor build freshness', () => {
     }
 
     await expectStaleAfter(() => writeFile(path.join(root, 'public', 'nested', 'runtime.bin'), 'public-v2'))
+    await expectStaleAfter(() => writeFile(path.join(root, 'scripts', 'lib', 'browser-core.mjs'), 'export const browserCore = 2\n'))
+    await expectStaleAfter(() => writeFile(path.join(root, 'scripts', 'generate-label-validator.mjs'), 'export const changed = true\n'))
     await expectStaleAfter(() => writeFile(path.join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\npatched: true\n'))
     await expectStaleAfter(() => writeFile(path.join(root, 'npm-shrinkwrap.json'), '{"lockfileVersion":3,"patched":true}\n'))
+    await expectStaleAfter(() => rm(path.join(root, 'npm-shrinkwrap.json')))
+    await expectStaleAfter(() => writeFile(path.join(root, 'npm-shrinkwrap.json'), '{"lockfileVersion":3,"restored":true}\n'))
     await expectStaleAfter(() => writeFile(path.join(root, 'public', 'added.bin'), 'added'))
     await expectStaleAfter(() => rm(path.join(root, 'public', 'added.bin')))
     await expectStaleAfter(() => writeFile(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}\n'))

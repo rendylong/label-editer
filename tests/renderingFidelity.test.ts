@@ -745,6 +745,11 @@ describe('形状预览与工艺遮罩保真', () => {
     'color(display-p3 0 0 0 / 0)/**/',
     'color-mix(in srgb, transparent, transparent)/**/',
     'color-mix(in srgb, transparent 100%, red calc(0deg / 1deg * 1%))',
+    'color-mix(in srgb, transparent 100%, red min(0%, 1%))',
+    'color-mix(in srgb, transparent 100%, red max(0%, 0%))',
+    'color-mix(in srgb, transparent 100%, red clamp(0%, 0%, 1%))',
+    'color-mix(in srgb, transparent 100%, red calc(1% + -1%))',
+    'color-mix(in srgb, transparent 100%, red calc(1% /**/- 1%))',
     'hwb(120 20% 30% / 0)',
     'lab(50% 0 0 / 0)',
     'lch(50% 20 30deg / 0)',
@@ -767,6 +772,10 @@ describe('形状预览与工艺遮罩保真', () => {
     'hsl(120deg nope 50% / 0)',
     'color(display-p3 1 0 / 0)',
     'rgb(10, 20%, 30, 0)',
+    'color-mix(in srgb, transparent 100%, red calc(1%- 1%))',
+    'color-mix(in srgb, transparent 100%, red calc(1% -1%))',
+    'color-mix(in srgb, transparent 100%, red calc(1%/**/- 1%))',
+    'color-mix(in srgb, transparent 100%, red calc(1%/**/+/**/-1%))',
   ])('rejects invalid zero-alpha-looking CSS fill %s across color and mask routing', (fill) => {
     const paintProps = (craft as unknown as ShapeDrawingApi).genericShapePaintProps
     const mark = makeShape({ shape: 'rectangle', fill, stroke: '#b76a3a', strokeWidth: 2, craft: [foil] })

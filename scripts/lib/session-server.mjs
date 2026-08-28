@@ -10,11 +10,14 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
   '.wasm': 'application/wasm',
   '.glb': 'model/gltf-binary',
   '.woff2': 'font/woff2',
   '.woff': 'font/woff',
   '.ttf': 'font/ttf',
+  '.md': 'text/markdown; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
 }
 
 function json(response, status, value) {
@@ -74,6 +77,8 @@ export async function createSessionServer({
   maxEditorSnapshotBytes,
   maxEditorAssetCount,
   maxEditorAssetPathBytes,
+  maxEditorTreeDepth,
+  maxEditorTreeEntries,
   maxUploadBytes = 128 * 1024 * 1024,
   maxReviewBatchBytes = 128 * 1024 * 1024,
   maxReviewBatchArtifacts = 131,
@@ -92,6 +97,8 @@ export async function createSessionServer({
     maxEditorSnapshotBytes,
     maxEditorAssetCount,
     maxEditorAssetPathBytes,
+    maxEditorTreeDepth,
+    maxEditorTreeEntries,
   }
   const captured = editorSnapshot ?? (await snapshotEditorDist(editorRoot, assetLimitOptions)).snapshot
   const staticAssets = takeEditorDistSnapshot(captured)
@@ -613,7 +620,8 @@ export async function createSessionServer({
       const key = safeStaticKey(url.pathname)
       if (!key) return json(response, 403, { ok: false, error: 'Forbidden' })
       const assetKey = staticAssets.has(key) ? key : 'index.html'
-      const bytes = staticAssets.get(assetKey)
+      const bytes = staticAssets.read(assetKey)
+      if (!bytes) return json(response, 404, { ok: false, error: 'Editor asset not found' })
       response.writeHead(200, {
         'content-type': MIME[path.extname(assetKey)] ?? 'application/octet-stream',
         'content-length': bytes.byteLength,
@@ -629,12 +637,18 @@ export async function createSessionServer({
     }
   })
 
-  await new Promise((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
-  })
-  const address = server.address()
-  if (!address || typeof address === 'string') throw new Error('Session server did not bind a TCP port')
+  let address
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Session server did not bind a TCP port')
+  } catch (error) {
+    staticAssets.dispose()
+    throw error
+  }
   const origin = `http://127.0.0.1:${address.port}`
 
   return {
@@ -691,8 +705,11 @@ export async function createSessionServer({
         if (session.reviewLease) clearReviewLeaseTimer(session.reviewLease)
       }
       sessions.clear()
-      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
-      staticAssets.clear()
+      try {
+        await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+      } finally {
+        staticAssets.dispose()
+      }
     },
   }
 }

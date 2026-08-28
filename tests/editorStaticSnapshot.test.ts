@@ -1,10 +1,12 @@
 import { request } from 'node:http'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error Node plugin server is intentionally authored as directly executable ESM.
 import { createSessionServer } from '../scripts/lib/session-server.mjs'
+// @ts-expect-error Node build snapshot is intentionally authored as directly executable ESM.
+import { snapshotEditorDist, takeEditorDistSnapshot } from '../scripts/lib/build-fingerprint.mjs'
 
 async function fixture(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'glb-label-static-snapshot-'))
@@ -32,6 +34,67 @@ function rawStatus(origin: string, requestPath: string): Promise<number> {
 }
 
 describe('editor static byte snapshot', () => {
+  it('consumes an opaque snapshot once and returns copies instead of mutable internal Map bytes', async () => {
+    const root = await fixture()
+    const captured = await snapshotEditorDist(root)
+    const assets = takeEditorDistSnapshot(captured.snapshot)
+    expect(Object.isFrozen(assets)).toBe(true)
+    expect(() => takeEditorDistSnapshot(captured.snapshot)).toThrow(/already consumed/i)
+
+    const first = assets.read('index.html')
+    expect(first).toBeDefined()
+    first?.fill(0)
+    expect(assets.read('index.html')?.toString('utf8')).toBe('<main>verified</main>')
+    expect(Reflect.set(assets, 'read', () => Buffer.from('tampered'))).toBe(false)
+
+    assets.dispose()
+    expect(() => assets.read('index.html')).toThrow(/disposed/i)
+  })
+
+  it('serves every current dist extension with an explicit nosniff MIME, including SVG', async () => {
+    const root = await fixture()
+    const expected = new Map([
+      ['asset.html', 'text/html; charset=utf-8'],
+      ['asset.js', 'text/javascript; charset=utf-8'],
+      ['asset.css', 'text/css; charset=utf-8'],
+      ['asset.json', 'application/json; charset=utf-8'],
+      ['asset.png', 'image/png'],
+      ['asset.svg', 'image/svg+xml'],
+      ['asset.wasm', 'application/wasm'],
+      ['asset.glb', 'model/gltf-binary'],
+      ['asset.woff2', 'font/woff2'],
+      ['asset.woff', 'font/woff'],
+      ['asset.ttf', 'font/ttf'],
+      ['asset.md', 'text/markdown; charset=utf-8'],
+      ['asset.txt', 'text/plain; charset=utf-8'],
+    ])
+    for (const fileName of expected.keys()) await writeFile(path.join(root, fileName), 'fixture')
+    const server = await createSessionServer({ editorRoot: root })
+    try {
+      for (const [fileName, mime] of expected) {
+        const response = await fetch(`${server.origin}/${fileName}`)
+        expect(response.status, fileName).toBe(200)
+        expect(response.headers.get('content-type'), fileName).toBe(mime)
+        expect(response.headers.get('x-content-type-options'), fileName).toBe('nosniff')
+      }
+
+      const currentExtensions = new Set<string>()
+      const visit = async (directory: string) => {
+        for (const entry of await readdir(directory, { withFileTypes: true })) {
+          if (entry.name === 'build-fingerprint.json') continue
+          const absolute = path.join(directory, entry.name)
+          if (entry.isDirectory()) await visit(absolute)
+          else currentExtensions.add(path.extname(entry.name))
+        }
+      }
+      await visit(path.resolve('dist'))
+      const recognizedExtensions = new Set([...expected.keys()].map((fileName) => path.extname(fileName)))
+      expect([...currentExtensions].every((extension) => recognizedExtensions.has(extension))).toBe(true)
+    } finally {
+      await server.close()
+    }
+  })
+
   it('serves immutable regular-file bytes without reopening renamed, deleted, added, or symlinked paths', async () => {
     const root = await fixture()
     const server = await createSessionServer({ editorRoot: root })
