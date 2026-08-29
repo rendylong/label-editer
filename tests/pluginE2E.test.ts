@@ -1135,8 +1135,42 @@ describe('GLB label plugin E2E', () => {
       })
       expect(loaded).toMatchObject({ ok: true, operation: 'load_model' })
       const fixture = reviewEvidenceFixture()
+      const inspected = bridgeData<{ meshes: Array<{
+        stableSelector: string
+        meshIndex: number
+        nodeIndex: number
+        nodeName: string
+      }> }>(loaded, 'inspect review target')
+      const exactTarget = inspected.meshes.find((mesh) => mesh.nodeName === 'Cube.001_Material.001_0')
+      if (!exactTarget) throw new Error('Review fixture target was not present in browser inspection')
+      ;(fixture.spec.areas as Array<Record<string, unknown>>)[0].target = {
+        stableSelector: exactTarget.stableSelector,
+        meshIndex: exactTarget.meshIndex,
+        nodeName: exactTarget.nodeName,
+      }
+      fixture.request.designGate.currentDocumentJson = JSON.stringify(fixture.spec)
       const applied = await runtime.callBridge(session, 'applySpec', { spec: fixture.spec, assetUrls: {} })
       expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, operation: 'apply_label_spec' })
+      const appliedProject = bridgeData<{ project: { areas: Array<Record<string, unknown>> } }>(
+        applied,
+        'apply exact review target',
+      ).project
+      expect(appliedProject.areas[0]).toMatchObject({
+        meshIndex: exactTarget.meshIndex,
+        nodeIndex: exactTarget.nodeIndex,
+        stableSelector: exactTarget.stableSelector,
+        nodeName: exactTarget.nodeName,
+      })
+      expect(await runtime.callBridge(session, 'applyProject', { project: structuredClone(appliedProject) }))
+        .toMatchObject({ ok: true, operation: 'apply_label_project' })
+      const wrongNode = structuredClone(appliedProject)
+      wrongNode.areas[0].nodeIndex = exactTarget.nodeIndex + 1
+      wrongNode.areas[0].stableSelector = `mesh:${String(exactTarget.meshIndex)}/node:${String(exactTarget.nodeIndex + 1)}`
+      expect(await runtime.callBridge(session, 'applyProject', { project: wrongNode })).toMatchObject({
+        ok: false,
+        operation: 'apply_label_project',
+        error: { code: 'INVALID_LABEL_SPEC' },
+      })
       expect(await runtime.callBridge(session, 'waitForReady', { timeoutMs: 60_000 }))
         .toMatchObject({ ok: true, operation: 'wait_for_ready' })
 

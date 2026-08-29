@@ -502,6 +502,22 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
   const meshIndexValue = requiredAreaValue(raw, 'meshIndex', legacy, 0)
   const meshIndex = areaFiniteNumber(meshIndexValue, 'meshIndex')
   if (!Number.isInteger(meshIndex) || meshIndex < 0) areaError('meshIndex', '必须是非负整数')
+  const hasNodeIndex = raw.nodeIndex !== undefined
+  const hasStableSelector = raw.stableSelector !== undefined
+  if (hasNodeIndex !== hasStableSelector) {
+    areaError('node identity', 'nodeIndex 与 stableSelector 必须同时提供或同时省略')
+  }
+  let nodeIndex: number | undefined
+  let stableSelector: string | undefined
+  if (hasNodeIndex && hasStableSelector) {
+    nodeIndex = areaFiniteNumber(raw.nodeIndex, 'nodeIndex')
+    if (!Number.isInteger(nodeIndex) || nodeIndex < 0) areaError('nodeIndex', '必须是非负整数')
+    stableSelector = nonEmptyString(raw.stableSelector, 'stableSelector', 128)
+    const match = /^mesh:(0|[1-9]\d*)\/node:(0|[1-9]\d*)$/.exec(stableSelector)
+    if (!match || Number(match[1]) !== meshIndex || Number(match[2]) !== nodeIndex) {
+      areaError('stableSelector', '必须精确匹配 meshIndex 与 nodeIndex')
+    }
+  }
   const name = typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : nodeNameValue
   if (raw.surfaceMode !== undefined && raw.surfaceMode !== 'overlay' && raw.surfaceMode !== 'replace') {
     areaError('surfaceMode', '必须是 overlay 或 replace')
@@ -555,6 +571,7 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
     id: idValue,
     name,
     meshIndex,
+    ...(nodeIndex === undefined ? {} : { nodeIndex, stableSelector }),
     nodeName: nodeNameValue,
     surfaceMode: raw.surfaceMode === 'overlay' || raw.surfaceMode === 'replace'
       ? raw.surfaceMode

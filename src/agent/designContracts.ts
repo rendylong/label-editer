@@ -780,7 +780,7 @@ async function verifyArtifactEvidence(
     if (!isRecord(value) || value.version !== 3 || !validateWorkflowProjectSchema(value)) {
       return workflowError('DIGEST_MISMATCH', 'Resolved Project is not a valid Project v3', field)
     }
-    assertDocumentAreaIdentity(value)
+    assertDocumentAreaIdentity(value, field)
     const revision = `sha256:${await sha256Canonical(value)}`
     const targetDigest = await areaTargetsSha256(value)
     if (manifest.resolvedProject.revision !== revision
@@ -898,14 +898,26 @@ function documentAreas(document: UnknownRecord): UnknownRecord[] {
   return Array.isArray(document.areas) ? document.areas.filter(isRecord) : []
 }
 
-function assertDocumentAreaIdentity(document: UnknownRecord): void {
+function assertDocumentAreaIdentity(document: UnknownRecord, field = 'currentDocument.areas'): void {
   const ids = new Set<string>()
   const blueprintAreaIds = new Set<string>()
   for (const area of documentAreas(document)) {
     const id = typeof area.id === 'string' ? area.id : ''
     const blueprintAreaId = typeof area.blueprintAreaId === 'string' ? area.blueprintAreaId : ''
     if (!id || ids.has(id) || (blueprintAreaId && blueprintAreaIds.has(blueprintAreaId))) {
-      workflowError('APPROVAL_REQUIRED', 'Current Spec/Project area identity is missing or duplicated', 'currentDocument.areas')
+      workflowError('APPROVAL_REQUIRED', 'Current Spec/Project area identity is missing or duplicated', field)
+    }
+    if (document.version === 3) {
+      const hasNodeIndex = area.nodeIndex !== undefined
+      const hasStableSelector = area.stableSelector !== undefined
+      if (hasNodeIndex !== hasStableSelector
+        || (hasNodeIndex && (
+          !Number.isInteger(area.meshIndex)
+          || !Number.isInteger(area.nodeIndex)
+          || area.stableSelector !== `mesh:${String(area.meshIndex)}/node:${String(area.nodeIndex)}`
+        ))) {
+        workflowError('APPROVAL_REQUIRED', 'Project area exact node identity is incomplete or inconsistent', field)
+      }
     }
     ids.add(id)
     if (blueprintAreaId) blueprintAreaIds.add(blueprintAreaId)
@@ -1221,7 +1233,12 @@ function areaTargetProjection(document: UnknownRecord): UnknownRecord[] {
     blueprintAreaId: area.blueprintAreaId ?? null,
     target: isRecord(area.target)
       ? structuredClone(area.target)
-      : { meshIndex: area.meshIndex, nodeName: area.nodeName },
+      : {
+          meshIndex: area.meshIndex,
+          nodeIndex: area.nodeIndex ?? null,
+          stableSelector: area.stableSelector ?? null,
+          nodeName: area.nodeName,
+        },
     surfaceMode: area.surfaceMode,
     side: area.side ?? null,
     range: structuredClone(area.range),
@@ -1258,13 +1275,17 @@ function assertResolvedDocumentMapping(source: UnknownRecord, resolved: UnknownR
       workflowError('STALE_APPROVAL', 'Resolved Project mapping differs from the reviewed Spec', 'reviewManifest.resolvedProject')
     }
     const target = isRecord(area.target) ? area.target : {}
+    if (!Number.isInteger(live.nodeIndex)
+      || typeof live.stableSelector !== 'string'
+      || live.stableSelector !== `mesh:${String(live.meshIndex)}/node:${String(live.nodeIndex)}`) {
+      workflowError('STALE_APPROVAL', 'Resolved Project does not preserve exact Spec node identity', 'reviewManifest.resolvedProject')
+    }
     if ((typeof target.meshIndex === 'number' && target.meshIndex !== live.meshIndex)
       || (typeof target.nodeName === 'string' && target.nodeName !== live.nodeName)) {
       workflowError('STALE_APPROVAL', 'Resolved Project target differs from the reviewed Spec selector', 'reviewManifest.resolvedProject')
     }
     if (typeof target.stableSelector === 'string') {
-      const match = /^mesh:(\d+)\/node:(\d+)$/.exec(target.stableSelector)
-      if (!match || Number(match[1]) !== live.meshIndex) {
+      if (target.stableSelector !== live.stableSelector) {
         workflowError('STALE_APPROVAL', 'Resolved Project target differs from the reviewed stable selector', 'reviewManifest.resolvedProject')
       }
     }

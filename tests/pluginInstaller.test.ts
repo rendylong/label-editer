@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -1138,6 +1138,7 @@ describe('GLB label editor installer', () => {
       '@csstools/css-tokenizer': '4.0.0',
       ajv: '8.20.0',
       playwright: '1.62.1',
+      typescript: '^5.9.0',
     })
     expect(JSON.stringify(shrinkwrap)).not.toContain('registry.npmmirror.com')
     const lockedPaths = Object.keys(shrinkwrap.packages)
@@ -1437,6 +1438,13 @@ describe('GLB label editor installer', () => {
         'review-manifest.json', 'review-sheet.png', 'surface-front.png',
       ]
       expect((await readdir(fixture.outputDir)).sort()).toEqual(expectedOutputFiles)
+      const resolvedProject = JSON.parse(await readFile(path.join(fixture.outputDir, 'resolved-project.lbl.json'), 'utf8'))
+      expect(resolvedProject.areas[0]).toMatchObject({
+        meshIndex: fixture.target.meshIndex,
+        nodeIndex: fixture.target.nodeIndex,
+        stableSelector: fixture.target.stableSelector,
+        nodeName: fixture.target.nodeName,
+      })
       expect(envelope.data.artifacts).toEqual(manifest.artifacts.map((artifact: { path: string }) => ({
         ...artifact,
         path: path.join(canonicalOutputDir, artifact.path),
@@ -1543,6 +1551,32 @@ describe('GLB label editor installer', () => {
     },
     180_000,
   )
+
+  it('returns a controlled JSON envelope when the installed gate transpiler dependency is unavailable', async () => {
+    const installed = await installedPackage()
+    const runtimeRoot = path.join(installed.installRoot, 'runtime')
+    const dependencyPath = path.join(runtimeRoot, 'node_modules/typescript')
+    const parkedPath = path.join(runtimeRoot, 'node_modules/.typescript-missing-probe')
+    await rename(dependencyPath, parkedPath)
+    try {
+      const result = await runBoundedCommand('installed missing gate transpiler', process.execPath, [
+        installed.launcherPath, 'gate', 'design', 'missing-gate-request.json', '--json',
+      ], {
+        cwd: installed.callerRoot,
+        timeoutMs: 30_000,
+        maxBufferBytes: 16 * 1024 * 1024,
+      })
+      expect(result.status).not.toBe(0)
+      expect(() => JSON.parse(result.stdout)).not.toThrow()
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        ok: false,
+        operation: 'gate',
+        error: { code: 'INTERNAL_ERROR' },
+      })
+    } finally {
+      await rename(parkedPath, dependencyPath)
+    }
+  }, 180_000)
 
   it('unit-tests installer staging and Codex registration with controlled commands', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'glb-label-installer-'))

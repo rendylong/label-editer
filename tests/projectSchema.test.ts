@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { Document, NodeIO } from '@gltf-transform/core'
 import labelProjectV3Schema from '../src/agent/label-project-v3.schema.json'
+import { validateWorkflowProjectSchema } from '../src/agent/generated/designContractValidators'
 import { importProject } from '../src/app/actions'
 import { parseLabelProject, serializeLabelProject } from '../src/app/projectSchema'
 import { resolveCarrierSurface } from '../src/label/paper'
@@ -206,6 +207,53 @@ afterEach(() => {
 })
 
 describe('label project v3', () => {
+  it('round-trips exact node identity while accepting identity-less legacy Project v3 areas', () => {
+    const exact = projectWithLayers([makeArea().layers[0]]) as any
+    exact.areas[0].nodeIndex = 6
+    exact.areas[0].stableSelector = 'mesh:0/node:6'
+
+    const parsed = parseLabelProject(exact)
+    const serialized = serializeLabelProject('bottle.glb', parsed.areas)
+
+    expect(serialized.areas[0]).toMatchObject({
+      meshIndex: 0,
+      nodeIndex: 6,
+      stableSelector: 'mesh:0/node:6',
+    })
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(serialized)).toBe(true)
+    expect(validateWorkflowProjectSchema(serialized)).toBe(true)
+
+    const legacy = serializeLabelProject('bottle.glb', [makeArea()])
+    expect(parseLabelProject(legacy).areas[0]).not.toHaveProperty('nodeIndex')
+    expect(parseLabelProject(legacy).areas[0]).not.toHaveProperty('stableSelector')
+    expect(validateWorkflowProjectSchema(legacy)).toBe(true)
+  })
+
+  it.each([
+    ['selector without node index', { stableSelector: 'mesh:0/node:6' }],
+    ['node index without selector', { nodeIndex: 6 }],
+    ['abbreviated selector', { nodeIndex: 6, stableSelector: 'mesh:0' }],
+  ])('rejects an incomplete or malformed exact node identity: %s', (_label, identity) => {
+    const project = serializeLabelProject('bottle.glb', [makeArea()]) as any
+    Object.assign(project.areas[0], identity)
+
+    expect(() => parseLabelProject(project)).toThrow(/stableSelector|nodeIndex|node identity/i)
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(project)).toBe(false)
+    expect(validateWorkflowProjectSchema(project)).toBe(false)
+  })
+
+  it.each([
+    ['selector with another mesh', { nodeIndex: 6, stableSelector: 'mesh:1/node:6' }],
+    ['selector with another node', { nodeIndex: 6, stableSelector: 'mesh:0/node:7' }],
+  ])('rejects a schema-shaped but internally inconsistent exact node identity: %s', (_label, identity) => {
+    const project = serializeLabelProject('bottle.glb', [makeArea()]) as any
+    Object.assign(project.areas[0], identity)
+
+    expect(new Ajv2020({ allErrors: true, strict: true }).compile(labelProjectV3Schema)(project)).toBe(true)
+    expect(validateWorkflowProjectSchema(project)).toBe(true)
+    expect(() => parseLabelProject(project)).toThrow(/stableSelector|nodeIndex|node identity/i)
+  })
+
   it('rejects duplicate layer ids before canonical rendering becomes ambiguous', () => {
     const first = makeArea().layers[0]
     const project = projectWithLayers([first, { ...first, x: first.x + 20 }])

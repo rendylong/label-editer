@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, open, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
 import { createOperations } from '../scripts/lib/operations.mjs'
 // @ts-expect-error Pure Node ESM module is consumed directly by the CLI.
@@ -235,6 +235,61 @@ describe('label review operation', () => {
     })
     expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_USAGE', message: expect.stringMatching(/handoff.*bounded|handoff.*size/i) } })
     expect(test.sessions).toBe(0)
+  })
+
+  it('bounds a concurrent input growth to 16 MiB and fails structurally before opening Chromium', async () => {
+    const input = await fixture()
+    const maxBytes = 16 * 1024 * 1024
+    const largeDocument = structuredClone(input.document)
+    largeDocument.modelFileName = ''
+    const emptyBytes = Buffer.byteLength(JSON.stringify(largeDocument))
+    largeDocument.modelFileName = 'x'.repeat(maxBytes - 1 - emptyBytes)
+    const initialBytes = JSON.stringify(largeDocument)
+    expect(Buffer.byteLength(initialBytes)).toBe(maxBytes - 1)
+    input.document = largeDocument
+    await writeFile(input.inputPath, initialBytes)
+
+    const probe = await open(input.inputPath, 'r')
+    const fileHandlePrototype = Object.getPrototypeOf(probe) as {
+      read: (...args: any[]) => Promise<{ bytesRead: number; buffer: Uint8Array }>
+    }
+    await probe.close()
+    const originalRead = fileHandlePrototype.read
+    const requestedLengths: number[] = []
+    const bufferLengths: number[] = []
+    let growthInjected = false
+    const readSpy = vi.spyOn(fileHandlePrototype, 'read').mockImplementation(async function (this: unknown, ...args: any[]) {
+      const [buffer, _offset, length] = args as [Uint8Array, number, number, number]
+      if (buffer instanceof Uint8Array) {
+        bufferLengths.push(buffer.byteLength)
+        requestedLengths.push(length)
+        if (!growthInjected && buffer.byteLength > 15 * 1024 * 1024) {
+          growthInjected = true
+          await appendFile(input.inputPath, 'growth-after-open')
+        }
+      }
+      return originalRead.apply(this, args as any)
+    })
+
+    try {
+      const test = harness(input)
+      const result = await createOperations(test.runtime).review({
+        inputPath: input.inputPath,
+        glbPath: input.glbPath,
+        outputDir: input.outputDir,
+      })
+
+      expect(growthInjected).toBe(true)
+      expect(Math.max(...bufferLengths)).toBeLessThanOrEqual(maxBytes)
+      expect(Math.max(...requestedLengths)).toBeLessThanOrEqual(maxBytes)
+      expect(result).toMatchObject({
+        ok: false,
+        error: { code: expect.stringMatching(/^(INVALID_USAGE|STALE_APPROVAL)$/) },
+      })
+      expect(test.sessions).toBe(0)
+    } finally {
+      readSpy.mockRestore()
+    }
   })
 
   it('rejects a symlink handoff during discovery before opening Chromium', async () => {

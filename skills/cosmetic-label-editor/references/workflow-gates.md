@@ -45,6 +45,6 @@ Production request:
 }
 ```
 
-The production review directory also contains `resolved-project.lbl.json`. `review-manifest.json` separately binds its exact revision, SHA-256, and canonical area-target digest; the production gate reads that exact Project v3 and checks it against the original reviewed Spec v2 or Project v3 instead of relabeling the input kind.
+The production review directory also contains `resolved-project.lbl.json`. `review-manifest.json` separately binds its exact revision, SHA-256, and canonical area-target digest; the production gate reads that exact Project v3 and checks it against the original reviewed Spec v2 or Project v3 instead of relabeling the input kind. Project v3 areas may omit both `nodeIndex` and a full `mesh:n/node:m` `stableSelector` only for legacy compatibility. A Project resolved from a Spec must preserve both fields and the production gate rejects a mesh-only or different-node substitute.
 
 Each evidence root must contain exactly its manifest, the bound resolved Project when applicable, and the artifact paths declared by that manifest. The command freshly verifies manifest bytes, the exact portable file set, regular-file/no-symlink status, per-file and aggregate budgets, SHA-256, MIME, and dimensions. Run production gate once after production approval before QC, again after any recapture or repair, and immediately before apply/export. Never continue after a nonzero exit or `ok: false` envelope.

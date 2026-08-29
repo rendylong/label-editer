@@ -80,7 +80,12 @@ function areaTargetsSha256(document: any): string {
   const areas = document.areas.map((area: any) => ({
     id: area.id,
     blueprintAreaId: area.blueprintAreaId ?? null,
-    target: area.target ?? { meshIndex: area.meshIndex, nodeName: area.nodeName },
+    target: area.target ?? {
+      meshIndex: area.meshIndex,
+      nodeIndex: area.nodeIndex ?? null,
+      stableSelector: area.stableSelector ?? null,
+      nodeName: area.nodeName,
+    },
     surfaceMode: area.surfaceMode,
     side: area.side ?? null,
     range: area.range,
@@ -154,7 +159,8 @@ function labelDocument(sourceBlueprint: LayoutBlueprintV1, blueprintSha256: stri
 
 function projectDocument(sourceBlueprint: LayoutBlueprintV1, blueprintSha256: string, designManifestSha256: string): any {
   const shell: LabelAreaConfig = {
-    id: 'front', name: 'Front', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay', side: 'front',
+    id: 'front', name: 'Front', meshIndex: 0, nodeIndex: 1, stableSelector: 'mesh:0/node:1',
+    nodeName: 'Bottle', surfaceMode: 'overlay', side: 'front',
     remap: {
       mode: 'cylindrical', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0,
       mirrorU: false, planarBox: { min: [-1, -1, -1], max: [1, 1, 1] },
@@ -744,6 +750,48 @@ describe('production approval gate', () => {
     })
   })
 
+  it('rejects a resolved Spec Project that silently switches to another node sharing the same mesh', async () => {
+    const state = workflowFixture()
+    state.resolvedProject.areas[0].nodeIndex = 2
+    state.resolvedProject.areas[0].stableSelector = 'mesh:0/node:2'
+    const resolvedProjectText = JSON.stringify(state.resolvedProject)
+    state.productionArtifactFiles.set('resolved-project.lbl.json', resolvedProjectText)
+    state.productionManifest.resolvedProject = {
+      path: 'resolved-project.lbl.json',
+      revision: revisionOf(state.resolvedProject),
+      sha256: sha256(resolvedProjectText),
+      areaTargetsSha256: areaTargetsSha256(state.resolvedProject),
+    }
+    state.productionApproval.review_manifest_sha256 = sha256(JSON.stringify(state.productionManifest))
+
+    await expectWorkflowCode(
+      verifyProductionGate(productionGateInput(state)),
+      'STALE_APPROVAL',
+      'reviewManifest.resolvedProject',
+    )
+  })
+
+  it('rejects an identity-less legacy Project as the resolved evidence for a Spec approval', async () => {
+    const state = workflowFixture()
+    delete state.resolvedProject.areas[0].nodeIndex
+    delete state.resolvedProject.areas[0].stableSelector
+    const resolvedProjectText = JSON.stringify(state.resolvedProject)
+    state.productionArtifactFiles.set('resolved-project.lbl.json', resolvedProjectText)
+    state.productionManifest.resolvedProject = {
+      path: 'resolved-project.lbl.json',
+      revision: revisionOf(state.resolvedProject),
+      sha256: sha256(resolvedProjectText),
+      areaTargetsSha256: areaTargetsSha256(state.resolvedProject),
+    }
+    state.productionApproval.review_manifest_sha256 = sha256(JSON.stringify(state.productionManifest))
+
+    await expectWorkflowCode(
+      verifyProductionGate(productionGateInput(state)),
+      'STALE_APPROVAL',
+      'reviewManifest.resolvedProject',
+    )
+  })
+
   it('revalidates production PNG bytes, MIME, and dimensions on every invocation', async () => {
     const state = workflowFixture()
     state.productionArtifactFiles.set('label-front.png', pngBytes(1599, 1600))
@@ -866,6 +914,7 @@ describe('production approval gate', () => {
 
   it.each([
     ['canvas', (area: any) => { area.canvas.width += 1 }],
+    ['node identity', (area: any) => { area.nodeIndex = 2; area.stableSelector = 'mesh:0/node:2' }],
     ['axis minimum', (area: any) => { area.axisMin = -2 }],
     ['axis maximum', (area: any) => { area.axisMax = 2 }],
   ])('binds Project v3 %s into the production area-target digest', async (_label, mutate) => {
@@ -991,7 +1040,8 @@ describe('revision classification', () => {
   })
 
   it.each([
-    ['mesh target', (area: any) => { area.meshIndex = 3 }],
+    ['mesh target', (area: any) => { area.meshIndex = 3; area.stableSelector = 'mesh:3/node:1' }],
+    ['node target', (area: any) => { area.nodeIndex = 3; area.stableSelector = 'mesh:0/node:3' }],
     ['range', (area: any) => { area.range.uStart = 0.2 }],
     ['translation', (area: any) => { area.remap.origin[0] = 0.5 }],
     ['orientation', (area: any) => { area.remap.axis = [1, 0, 0] }],

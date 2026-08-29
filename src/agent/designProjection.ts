@@ -328,7 +328,11 @@ function expectedProjectAreas(blueprint: LayoutBlueprintV1, currentDocument: Unk
     const compiled = compileBlueprintArea(blueprint, area, {
       blueprintAreaId: area.id,
       name: shell.name,
-      target: { meshIndex: shell.meshIndex, nodeName: shell.nodeName },
+      target: {
+        meshIndex: shell.meshIndex,
+        ...(shell.stableSelector === undefined ? {} : { stableSelector: shell.stableSelector }),
+        nodeName: shell.nodeName,
+      },
       surfaceMode: shell.surfaceMode,
       range: shell.range,
     })
@@ -345,7 +349,16 @@ function expectedProjectAreas(blueprint: LayoutBlueprintV1, currentDocument: Unk
       layers: [], globalCraft: { craft: [] }, fonts: [], undoStack: [], redoStack: [],
     }
     const mapped = applyStructuredLabelSpec(base, { version: 2, areas: [compiled] }, 'approved-projection').areas[0]
-    return { ...mapped, id: shell.id, meshIndex: shell.meshIndex, nodeName: shell.nodeName }
+    return {
+      ...mapped,
+      id: shell.id,
+      meshIndex: shell.meshIndex,
+      ...(shell.nodeIndex === undefined ? {} : {
+        nodeIndex: shell.nodeIndex,
+        stableSelector: shell.stableSelector,
+      }),
+      nodeName: shell.nodeName,
+    }
   })
 }
 

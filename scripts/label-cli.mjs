@@ -154,8 +154,16 @@ export async function runCli(argv, dependencies = {}) {
     parsed = parseArgv(argv)
     assertShape(parsed)
     if (parsed.command === 'gate') {
-      const runGate = dependencies.gateRunner
-        ?? (await import('./lib/workflow-gate.mjs')).runWorkflowGate
+      let runGate = dependencies.gateRunner
+      if (!runGate) {
+        try {
+          runGate = (await import('./lib/workflow-gate.mjs')).runWorkflowGate
+        } catch {
+          const error = new Error('Workflow gate runtime could not be initialized')
+          error.code = 'INTERNAL_ERROR'
+          throw error
+        }
+      }
       envelope = await runGate(parsed.positional[0], parsed.positional[1], {
         allowedRoots: dependencies.runtimeOptions?.allowedRoots,
       })

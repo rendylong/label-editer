@@ -73,6 +73,12 @@ function structuredInvalidLabelSpec(issues: QcValidationIssue[]): Error {
   return error
 }
 
+function invalidLabelProject(message: string): Error {
+  const error = new Error(message) as Error & { code: string }
+  error.code = 'INVALID_LABEL_SPEC'
+  return error
+}
+
 function staleQcState(stage: string, component: QcValidationIssue['component'], areaId?: string): Error {
   const issue: QcValidationIssue = {
     severity: 'error',
@@ -239,6 +245,8 @@ async function buildAreasFromSpec(spec: LabelSpecV2, assetUrls: Record<string, s
       id: areaSpec.id,
       name: areaSpec.name,
       meshIndex: target.meshIndex,
+      nodeIndex: target.nodeIndex,
+      stableSelector: target.stableSelector,
       nodeName: target.nodeName,
       surfaceMode: areaSpec.surfaceMode,
       side: areaSpec.side,
@@ -265,6 +273,8 @@ async function buildAreasFromSpec(spec: LabelSpecV2, assetUrls: Record<string, s
       ...mapped,
       id: areaSpec.id,
       meshIndex: target.meshIndex,
+      nodeIndex: target.nodeIndex,
+      stableSelector: target.stableSelector,
       nodeName: target.nodeName,
       surfaceMode: areaSpec.surfaceMode,
       side: areaSpec.side,
@@ -951,13 +961,31 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
       }
     },
     applyProject: async (input) => {
-      const project = parseLabelProject(input.project)
+      let project: ReturnType<typeof parseLabelProject>
+      try {
+        project = parseLabelProject(input.project)
+      } catch (error) {
+        throw invalidLabelProject(`Invalid Label Project v3: ${error instanceof Error ? error.message : String(error)}`)
+      }
       const model = useModelStore.getState()
       if (!model.glbBytes) throw new Error('No model is loaded')
       if (project.modelFileName && model.modelName && project.modelFileName !== model.modelName) {
         const error = new Error(`Project targets ${project.modelFileName}, but the loaded model is ${model.modelName}`) as Error & { code: string }
         error.code = 'INVALID_LABEL_SPEC'
         throw error
+      }
+      const exactAreas = project.areas.filter((area) => area.nodeIndex !== undefined && area.stableSelector !== undefined)
+      if (exactAreas.length > 0) {
+        const inspection = await inspectModel(model.glbBytes, model.modelName)
+        for (const area of exactAreas) {
+          const target = inspection.meshes.find((mesh) => mesh.stableSelector === area.stableSelector)
+          if (!target
+            || target.meshIndex !== area.meshIndex
+            || target.nodeIndex !== area.nodeIndex
+            || target.nodeName !== area.nodeName) {
+            throw invalidLabelProject(`Project area ${area.id} does not match an exact node in the loaded model`)
+          }
+        }
       }
       normalizedSpec = undefined
       const areas: LabelAreaConfig[] = project.areas.map((area) => ({

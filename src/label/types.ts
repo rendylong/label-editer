@@ -272,6 +272,10 @@ export interface LabelAreaConfig {
   /** 区域名称（默认 = 目标网格名） */
   name: string
   meshIndex: number
+  /** Exact glTF node identity when this area was resolved from model inspection. */
+  nodeIndex?: number
+  /** Full stable selector paired with nodeIndex; omitted only for legacy Projects. */
+  stableSelector?: string
   nodeName: string
   /**
    * overlay：目标是瓶身等产品本体，保留原几何/材质并新增透明贴标层；

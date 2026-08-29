@@ -74,7 +74,8 @@ async function gateFixture() {
   const document = { version: 2, areas: [compiled] }
   const documentText = await writeJson(path.join(evidence, 'working.json'), document)
   const shell: any = {
-    id: 'front', name: 'Front', meshIndex: 0, nodeName: 'Bottle', surfaceMode: 'overlay', side: 'front',
+    id: 'front', name: 'Front', meshIndex: 0, nodeIndex: 0, stableSelector: 'mesh:0/node:0',
+    nodeName: 'Bottle', surfaceMode: 'overlay', side: 'front',
     remap: { mode: 'cylindrical', axis: [0, 1, 0], origin: [0, 0, 0], radius: 1, wrap: 1, offset: 0, mirrorU: false, planarBox: { min: [-1, -1, -1], max: [1, 1, 1] } },
     range: structuredClone(compiled.range), canvas: { width: 800, height: 1200, aspect: 2 / 3 },
     paper: { enabled: false, color: '#ffffff', opacity: 0 }, layers: [], globalCraft: { craft: [] }, fonts: [],

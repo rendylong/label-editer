@@ -1,8 +1,34 @@
 import { readFile } from 'node:fs/promises'
-import { stripTypeScriptTypes } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
 const SOURCE_EXTENSIONS = ['.ts', '.tsx', '.mjs', '.js', '.json']
+
+function transpileTypeScript(source, fileName) {
+  const result = ts.transpileModule(source, {
+    fileName,
+    reportDiagnostics: true,
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler,
+      jsx: ts.JsxEmit.ReactJSX,
+      isolatedModules: true,
+      esModuleInterop: true,
+      allowSyntheticDefaultImports: true,
+      sourceMap: false,
+      inlineSourceMap: false,
+    },
+  })
+  const errors = result.diagnostics?.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error) ?? []
+  if (errors.length > 0) {
+    const message = errors
+      .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'))
+      .join('; ')
+    throw new Error(`TypeScript gate transpilation failed for ${fileName}: ${message}`)
+  }
+  return result.outputText
+}
 
 export async function resolve(specifier, context, nextResolve) {
   try {
@@ -40,7 +66,7 @@ export async function load(url, context, nextLoad) {
     const source = await readFile(fileURLToPath(url), 'utf8')
     return {
       format: 'module',
-      source: stripTypeScriptTypes(source, { mode: 'strip', sourceMap: false }),
+      source: transpileTypeScript(source, fileURLToPath(url)),
       shortCircuit: true,
     }
   }

@@ -373,6 +373,10 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name", "meshIndex", "nodeName", "surfaceMode", "remap", "range", "canvas", "paper", "layers", "globalCraft", "fonts", "referenceVisible"],
+      "dependentRequired": {
+        "nodeIndex": ["stableSelector"],
+        "stableSelector": ["nodeIndex"]
+      },
       "allOf": [{
         "if": {
           "properties": { "carrier": { "enum": ["direct_surface_print", "in_mold", "foil_or_ink_only", "bare"] } },
@@ -384,6 +388,8 @@
         "id": { "type": "string", "minLength": 1 },
         "name": { "type": "string", "minLength": 1 },
         "meshIndex": { "type": "integer", "minimum": 0 },
+        "nodeIndex": { "type": "integer", "minimum": 0 },
+        "stableSelector": { "type": "string", "pattern": "^mesh:(0|[1-9][0-9]*)/node:(0|[1-9][0-9]*)$" },
         "nodeName": { "type": "string", "minLength": 1 },
         "surfaceMode": { "enum": ["overlay", "replace"] },
         "side": { "enum": ["front", "back", "left", "right", "wrap", "top", "bottom", "neck", "custom"] },

@@ -1,10 +1,9 @@
 import Ajv2020 from 'ajv/dist/2020.js'
 import { randomBytes } from 'node:crypto'
-import { constants as fsConstants } from 'node:fs'
 import { lstat, open, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { failure, success } from './envelope.mjs'
-import { snapshotRegularDirectory } from './bounded-file-reader.mjs'
+import { readBoundedRegularFile, snapshotRegularDirectory } from './bounded-file-reader.mjs'
 import { publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
 import { inspectProject, patchLabelSpec, revisionOf } from './project-control.mjs'
 import { buildQcManifest, parseQcCameraConfig, qcArtifactRelativePath, validateQcManifest } from './qc-output.mjs'
@@ -291,43 +290,23 @@ async function resolveReviewRegularPath(rootPolicy, inputPath, label) {
   return resolveAllowedPath(rootPolicy, absolute)
 }
 
-function fileSnapshotIdentity(info) {
-  return {
-    dev: String(info.dev),
-    ino: String(info.ino),
-    size: String(info.size),
-    mtimeNs: String(info.mtimeNs),
-    ctimeNs: String(info.ctimeNs),
-  }
-}
-
 async function readStableReviewFile(filePath, label, maxBytes) {
-  const beforePath = await lstat(filePath, { bigint: true })
-  if (!beforePath.isFile() || beforePath.isSymbolicLink()) throw reviewUsageError(`${label} must be a regular file`)
-  if (beforePath.size < 1n || beforePath.size > BigInt(maxBytes)) {
-    throw reviewUsageError(`${label} exceeds the bounded review input size`)
-  }
-  const handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
-  try {
-    const beforeHandle = await handle.stat({ bigint: true })
-    if (JSON.stringify(fileSnapshotIdentity(beforeHandle)) !== JSON.stringify(fileSnapshotIdentity(beforePath))) {
-      throw staleReviewError(`${label} changed before bounded readback`)
-    }
-    const bytes = new Uint8Array(await handle.readFile())
-    const [afterHandle, afterPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      lstat(filePath, { bigint: true }),
-    ])
-    const identity = fileSnapshotIdentity(beforePath)
-    if (bytes.byteLength !== Number(beforePath.size)
-      || JSON.stringify(fileSnapshotIdentity(afterHandle)) !== JSON.stringify(identity)
-      || JSON.stringify(fileSnapshotIdentity(afterPath)) !== JSON.stringify(identity)) {
-      throw staleReviewError(`${label} changed during bounded readback`)
-    }
-    return { bytes, sha256: sha256Bytes(bytes), identity }
-  } finally {
-    await handle.close()
-  }
+  const { bytes, identity } = await readBoundedRegularFile(filePath, {
+    label,
+    maxBytes,
+    minBytes: 1,
+    code: 'INVALID_USAGE',
+    pathCode: 'PATH_NOT_ALLOWED',
+    makeError: (code, message) => {
+      if (code === 'PATH_NOT_ALLOWED') {
+        const error = new Error(message)
+        error.code = code
+        return error
+      }
+      return /changed|grew/i.test(message) ? staleReviewError(message) : reviewUsageError(message)
+    },
+  })
+  return { bytes, sha256: sha256Bytes(bytes), identity }
 }
 
 async function readReviewSnapshot(sources, { parse = false } = {}) {
