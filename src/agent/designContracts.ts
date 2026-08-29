@@ -18,6 +18,7 @@ import { WorkflowGateError, type WorkflowGateErrorCode } from './workflowGateErr
 import { validateManifestSemantics } from '../../scripts/lib/design-manifest-core.mjs'
 import { validateFontStack } from '../label/fontStack'
 import { canonicalLayerOrder, compareOrdinalText } from '../label/layerOrder'
+import { parsePortablePng } from '../../scripts/lib/png-core.mjs'
 
 export { WorkflowGateError } from './workflowGateError'
 export type { WorkflowGateErrorCode } from './workflowGateError'
@@ -233,6 +234,7 @@ export interface ReviewManifestV1 {
   version: 1
   createdAt: string
   input: { kind: 'label-spec-v2' | 'label-project-v3'; revision: string; sha256: string }
+  resolvedProject: { path: 'resolved-project.lbl.json'; revision: string; sha256: string; areaTargetsSha256: string }
   blueprint: { revision: string; sha256: string }
   designReviewManifest: { sha256: string }
   model: { fingerprint: string }
@@ -277,10 +279,16 @@ export interface WorkflowJsonSource {
   read: () => string | Uint8Array | Promise<string | Uint8Array>
 }
 
+export interface WorkflowArtifactReader {
+  list: () => readonly string[] | Promise<readonly string[]>
+  read: (relativePath: string) => string | Uint8Array | Promise<string | Uint8Array>
+}
+
 export interface DesignGateInput {
   handoff: unknown
   blueprint: WorkflowJsonSource
   designReviewManifest: WorkflowJsonSource
+  designReviewArtifacts: WorkflowArtifactReader
   currentDocument: WorkflowJsonSource
   approvalRecord?: unknown
 }
@@ -293,12 +301,14 @@ export interface DesignGateResult {
   designReviewManifestSha256: string
   documentRevision: string
   documentSha256: string
+  documentKind: 'label-spec-v2' | 'label-project-v3'
 }
 
 export interface ProductionGateInput extends Omit<DesignGateInput, 'approvalRecord'> {
   approvalRecord: unknown
   designApprovalRecord?: unknown
   productionReviewManifest: WorkflowJsonSource
+  productionReviewArtifacts: WorkflowArtifactReader
   modelFingerprint: string
 }
 
@@ -590,6 +600,7 @@ type UnknownRecord = Record<string, unknown>
 interface JsonEvidence<T> {
   value: T
   sha256: string
+  bytes: Uint8Array
 }
 
 interface DocumentEvidence extends JsonEvidence<UnknownRecord> {
@@ -654,7 +665,163 @@ async function readJsonEvidence<T>(source: WorkflowJsonSource, field: string): P
   } catch {
     return workflowError('DIGEST_MISMATCH', `Current ${field} evidence is not valid UTF-8 JSON`, field)
   }
-  return { value, sha256: await sha256Bytes(bytes) }
+  return { value, sha256: await sha256Bytes(bytes), bytes }
+}
+
+const MAX_WORKFLOW_EVIDENCE_FILES = 513
+const MAX_WORKFLOW_EVIDENCE_TOTAL_BYTES = 128 * 1024 * 1024
+
+function portableEvidencePath(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 2048 || value.includes('\0')
+    || value.startsWith('/') || /^[a-z]:/i.test(value) || value.includes('\\')) {
+    return workflowError('DIGEST_MISMATCH', 'Evidence path is not portable', field)
+  }
+  const parts = value.split('/')
+  if (parts.some((part) => !part || part === '.' || part === '..')) {
+    return workflowError('DIGEST_MISMATCH', 'Evidence path contains an unsafe segment', field)
+  }
+  return value
+}
+
+function artifactBytes(value: string | Uint8Array, field: string): Uint8Array {
+  const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value
+  if (!(bytes instanceof Uint8Array) || bytes.byteLength < 1 || bytes.byteLength > MAX_WORKFLOW_ARTIFACT_BYTES) {
+    return workflowError('DIGEST_MISMATCH', 'Evidence artifact has an invalid bounded size', field)
+  }
+  return bytes
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false
+  for (let index = 0; index < left.byteLength; index += 1) if (left[index] !== right[index]) return false
+  return true
+}
+
+async function verifyArtifactEvidence(
+  reader: WorkflowArtifactReader,
+  manifestEvidence: JsonEvidence<DesignReviewManifestV1 | ReviewManifestV1>,
+  kind: 'design' | 'production',
+): Promise<DocumentEvidence | undefined> {
+  const field = kind === 'design' ? 'designReviewArtifacts' : 'productionReviewArtifacts'
+  const manifestName = kind === 'design' ? 'design-review-manifest.json' : 'review-manifest.json'
+  let listed: readonly string[]
+  try { listed = await reader.list() } catch {
+    return workflowError('DIGEST_MISMATCH', 'Current evidence directory could not be listed', field)
+  }
+  if (!Array.isArray(listed) || listed.length < 1 || listed.length > MAX_WORKFLOW_EVIDENCE_FILES
+    || listed.some((entry) => typeof entry !== 'string')) {
+    return workflowError('DIGEST_MISMATCH', 'Current evidence directory has an invalid bounded file set', field)
+  }
+  const resolvedProjectPath = kind === 'production'
+    ? portableEvidencePath((manifestEvidence.value as ReviewManifestV1).resolvedProject.path, `${field}.resolvedProject.path`)
+    : undefined
+  const expected = [
+    manifestName,
+    ...(resolvedProjectPath === undefined ? [] : [resolvedProjectPath]),
+    ...manifestEvidence.value.artifacts.map((artifact) => portableEvidencePath(artifact.path, `${field}.path`)),
+  ]
+  const expectedKeys = new Map<string, string>()
+  for (const entry of expected) {
+    const key = entry.normalize('NFKC').toLowerCase()
+    if (expectedKeys.has(key)) return workflowError('DIGEST_MISMATCH', 'Manifest artifact paths are not portable and unique', `${field}.path`)
+    expectedKeys.set(key, entry)
+  }
+  const actualKeys = new Map<string, string>()
+  for (const raw of listed) {
+    const entry = portableEvidencePath(raw, field)
+    const key = entry.normalize('NFKC').toLowerCase()
+    if (actualKeys.has(key)) return workflowError('DIGEST_MISMATCH', 'Evidence file paths are not portable and unique', field)
+    actualKeys.set(key, entry)
+  }
+  if (expectedKeys.size !== actualKeys.size || [...expectedKeys].some(([key, value]) => actualKeys.get(key) !== value)) {
+    return workflowError('DIGEST_MISMATCH', 'Evidence directory does not contain the exact manifest file set', field)
+  }
+  let totalBytes = 0
+  const read = async (relativePath: string): Promise<Uint8Array> => {
+    let supplied: string | Uint8Array
+    try { supplied = await reader.read(relativePath) } catch {
+      return workflowError('DIGEST_MISMATCH', `Evidence artifact could not be read: ${relativePath}`, field)
+    }
+    const bytes = artifactBytes(supplied, field)
+    totalBytes += bytes.byteLength
+    if (totalBytes > MAX_WORKFLOW_EVIDENCE_TOTAL_BYTES) {
+      return workflowError('DIGEST_MISMATCH', 'Evidence artifacts exceed the bounded aggregate size', field)
+    }
+    return bytes
+  }
+  const manifestBytes = await read(manifestName)
+  if (!sameBytes(manifestBytes, manifestEvidence.bytes)) {
+    return workflowError('DIGEST_MISMATCH', 'Evidence manifest bytes differ from the supplied manifest', field)
+  }
+  let htmlCount = 0
+  let resolvedProject: DocumentEvidence | undefined
+  if (kind === 'design') {
+    const manifest = manifestEvidence.value as DesignReviewManifestV1
+    for (const viewKind of ['mockup-html', 'mockup-front', 'mockup-back'] as const) {
+      if (manifest.artifacts.filter((artifact) => artifact.viewKind === viewKind).length !== 1) {
+        return workflowError('DIGEST_MISMATCH', `Design evidence requires exactly one ${viewKind} artifact`, field)
+      }
+    }
+    for (const area of manifest.areas.filter((entry) => entry.carrier !== 'bare')) {
+      if (manifest.artifacts.filter((artifact) => artifact.viewKind === 'mockup-area' && artifact.areaId === area.id).length !== 1) {
+        return workflowError('DIGEST_MISMATCH', `Design evidence requires exactly one area artifact for ${area.id}`, field)
+      }
+    }
+  } else {
+    const manifest = manifestEvidence.value as ReviewManifestV1
+    const bytes = await read(resolvedProjectPath!)
+    if (await sha256Bytes(bytes) !== manifest.resolvedProject.sha256) {
+      return workflowError('DIGEST_MISMATCH', 'Resolved Project digest is stale', field)
+    }
+    let value: unknown
+    try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) } catch {
+      return workflowError('DIGEST_MISMATCH', 'Resolved Project is not valid UTF-8 JSON', field)
+    }
+    if (!isRecord(value) || value.version !== 3 || !validateWorkflowProjectSchema(value)) {
+      return workflowError('DIGEST_MISMATCH', 'Resolved Project is not a valid Project v3', field)
+    }
+    assertDocumentAreaIdentity(value)
+    const revision = `sha256:${await sha256Canonical(value)}`
+    const targetDigest = await areaTargetsSha256(value)
+    if (manifest.resolvedProject.revision !== revision
+      || manifest.resolvedProject.areaTargetsSha256 !== targetDigest) {
+      return workflowError('DIGEST_MISMATCH', 'Resolved Project binding is stale', field)
+    }
+    resolvedProject = { value: structuredClone(value), bytes, sha256: manifest.resolvedProject.sha256, revision, kind: 'label-project-v3' }
+  }
+  for (const artifact of manifestEvidence.value.artifacts) {
+    const bytes = await read(artifact.path)
+    if (await sha256Bytes(bytes) !== artifact.sha256) {
+      return workflowError('DIGEST_MISMATCH', `Evidence artifact digest is stale: ${artifact.path}`, field)
+    }
+    if (artifact.mimeType === 'image/png') {
+      try {
+        parsePortablePng(bytes, {
+          expectedWidth: artifact.width, expectedHeight: artifact.height,
+          maxWidth: 32768, maxHeight: 32768, maxPixels: 64 * 1024 * 1024,
+        })
+      } catch {
+        return workflowError('DIGEST_MISMATCH', `Evidence PNG MIME or dimensions are invalid: ${artifact.path}`, field)
+      }
+    } else if (kind === 'design' && artifact.mimeType === 'text/html' && artifact.viewKind === 'mockup-html') {
+      htmlCount += 1
+      let html: string
+      try { html = new TextDecoder('utf-8', { fatal: true }).decode(bytes) } catch {
+        return workflowError('DIGEST_MISMATCH', 'Design HTML is not valid UTF-8', field)
+      }
+      if (html.includes('\0') || !/<html\b/i.test(html)
+        || !html.includes(`width:${artifact.width}px;height:${artifact.height}px`)
+        || artifact.sha256 !== (manifestEvidence.value as DesignReviewManifestV1).html.sha256) {
+        return workflowError('DIGEST_MISMATCH', 'Design HTML MIME, dimensions, or manifest binding is invalid', field)
+      }
+    } else {
+      return workflowError('DIGEST_MISMATCH', `Evidence artifact MIME is invalid: ${artifact.path}`, field)
+    }
+  }
+  if (kind === 'design' && htmlCount !== 1) {
+    return workflowError('DIGEST_MISMATCH', 'Design evidence requires exactly one HTML artifact', field)
+  }
+  return resolvedProject
 }
 
 async function readBlueprintEvidence(source: WorkflowJsonSource): Promise<JsonEvidence<LayoutBlueprintV1>> {
@@ -664,6 +831,7 @@ async function readBlueprintEvidence(source: WorkflowJsonSource): Promise<JsonEv
   } catch (error) {
     return workflowError('DIGEST_MISMATCH', 'Current blueprint evidence is not contract-valid', 'blueprint', {
       contractCode: error instanceof DesignContractError ? error.code : 'INVALID_LAYOUT_BLUEPRINT',
+      contractDetails: error instanceof DesignContractError ? error.details ?? error.message : String(error),
     })
   }
 }
@@ -708,6 +876,7 @@ async function readDocumentEvidence(source: WorkflowJsonSource): Promise<Documen
   return {
     value: structuredClone(evidence.value),
     sha256: evidence.sha256,
+    bytes: evidence.bytes,
     kind: evidence.value.version === 2 ? 'label-spec-v2' : 'label-project-v3',
     revision: `sha256:${digest}`,
   }
@@ -942,6 +1111,7 @@ export async function verifyDesignGate(input: DesignGateInput): Promise<DesignGa
     readDesignManifestEvidence(input.designReviewManifest),
     readDocumentEvidence(input.currentDocument),
   ])
+  await verifyArtifactEvidence(input.designReviewArtifacts, designManifest, 'design')
   assertManifestBlueprintBinding(designManifest.value, blueprint)
   assertDocumentDesignBindings(document.value, blueprint, designManifest.sha256)
   assertCurrentDocumentDesign(document.value, blueprint.value)
@@ -982,6 +1152,7 @@ export async function verifyDesignGate(input: DesignGateInput): Promise<DesignGa
       valid: true, status: 'continuous_authorized', blueprintRevision: blueprint.value.revision,
       blueprintSha256: blueprint.sha256, designReviewManifestSha256: designManifest.sha256,
       documentRevision: document.revision, documentSha256: document.sha256,
+      documentKind: document.kind,
     }
   }
 
@@ -1040,6 +1211,7 @@ export async function verifyDesignGate(input: DesignGateInput): Promise<DesignGa
     designReviewManifestSha256: designManifest.sha256,
     documentRevision: document.revision,
     documentSha256: document.sha256,
+    documentKind: document.kind,
   }
 }
 
@@ -1054,12 +1226,60 @@ function areaTargetProjection(document: UnknownRecord): UnknownRecord[] {
     side: area.side ?? null,
     range: structuredClone(area.range),
     remap: area.remap === undefined ? null : structuredClone(area.remap),
-    placementPolicy: area.placementPolicy ?? null,
+    placementPolicy: area.placementPolicy ?? (area.artboard === undefined ? null : 'block'),
     canvas: area.canvas === undefined ? null : structuredClone(area.canvas),
     axisMin: area.axisMin ?? null,
     axisMax: area.axisMax ?? null,
   }))
   return stableSortById(projected.map((area) => ({ ...area, id: String(area.id) })))
+}
+
+function assertResolvedDocumentMapping(source: UnknownRecord, resolved: UnknownRecord): void {
+  if (source.version === 3) {
+    if (!sameProjection(areaTargetProjection(source), areaTargetProjection(resolved))) {
+      workflowError('STALE_APPROVAL', 'Resolved Project mapping differs from the reviewed Project', 'reviewManifest.resolvedProject')
+    }
+    return
+  }
+  const resolvedById = new Map(documentAreas(resolved).map((area) => [area.id, area]))
+  if (resolvedById.size !== documentAreas(source).length) {
+    workflowError('STALE_APPROVAL', 'Resolved Project area set differs from the reviewed Spec', 'reviewManifest.resolvedProject')
+  }
+  for (const area of documentAreas(source)) {
+    const live = resolvedById.get(area.id)
+    if (!live) workflowError('STALE_APPROVAL', 'Resolved Project is missing a reviewed Spec area', 'reviewManifest.resolvedProject')
+    const sourcePolicy = area.placementPolicy ?? (area.artboard === undefined ? null : 'block')
+    const livePolicy = live.placementPolicy ?? (live.artboard === undefined ? null : 'block')
+    if (area.blueprintAreaId !== live.blueprintAreaId
+      || area.surfaceMode !== live.surfaceMode
+      || area.side !== live.side
+      || sourcePolicy !== livePolicy
+      || !sameProjection(area.range, live.range)) {
+      workflowError('STALE_APPROVAL', 'Resolved Project mapping differs from the reviewed Spec', 'reviewManifest.resolvedProject')
+    }
+    const target = isRecord(area.target) ? area.target : {}
+    if ((typeof target.meshIndex === 'number' && target.meshIndex !== live.meshIndex)
+      || (typeof target.nodeName === 'string' && target.nodeName !== live.nodeName)) {
+      workflowError('STALE_APPROVAL', 'Resolved Project target differs from the reviewed Spec selector', 'reviewManifest.resolvedProject')
+    }
+    if (typeof target.stableSelector === 'string') {
+      const match = /^mesh:(\d+)\/node:(\d+)$/.exec(target.stableSelector)
+      if (!match || Number(match[1]) !== live.meshIndex) {
+        workflowError('STALE_APPROVAL', 'Resolved Project target differs from the reviewed stable selector', 'reviewManifest.resolvedProject')
+      }
+    }
+    if (isRecord(area.remap)) {
+      const remap = isRecord(live.remap) ? live.remap : {}
+      for (const key of ['wrap', 'offset', 'mirrorU'] as const) {
+        if (area.remap[key] !== undefined && area.remap[key] !== remap[key]) {
+          workflowError('STALE_APPROVAL', 'Resolved Project remap differs from the reviewed Spec', 'reviewManifest.resolvedProject')
+        }
+      }
+      if (area.remap.mode !== undefined && area.remap.mode !== 'auto' && area.remap.mode !== remap.mode) {
+        workflowError('STALE_APPROVAL', 'Resolved Project mapping mode differs from the reviewed Spec', 'reviewManifest.resolvedProject')
+      }
+    }
+  }
 }
 
 async function areaTargetsSha256(document: UnknownRecord): Promise<string> {
@@ -1091,6 +1311,7 @@ export async function verifyProductionGate(input: ProductionGateInput): Promise<
     handoff: input.handoff,
     blueprint: input.blueprint,
     designReviewManifest: input.designReviewManifest,
+    designReviewArtifacts: input.designReviewArtifacts,
     currentDocument: input.currentDocument,
     ...(input.designApprovalRecord === undefined ? {} : { approvalRecord: input.designApprovalRecord }),
   })
@@ -1100,6 +1321,10 @@ export async function verifyProductionGate(input: ProductionGateInput): Promise<
     readDocumentEvidence(input.currentDocument),
     readProductionManifestEvidence(input.productionReviewManifest),
   ])
+  const resolvedProject = await verifyArtifactEvidence(input.productionReviewArtifacts, productionManifest, 'production')
+  if (!resolvedProject) {
+    return workflowError('DIGEST_MISMATCH', 'Production review does not bind the exact resolved Project', 'productionReviewArtifacts')
+  }
   if (design.blueprintRevision !== blueprint.value.revision
     || design.blueprintSha256 !== blueprint.sha256
     || design.designReviewManifestSha256 !== designManifest.sha256
@@ -1121,6 +1346,9 @@ export async function verifyProductionGate(input: ProductionGateInput): Promise<
     return workflowError('STALE_APPROVAL', 'Production review model binding is stale', 'reviewManifest.model')
   }
   assertReviewManifestAreas(manifest, document.value)
+  assertDocumentDesignBindings(resolvedProject.value, blueprint, designManifest.sha256)
+  assertCurrentDocumentDesign(resolvedProject.value, blueprint.value)
+  assertResolvedDocumentMapping(document.value, resolvedProject.value)
   const targetDigest = await areaTargetsSha256(document.value)
   if (manifest.areaTargetsSha256 !== targetDigest) {
     return workflowError('STALE_APPROVAL', 'Production review area-target digest is stale', 'reviewManifest.areaTargetsSha256')
@@ -1183,7 +1411,7 @@ function designProjections(blueprint: LayoutBlueprintV1): Record<string, unknown
     'design:layout': {
       areas: stableSortById(blueprint.areas).map((area) => ({
         id: area.id, side: area.side, artboard: area.artboard,
-        placementIntent: area.placementIntent, placementPolicy: area.placementPolicy ?? null,
+        placementIntent: area.placementIntent, placementPolicy: area.placementPolicy ?? 'block',
       })),
       layers: sortedLayerProjection(blueprint, (_area, layer) => ({
         boundsMm: layer.boundsMm ?? null, normalizedBounds: layer.normalizedBounds ?? null,

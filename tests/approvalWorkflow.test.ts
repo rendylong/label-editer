@@ -16,8 +16,10 @@ import {
   type LayoutBlueprintV1,
   type ReviewManifestV1,
   type WorkflowJsonSource,
+  type WorkflowArtifactReader,
   type WorkflowRevisionSnapshot,
 } from '../src/agent/designContracts'
+import { pngBytes } from './pngTestUtils'
 // @ts-expect-error Pure Node ESM canonical revision helper is consumed directly by tests.
 import { revisionOf } from '../scripts/lib/project-control.mjs'
 
@@ -29,7 +31,7 @@ function canonicalValue(value: unknown): unknown {
   ]))
 }
 
-function sha256(value: string): string {
+function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
@@ -46,6 +48,34 @@ function alternatingSource(first: unknown, second: unknown): WorkflowJsonSource 
   return { read: () => JSON.stringify(reads++ === 0 ? first : second) }
 }
 
+function artifactReader(manifestName: string, manifest: () => unknown, files: Map<string, Uint8Array | string>): WorkflowArtifactReader {
+  return {
+    list: () => [manifestName, ...files.keys()],
+    read: (relativePath) => {
+      if (relativePath === manifestName) return JSON.stringify(manifest())
+      const value = files.get(relativePath)
+      if (value === undefined) throw new Error(`missing artifact: ${relativePath}`)
+      return value
+    },
+  }
+}
+
+const DESIGN_HTML = '<!doctype html><html><body><section style="width:1600px;height:1200px"></section></body></html>'
+const DESIGN_ARTIFACT_FILES = new Map<string, Uint8Array | string>([
+  ['mockup.html', DESIGN_HTML],
+  ['mockup-front.png', pngBytes(1600, 1200)],
+  ['mockup-back.png', pngBytes(1600, 1200)],
+  ['areas/front.png', pngBytes(800, 1200)],
+])
+const PRODUCTION_ARTIFACT_FILES = new Map<string, Uint8Array | string>([
+  ['label-front.png', pngBytes(1600, 1600)],
+  ['surface-front.png', pngBytes(1600, 1600)],
+  ['model-front.png', pngBytes(1600, 1600)],
+  ['model-back.png', pngBytes(1600, 1600)],
+  ['review-sheet.png', pngBytes(1600, 1600)],
+])
+const artifactSha256 = (path: string, files: Map<string, Uint8Array | string>) => sha256(files.get(path)!)
+
 function areaTargetsSha256(document: any): string {
   const areas = document.areas.map((area: any) => ({
     id: area.id,
@@ -55,7 +85,7 @@ function areaTargetsSha256(document: any): string {
     side: area.side ?? null,
     range: area.range,
     remap: area.remap ?? null,
-    placementPolicy: area.placementPolicy ?? null,
+    placementPolicy: area.placementPolicy ?? (area.artboard === undefined ? null : 'block'),
     canvas: area.canvas ?? null,
     axisMin: area.axisMin ?? null,
     axisMax: area.axisMax ?? null,
@@ -86,16 +116,19 @@ function designManifest(blueprintSha256: string, side: LayoutBlueprintV1['areas'
   return {
     version: 1, createdAt: '2026-08-27T10:00:00.000Z',
     blueprint: { revision: 'design-rev-001', sha256: blueprintSha256 },
-    html: { sha256: '1'.repeat(64) }, references: [],
+    html: { sha256: artifactSha256('mockup.html', DESIGN_ARTIFACT_FILES) }, references: [],
     areas: [{ id: 'front', side, carrier: 'direct_surface_print' }],
     artifacts: [{
-      id: 'mockup-front', path: 'mockup-front.png', sha256: '2'.repeat(64), mimeType: 'image/png',
+      id: 'mockup-html', path: 'mockup.html', sha256: artifactSha256('mockup.html', DESIGN_ARTIFACT_FILES), mimeType: 'text/html',
+      width: 1600, height: 1200, viewKind: 'mockup-html',
+    }, {
+      id: 'mockup-front', path: 'mockup-front.png', sha256: artifactSha256('mockup-front.png', DESIGN_ARTIFACT_FILES), mimeType: 'image/png',
       width: 1600, height: 1200, viewKind: 'mockup-front',
     }, {
-      id: 'mockup-back', path: 'mockup-back.png', sha256: '3'.repeat(64), mimeType: 'image/png',
+      id: 'mockup-back', path: 'mockup-back.png', sha256: artifactSha256('mockup-back.png', DESIGN_ARTIFACT_FILES), mimeType: 'image/png',
       width: 1600, height: 1200, viewKind: 'mockup-back',
     }, {
-      id: 'mockup-area-front', path: 'areas/front.png', sha256: '4'.repeat(64), mimeType: 'image/png',
+      id: 'mockup-area-front', path: 'areas/front.png', sha256: artifactSha256('areas/front.png', DESIGN_ARTIFACT_FILES), mimeType: 'image/png',
       width: 800, height: 1200, viewKind: 'mockup-area', areaId: 'front', carrier: 'direct_surface_print',
     }],
   }
@@ -110,7 +143,7 @@ function labelDocument(sourceBlueprint: LayoutBlueprintV1, blueprintSha256: stri
       range: { uStart: 0.1, uWidth: 0.3, vStart: 0.2, vHeight: 0.5 },
       remap: { mode: 'cylindrical', wrap: 1, offset: 0, mirrorU: false },
       carrier: 'direct_surface_print', artboard: { widthMm: 40, heightMm: 60, background: 'transparent' },
-      placementPolicy: 'fit', blueprintAreaId: 'front',
+      placementPolicy: compiledArea.placementPolicy, blueprintAreaId: 'front',
       designBinding: {
         blueprintRevision: 'design-rev-001', blueprintSha256, reviewManifestSha256: designManifestSha256,
       },
@@ -187,36 +220,42 @@ function legacyHandoff(status: 'approved' | 'assumed_for_fast_run' | 'awaiting_u
 
 function productionManifest(input: {
   document: any
+  resolvedProject: any
   blueprintSha256: string
   designManifestSha256: string
   modelFingerprint: string
 }): ReviewManifestV1 {
+  const resolvedProjectText = JSON.stringify(input.resolvedProject)
   return {
     version: 1, createdAt: '2026-08-27T10:30:00.000Z',
     input: {
       kind: 'label-spec-v2', revision: revisionOf(input.document), sha256: sha256(JSON.stringify(input.document)),
+    },
+    resolvedProject: {
+      path: 'resolved-project.lbl.json', revision: revisionOf(input.resolvedProject),
+      sha256: sha256(resolvedProjectText), areaTargetsSha256: areaTargetsSha256(input.resolvedProject),
     },
     blueprint: { revision: 'design-rev-001', sha256: input.blueprintSha256 },
     designReviewManifest: { sha256: input.designManifestSha256 }, model: { fingerprint: input.modelFingerprint },
     areaTargetsSha256: areaTargetsSha256(input.document),
     areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
     artifacts: [{
-      id: 'label-front', path: 'label-front.png', sha256: '5'.repeat(64), mimeType: 'image/png',
+      id: 'label-front', path: 'label-front.png', sha256: artifactSha256('label-front.png', PRODUCTION_ARTIFACT_FILES), mimeType: 'image/png',
       width: 1600, height: 1600, viewKind: 'flat-artwork', areaId: 'front', carrier: 'direct_surface_print',
     }, {
-      id: 'surface-front', path: 'surface-front.png', sha256: '6'.repeat(64), mimeType: 'image/png',
+      id: 'surface-front', path: 'surface-front.png', sha256: artifactSha256('surface-front.png', PRODUCTION_ARTIFACT_FILES), mimeType: 'image/png',
       width: 1600, height: 1600, viewKind: 'surface-face', areaId: 'front', carrier: 'direct_surface_print',
       camera: { position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
     }, {
-      id: 'model-front', path: 'model-front.png', sha256: '7'.repeat(64), mimeType: 'image/png',
+      id: 'model-front', path: 'model-front.png', sha256: artifactSha256('model-front.png', PRODUCTION_ARTIFACT_FILES), mimeType: 'image/png',
       width: 1600, height: 1600, viewKind: 'model-front',
       camera: { position: [0, 0, 3], direction: [0, 0, -1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
     }, {
-      id: 'model-back', path: 'model-back.png', sha256: '8'.repeat(64), mimeType: 'image/png',
+      id: 'model-back', path: 'model-back.png', sha256: artifactSha256('model-back.png', PRODUCTION_ARTIFACT_FILES), mimeType: 'image/png',
       width: 1600, height: 1600, viewKind: 'model-back',
       camera: { position: [0, 0, -3], direction: [0, 0, 1], target: [0, 0, 0], up: [0, 1, 0], fov: 45 },
     }, {
-      id: 'review-sheet', path: 'review-sheet.png', sha256: '9'.repeat(64), mimeType: 'image/png',
+      id: 'review-sheet', path: 'review-sheet.png', sha256: artifactSha256('review-sheet.png', PRODUCTION_ARTIFACT_FILES), mimeType: 'image/png',
       width: 1600, height: 1600, viewKind: 'review-sheet',
     }],
   }
@@ -229,8 +268,12 @@ function workflowFixture(sourceBlueprint = blueprint()) {
   state.designManifestSha256 = sha256(JSON.stringify(state.designManifest))
   state.document = labelDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
   state.handoff = handoff(state.blueprintSha256, state.designManifestSha256, sourceBlueprint.areas[0].side)
+  state.resolvedProject = projectDocument(state.blueprint, state.blueprintSha256, state.designManifestSha256)
+  state.productionArtifactFiles = new Map(PRODUCTION_ARTIFACT_FILES)
+  state.productionArtifactFiles.set('resolved-project.lbl.json', JSON.stringify(state.resolvedProject))
   state.productionManifest = productionManifest(state)
   state.productionManifestSha256 = sha256(JSON.stringify(state.productionManifest))
+  state.designArtifactFiles = new Map(DESIGN_ARTIFACT_FILES)
   state.productionApproval = {
     version: 1, gate: 'production', mode: 'explicit_approval', scope: 'current_task',
     design_revision: 'design-rev-001', blueprint_sha256: state.blueprintSha256,
@@ -246,6 +289,7 @@ function designGateInput(state: any) {
     handoff: state.handoff,
     blueprint: source(() => state.blueprint),
     designReviewManifest: source(() => state.designManifest),
+    designReviewArtifacts: artifactReader('design-review-manifest.json', () => state.designManifest, state.designArtifactFiles),
     currentDocument: source(() => state.document),
     ...(state.designApproval ? { approvalRecord: state.designApproval } : {}),
   }
@@ -255,6 +299,7 @@ function productionGateInput(state: any) {
   return {
     ...designGateInput(state), approvalRecord: state.productionApproval,
     productionReviewManifest: source(() => state.productionManifest),
+    productionReviewArtifacts: artifactReader('review-manifest.json', () => state.productionManifest, state.productionArtifactFiles),
     modelFingerprint: state.modelFingerprint,
   }
 }
@@ -272,6 +317,25 @@ describe('design approval gate', () => {
       valid: true, status: 'approved', blueprintRevision: 'design-rev-001',
       blueprintSha256: state.blueprintSha256, designReviewManifestSha256: state.designManifestSha256,
     })
+  })
+
+  it('compiles an omitted blueprint placement policy to the blocking default without stale design drift', async () => {
+    const sourceBlueprint = blueprint()
+    delete sourceBlueprint.areas[0].placementPolicy
+    const state = workflowFixture(sourceBlueprint)
+    expect(state.document.areas[0].placementPolicy).toBe('block')
+    await expect(verifyDesignGate(designGateInput(state))).resolves.toMatchObject({ valid: true })
+  })
+
+  it.each([
+    ['deleted', (files: Map<string, Uint8Array | string>) => files.delete('mockup-front.png')],
+    ['replaced', (files: Map<string, Uint8Array | string>) => files.set('mockup-front.png', pngBytes(1600, 1199))],
+    ['added', (files: Map<string, Uint8Array | string>) => files.set('unexpected.png', pngBytes(1, 1))],
+    ['renamed', (files: Map<string, Uint8Array | string>) => { const value = files.get('mockup-front.png')!; files.delete('mockup-front.png'); files.set('renamed.png', value) }],
+  ])('revalidates exact design artifact bytes and file set when an artifact is %s', async (_label, mutate) => {
+    const state = workflowFixture()
+    mutate(state.designArtifactFiles)
+    await expectWorkflowCode(verifyDesignGate(designGateInput(state)), 'DIGEST_MISMATCH', 'designReviewArtifacts')
   })
 
   it.each(['front', 'back', 'left', 'right', 'wrap', 'top', 'bottom', 'neck', 'custom'] as const)(
@@ -661,6 +725,16 @@ describe('design approval gate', () => {
 })
 
 describe('production approval gate', () => {
+  it('requires a Spec review to publish and bind the exact resolved Project consumed for capture', async () => {
+    const state = workflowFixture()
+    state.productionArtifactFiles.delete('resolved-project.lbl.json')
+    await expectWorkflowCode(
+      verifyProductionGate(productionGateInput(state)),
+      'DIGEST_MISMATCH',
+      'productionReviewArtifacts',
+    )
+  })
+
   it('accepts exact current input, model, target, blueprint, design-review, and production-review bindings', async () => {
     const state = workflowFixture()
     await expect(verifyProductionGate(productionGateInput(state))).resolves.toMatchObject({
@@ -668,6 +742,12 @@ describe('production approval gate', () => {
       modelFingerprint: state.modelFingerprint, areaTargetsSha256: areaTargetsSha256(state.document),
       productionReviewManifestSha256: state.productionManifestSha256,
     })
+  })
+
+  it('revalidates production PNG bytes, MIME, and dimensions on every invocation', async () => {
+    const state = workflowFixture()
+    state.productionArtifactFiles.set('label-front.png', pngBytes(1599, 1600))
+    await expectWorkflowCode(verifyProductionGate(productionGateInput(state)), 'DIGEST_MISMATCH', 'productionReviewArtifacts')
   })
 
   it('recomputes shared production manifest completeness instead of trusting an approval digest', async () => {
@@ -748,9 +828,11 @@ describe('production approval gate', () => {
       handoff: first.handoff,
       blueprint: alternatingSource(first.blueprint, second.blueprint),
       designReviewManifest: alternatingSource(first.designManifest, second.designManifest),
+      designReviewArtifacts: artifactReader('design-review-manifest.json', () => first.designManifest, first.designArtifactFiles),
       currentDocument: alternatingSource(first.document, second.document),
       approvalRecord: second.productionApproval,
       productionReviewManifest: source(() => second.productionManifest),
+      productionReviewArtifacts: artifactReader('review-manifest.json', () => second.productionManifest, second.productionArtifactFiles),
       modelFingerprint: second.modelFingerprint,
     }), 'STALE_APPROVAL', 'designGate.evidence')
   })

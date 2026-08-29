@@ -216,6 +216,21 @@ afterEach(async () => {
 })
 
 describe('label-cli protocol', () => {
+  it.each(['design', 'production'] as const)('routes gate %s without starting a browser runtime', async (kind) => {
+    const calls: unknown[] = []
+    const stdout: string[] = []
+    const code = await runCli(['gate', kind, 'gate-request.json', '--json'], {
+      gateRunner: async (...input: unknown[]) => {
+        calls.push(input)
+        return { ok: true, operation: `gate_${kind}`, data: { valid: true }, warnings: [] }
+      },
+      stdout: (value: string) => stdout.push(value), stderr: () => undefined,
+    })
+    expect(code).toBe(0)
+    expect(calls).toEqual([[kind, 'gate-request.json', { allowedRoots: undefined }]])
+    expect(JSON.parse(stdout[0])).toMatchObject({ ok: true, operation: `gate_${kind}`, data: { valid: true } })
+  })
+
   it('routes the additive review command with exact defaults and bounded dimensions', async () => {
     const calls: unknown[] = []
     const code = await runCli([

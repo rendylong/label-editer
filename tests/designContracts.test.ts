@@ -131,6 +131,10 @@ function productionReviewManifest(): ReviewManifestV1 {
     version: 1,
     createdAt: '2026-08-26T13:00:00.000Z',
     input: { kind: 'label-spec-v2', revision: 'sha256:current', sha256: SHA_A },
+    resolvedProject: {
+      path: 'resolved-project.lbl.json', revision: 'sha256:resolved', sha256: SHA_B,
+      areaTargetsSha256: SHA_A,
+    },
     blueprint: { revision: 'rev-001', sha256: SHA_B },
     designReviewManifest: { sha256: SHA_A },
     model: { fingerprint: 'model-fingerprint-001' },

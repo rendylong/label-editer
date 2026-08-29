@@ -81,11 +81,14 @@ Carrier 与 process 是两个不同维度。`direct_surface_print`、`in_mold`�
 | `live` | 自动打开只读 Web 预览并持续监听同一 working spec | 否 |
 | `preview` | 生成供 Agent 视觉检查的 PNG | 是 |
 | `review` | 生成与审批绑定的干净平面图稿和上模证据 | 是 |
+| `gate design` / `gate production` | 从有上限的 request 文件重验审批绑定与全部证据字节 | 否 |
 | `qc` | 生成用于检查与修复的诊断多视角证据 | 是 |
 | `apply` / `export` | 烘焙、GLB 交叉校验并完整发布产物 | 是 |
 | `open` | 显式人工接管，返回本机令牌化可编辑 URL | 否 |
 
-规范顺序是 carrier 决策 → blueprint/mockup → 设计审批 → `inspect` → 创建/校验 working spec → `live` → `project` / `patch --force` 循环 → `validate` → 干净 `review` → 制作审批 → 诊断 `qc` / 修复 / 重拍 → `apply` 或 `export`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open` 不属于默认 Agent 工作流。
+规范顺序是 carrier 决策 → blueprint/mockup → 设计审批 → `gate design` → `inspect` → 创建/校验 working spec → `live` → `project` / `patch --force` 循环 → `validate` → 干净 `review` → 制作审批 → `gate production` → 诊断 `qc` / 修复 / 重拍 → 再次 `gate production` → `apply` 或 `export`。不要根据相似节点名猜目标；使用检查结果中的 `stableSelector`。`open` 不属于默认 Agent 工作流。
+
+两道审批门都是已安装、纯本地的 CLI 命令：先运行 `label-cli gate design design-gate-request.json --json`，制作审批后运行 `label-cli gate production production-gate-request.json --json`。request 必须是 version 1，`gate` 必须与命令一致，并声明位于 request 文件目录之下的单一 `evidenceRoot`；其余路径都必须是该根目录下的可移植相对路径。设计 request 必须包含 `currentDocument`、`handoff`、`blueprint`、`designReviewManifest` 和 `designReviewEvidenceRoot`；若 Handoff v2 已携带精确审批，`designApprovalRecord` 可省略。制作 request 还必须包含 `productionReviewManifest`、`productionReviewEvidenceRoot`、`productionApprovalRecord` 和精确的当前 `model`。制作评审会发布 `resolved-project.lbl.json`；manifest 将这份精确 Project v3 与如实标记的原始 Spec v2 或 Project v3 分开绑定，制作 gate 会同时消费两者。证据目录只能包含 manifest、适用时绑定的 resolved Project 与其声明的产物；缺失、新增、改名、符号链接、非普通文件、digest/MIME/尺寸不一致都会在 QC/apply/export 前失败。
 
 ## CLI
 
@@ -120,6 +123,9 @@ node scripts/label-cli.mjs review working-label-spec.json \
   --width 1600 \
   --height 1600 \
   --json
+
+# QC 前及 apply/export 前，都重验同一份精确的制作 gate request
+label-cli gate production production-gate-request.json --json
 
 # 为当前 working revision 生成标准诊断 QC 证据集
 node scripts/label-cli.mjs qc working-label-spec.json \

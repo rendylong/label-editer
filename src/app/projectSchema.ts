@@ -546,6 +546,8 @@ function normalizeArea(raw: unknown, index: number, sourceVersion: 1 | 2 | typeo
   if (raw.placementPolicy !== undefined) {
     if (!['fit', 'crop-approved', 'block'].includes(String(raw.placementPolicy))) areaError('placementPolicy', '无效')
     placementPolicy = raw.placementPolicy as TargetAspectPolicy
+  } else if (!legacy && raw.artboard !== undefined) {
+    placementPolicy = 'block'
   }
   if (raw.blueprintAreaId !== undefined) nonEmptyString(raw.blueprintAreaId, 'blueprintAreaId', 128)
   const paper = resolveLabelPaper(paperInput)

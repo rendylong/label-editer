@@ -151,6 +151,11 @@ describe('physical label layout', () => {
       .toEqual({ status: 'blocked', code: 'TARGET_ASPECT_MISMATCH' })
   })
 
+  it('defaults an undeclared placement policy to blocking instead of silently fitting', () => {
+    expect(resolveTargetAspect({ artboardAspect: 2 / 3, targetAspect: 1 }))
+      .toEqual({ status: 'blocked', code: 'TARGET_ASPECT_MISMATCH' })
+  })
+
   it('uses a scale-relative one ppm boundary for the physical Lavira aspect', () => {
     const physicalAspect = 48 / 62
     expect(resolveTargetAspect({

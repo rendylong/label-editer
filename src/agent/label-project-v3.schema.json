@@ -395,7 +395,7 @@
         "carrier": { "$ref": "#/$defs/carrier" },
         "artboard": { "$ref": "#/$defs/artboard" },
         "substrate": { "$ref": "#/$defs/substrate" },
-        "placementPolicy": { "enum": ["fit", "crop-approved", "block"] },
+        "placementPolicy": { "enum": ["fit", "crop-approved", "block"], "default": "block" },
         "blueprintAreaId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "designBinding": { "$ref": "#/$defs/designBinding" },
         "layers": {

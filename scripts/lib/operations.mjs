@@ -1,8 +1,10 @@
 import Ajv2020 from 'ajv/dist/2020.js'
 import { randomBytes } from 'node:crypto'
+import { constants as fsConstants } from 'node:fs'
 import { lstat, open, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { failure, success } from './envelope.mjs'
+import { snapshotRegularDirectory } from './bounded-file-reader.mjs'
 import { publishFileAtomically, resolveAllowedOutputPath, resolveAllowedPath, sanitizeArtifactName, sha256Bytes } from './files.mjs'
 import { inspectProject, patchLabelSpec, revisionOf } from './project-control.mjs'
 import { buildQcManifest, parseQcCameraConfig, qcArtifactRelativePath, validateQcManifest } from './qc-output.mjs'
@@ -11,7 +13,9 @@ import { startLivePreview } from './live-preview.mjs'
 
 const schemaPath = path.resolve(import.meta.dirname, '../../src/agent/label-spec-v2.schema.json')
 const MAX_REVIEW_JSON_BYTES = 16 * 1024 * 1024
+const MAX_REVIEW_HANDOFF_BYTES = 4 * 1024 * 1024
 const MAX_REVIEW_MODEL_BYTES = 256 * 1024 * 1024
+const MAX_REVIEW_EVIDENCE_TOTAL_BYTES = 128 * 1024 * 1024
 
 async function readSchema() {
   return JSON.parse(await readFile(schemaPath, 'utf8'))
@@ -224,19 +228,19 @@ function decodeReviewJson(bytes, label) {
 
 async function resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, force) {
   const [input, model] = await Promise.all([
-    resolveAllowedPath(rootPolicy, inputPath),
-    resolveAllowedPath(rootPolicy, glbPath),
+    resolveReviewRegularPath(rootPolicy, inputPath, 'Review input'),
+    resolveReviewRegularPath(rootPolicy, glbPath, 'Review model'),
   ])
   let handoff
   try {
-    handoff = await resolveAllowedPath(rootPolicy, path.join(path.dirname(input), 'editor-handoff.json'))
+    handoff = await resolveReviewRegularPath(rootPolicy, path.join(path.dirname(input), 'editor-handoff.json'), 'editor-handoff.json')
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error
     const missing = new Error('Review requires adjacent approved editor-handoff.json evidence')
     missing.code = 'APPROVAL_REQUIRED'
     throw missing
   }
-  const handoffEvidence = decodeReviewJson(new Uint8Array(await readFile(handoff)), 'editor-handoff.json')
+  const handoffEvidence = decodeReviewJson((await readStableReviewFile(handoff, 'Review handoff', MAX_REVIEW_HANDOFF_BYTES)).bytes, 'editor-handoff.json')
   const blueprintSource = handoffEvidence.value?.source?.blueprint
   const designManifestSource = handoffEvidence.value?.source?.design_review_manifest
   if (typeof blueprintSource !== 'string' || !blueprintSource
@@ -247,8 +251,8 @@ async function resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, f
   let designReviewManifest
   try {
     [blueprint, designReviewManifest] = await Promise.all([
-      resolveAllowedPath(rootPolicy, path.resolve(path.dirname(handoff), blueprintSource)),
-      resolveAllowedPath(rootPolicy, path.resolve(path.dirname(handoff), designManifestSource)),
+      resolveReviewRegularPath(rootPolicy, path.resolve(path.dirname(handoff), blueprintSource), 'Review blueprint'),
+      resolveReviewRegularPath(rootPolicy, path.resolve(path.dirname(handoff), designManifestSource), 'Review design manifest'),
     ])
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error
@@ -276,6 +280,17 @@ async function resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, f
   return { input, model, handoff, blueprint, designReviewManifest, output }
 }
 
+async function resolveReviewRegularPath(rootPolicy, inputPath, label) {
+  const absolute = path.resolve(inputPath)
+  const info = await lstat(absolute)
+  if (info.isSymbolicLink() || !info.isFile()) {
+    const error = new Error(`${label} must be a regular file and not a symlink`)
+    error.code = 'PATH_NOT_ALLOWED'
+    throw error
+  }
+  return resolveAllowedPath(rootPolicy, absolute)
+}
+
 function fileSnapshotIdentity(info) {
   return {
     dev: String(info.dev),
@@ -292,7 +307,7 @@ async function readStableReviewFile(filePath, label, maxBytes) {
   if (beforePath.size < 1n || beforePath.size > BigInt(maxBytes)) {
     throw reviewUsageError(`${label} exceeds the bounded review input size`)
   }
-  const handle = await open(filePath, 'r')
+  const handle = await open(filePath, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
   try {
     const beforeHandle = await handle.stat({ bigint: true })
     if (JSON.stringify(fileSnapshotIdentity(beforeHandle)) !== JSON.stringify(fileSnapshotIdentity(beforePath))) {
@@ -320,7 +335,7 @@ async function readReviewSnapshot(sources, { parse = false } = {}) {
   const snapshots = await Promise.all(names.map((name) => readStableReviewFile(
     sources[name],
     name === 'model' ? 'Review model' : `Review ${name}`,
-    name === 'model' ? MAX_REVIEW_MODEL_BYTES : MAX_REVIEW_JSON_BYTES,
+    name === 'model' ? MAX_REVIEW_MODEL_BYTES : name === 'handoff' ? MAX_REVIEW_HANDOFF_BYTES : MAX_REVIEW_JSON_BYTES,
   )))
   const values = snapshots.map((snapshot) => snapshot.bytes)
   const hashes = Object.fromEntries(snapshots.map((snapshot, index) => [names[index], snapshot.sha256]))
@@ -345,6 +360,45 @@ function assertReviewSnapshot(expected, actual, boundary) {
   if (JSON.stringify(expected.hashes) !== JSON.stringify(actual.hashes)
     || JSON.stringify(expected.identities) !== JSON.stringify(actual.identities)) {
     throw staleReviewError(`Review production-gate source changed at ${boundary}`)
+  }
+}
+
+function safeReviewArtifactPath(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 2048 || value.includes('\0')
+    || path.isAbsolute(value) || value.includes('\\') || value.split('/').some((part) => !part || part === '.' || part === '..')) {
+    const error = new Error('Design-review artifact paths must be bounded portable relative paths')
+    error.code = 'PATH_NOT_ALLOWED'
+    throw error
+  }
+  return value
+}
+
+async function readDesignArtifactSnapshot(sources, manifest, { includeBase64 = false } = {}) {
+  const root = path.dirname(sources.designReviewManifest)
+  if (path.basename(sources.designReviewManifest) !== 'design-review-manifest.json') {
+    const error = new Error('Design-review evidence root must contain design-review-manifest.json')
+    error.code = 'PATH_NOT_ALLOWED'
+    throw error
+  }
+  const entries = await snapshotRegularDirectory(root, {
+    label: 'Design-review evidence root', maxFiles: 513, maxDepth: 8,
+    maxFileBytes: MAX_REVIEW_JSON_BYTES * 2, maxTotalBytes: MAX_REVIEW_EVIDENCE_TOTAL_BYTES,
+    makeError: (code, message) => {
+      const error = new Error(message)
+      error.code = code
+      return error
+    },
+  })
+  return entries.map(({ path: relativePath, bytes }) => ({
+    path: safeReviewArtifactPath(relativePath), sha256: sha256Bytes(bytes),
+    ...(includeBase64 ? { base64: Buffer.from(bytes).toString('base64') } : {}),
+  }))
+}
+
+function assertDesignArtifactSnapshot(expected, actual, boundary) {
+  const project = (values) => values.map(({ path: valuePath, sha256, identity }) => ({ path: valuePath, sha256, identity }))
+  if (JSON.stringify(project(expected)) !== JSON.stringify(project(actual))) {
+    throw staleReviewError(`Review design artifacts changed at ${boundary}`)
   }
 }
 
@@ -746,6 +800,7 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
         progress('Resolving approved review evidence')
         const sources = await resolveReviewSources(rootPolicy, inputPath, glbPath, outputDir, force)
         const initial = await readReviewSnapshot(sources, { parse: true })
+        const initialDesignArtifacts = await readDesignArtifactSnapshot(sources, initial.designReviewManifest.value, { includeBase64: true })
         const project = inspectProject(initial.input.value)
         const areas = reviewAreas(initial.input.value)
         const inputBinding = {
@@ -757,6 +812,8 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
           handoff: initial.handoff.value,
           blueprintJson: initial.blueprint.text,
           designReviewManifestJson: initial.designReviewManifest.text,
+          currentDocumentJson: initial.input.text,
+          designReviewArtifacts: initialDesignArtifacts.map(({ path: artifactPath, base64 }) => ({ path: artifactPath, base64 })),
         }
 
         session = await runtime.createSession({
@@ -791,6 +848,28 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
           || evidence.validation?.ready !== true || evidence.fidelity?.pass !== true) {
           throw staleReviewError('Captured review evidence does not bind the current approved production gate')
         }
+        if (typeof evidence.resolvedProjectJson !== 'string'
+          || evidence.resolvedProjectJson.length < 1
+          || evidence.resolvedProjectJson.length > MAX_REVIEW_JSON_BYTES) {
+          throw staleReviewError('Captured review evidence is missing the bounded resolved Project')
+        }
+        const resolvedProjectBytes = new TextEncoder().encode(evidence.resolvedProjectJson)
+        if (resolvedProjectBytes.byteLength > MAX_REVIEW_JSON_BYTES) {
+          throw staleReviewError('Captured resolved Project exceeds the bounded review size')
+        }
+        const resolvedProject = decodeReviewJson(resolvedProjectBytes, 'Resolved review Project').value
+        const resolvedInspection = inspectProject(resolvedProject)
+        if (resolvedInspection.kind !== 'label-project-v3'
+          || JSON.stringify(applied.data.project) !== evidence.resolvedProjectJson
+          || !/^[a-f0-9]{64}$/.test(evidence.resolvedProjectAreaTargetsSha256 ?? '')) {
+          throw staleReviewError('Captured resolved Project does not match the exact applied Project')
+        }
+        const resolvedProjectBinding = {
+          path: 'resolved-project.lbl.json',
+          revision: revisionOf(resolvedProject),
+          sha256: sha256Bytes(resolvedProjectBytes),
+          areaTargetsSha256: evidence.resolvedProjectAreaTargetsSha256,
+        }
         if (runtime.browserErrors(session.id).length > 0) {
           const error = new Error(`Browser reported errors: ${runtime.browserErrors(session.id).join('; ')}`)
           error.code = 'BROWSER_NOT_READY'
@@ -817,18 +896,29 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
         }
 
         assertReviewSnapshot(initial, await readReviewSnapshot(sources), 'before-staging')
+        assertDesignArtifactSnapshot(initialDesignArtifacts, await readDesignArtifactSnapshot(sources, initial.designReviewManifest.value), 'before-staging')
         const manifest = validateReviewManifest(buildReviewManifest({
           createdAt: new Date().toISOString(),
           input: inputBinding,
+          resolvedProject: resolvedProjectBinding,
           areas,
           evidence,
           artifacts,
-        }), { input: inputBinding, areas, evidence, artifacts })
+        }), { input: inputBinding, resolvedProject: resolvedProjectBinding, resolvedProjectBytes, areas, evidence, artifacts })
         const paths = new Map(manifest.artifacts.map((artifact) => [artifact.id, artifact.path]))
         const publicationArtifacts = artifacts.map((artifact) => ({
           ...artifact,
           relativePath: paths.get(artifact.id),
         }))
+        publicationArtifacts.push({
+          id: 'resolved-project',
+          fileName: resolvedProjectBinding.path,
+          relativePath: resolvedProjectBinding.path,
+          mimeType: 'application/json',
+          byteLength: resolvedProjectBytes.byteLength,
+          sha256: resolvedProjectBinding.sha256,
+          bytes: resolvedProjectBytes,
+        })
         const manifestBytes = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`)
         publicationArtifacts.push({
           id: 'review-manifest',
@@ -839,7 +929,7 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
           sha256: sha256Bytes(manifestBytes),
           bytes: manifestBytes,
         })
-        const validationContext = { input: inputBinding, areas, evidence, artifacts }
+        const validationContext = { input: inputBinding, resolvedProject: resolvedProjectBinding, resolvedProjectBytes, areas, evidence, artifacts }
         const publishedOutput = await runtime.publishArtifacts(
           session.id,
           sources.output,
@@ -850,6 +940,7 @@ export function createOperations(runtime, { progress = () => undefined, allowedR
             validateStaged: (directory) => validateReviewDirectory(directory, validationContext),
             beforeCommit: async (directory) => {
               assertReviewSnapshot(initial, await readReviewSnapshot(sources), 'before-final-rename')
+              assertDesignArtifactSnapshot(initialDesignArtifacts, await readDesignArtifactSnapshot(sources, initial.designReviewManifest.value), 'before-final-rename')
               await validateReviewDirectory(directory, validationContext)
             },
             validatePublished: (directory) => validateReviewDirectory(directory, validationContext),

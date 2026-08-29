@@ -390,6 +390,36 @@ function reviewEvidenceBytes(value: string): Uint8Array {
   return Uint8Array.from(new TextEncoder().encode(value))
 }
 
+function reviewArtifactReader(files: Array<{ path: string; base64: string }>) {
+  if (!Array.isArray(files) || files.length < 1 || files.length > 513) {
+    throw reviewNotReady('design-gate', 'Design-review artifact snapshot has an invalid bounded file set')
+  }
+  const byPath = new Map<string, Uint8Array>()
+  let total = 0
+  for (const file of files) {
+    if (!file || typeof file.path !== 'string' || typeof file.base64 !== 'string'
+      || file.base64.length > 48 * 1024 * 1024 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(file.base64)) {
+      throw reviewNotReady('design-gate', 'Design-review artifact snapshot contains invalid base64 evidence')
+    }
+    let decoded: string
+    try { decoded = atob(file.base64) } catch { throw reviewNotReady('design-gate', 'Design-review artifact snapshot contains invalid base64 evidence') }
+    const bytes = Uint8Array.from(decoded, (character) => character.charCodeAt(0))
+    total += bytes.byteLength
+    if (total > 128 * 1024 * 1024 || byPath.has(file.path)) {
+      throw reviewNotReady('design-gate', 'Design-review artifact snapshot exceeds bounded or unique evidence limits')
+    }
+    byPath.set(file.path, bytes)
+  }
+  return {
+    list: () => [...byPath.keys()],
+    read: (relativePath: string) => {
+      const bytes = byPath.get(relativePath)
+      if (!bytes) throw new Error(`Missing design-review artifact: ${relativePath}`)
+      return bytes
+    },
+  }
+}
+
 interface ReviewStateSnapshot {
   documentJson: string
   modelName: string
@@ -462,7 +492,7 @@ function reviewValidation(): DesignValidationReport {
     try {
       assertPhysicalAreaPlacement({
         ...area,
-        placementPolicy: area.designBinding?.approvedCrop ? 'crop-approved' : 'block',
+        placementPolicy: area.placementPolicy ?? 'block',
       })
     } catch (error) {
       issues.push({
@@ -1023,14 +1053,25 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
         const document = currentReviewDocument()
         const gateInput = input?.designGate
         if (!gateInput || typeof gateInput.blueprintJson !== 'string'
-          || typeof gateInput.designReviewManifestJson !== 'string') {
+          || typeof gateInput.designReviewManifestJson !== 'string'
+          || typeof gateInput.currentDocumentJson !== 'string') {
           throw reviewNotReady('design-gate', 'Exact design-gate evidence is required for production review')
         }
+        const designReviewArtifacts = reviewArtifactReader(gateInput.designReviewArtifacts)
         const gateEvidenceJson = JSON.stringify(gateInput)
         const gate = await verifyDesignGate({
           handoff: gateInput.handoff,
           blueprint: { read: () => reviewEvidenceBytes(gateInput.blueprintJson) },
           designReviewManifest: { read: () => reviewEvidenceBytes(gateInput.designReviewManifestJson) },
+          designReviewArtifacts,
+          currentDocument: { read: () => reviewEvidenceBytes(gateInput.currentDocumentJson) },
+          ...(gateInput.approvalRecord === undefined ? {} : { approvalRecord: gateInput.approvalRecord }),
+        })
+        const liveGate = await verifyDesignGate({
+          handoff: gateInput.handoff,
+          blueprint: { read: () => reviewEvidenceBytes(gateInput.blueprintJson) },
+          designReviewManifest: { read: () => reviewEvidenceBytes(gateInput.designReviewManifestJson) },
+          designReviewArtifacts,
           currentDocument: { read: () => reviewEvidenceBytes(document.json) },
           ...(gateInput.approvalRecord === undefined ? {} : { approvalRecord: gateInput.approvalRecord }),
         })
@@ -1095,13 +1136,30 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           handoff: gateInput.handoff,
           blueprint: { read: () => reviewEvidenceBytes(gateInput.blueprintJson) },
           designReviewManifest: { read: () => reviewEvidenceBytes(gateInput.designReviewManifestJson) },
-          currentDocument: { read: () => reviewEvidenceBytes(finalDocument.json) },
+          designReviewArtifacts,
+          currentDocument: { read: () => reviewEvidenceBytes(gateInput.currentDocumentJson) },
           ...(gateInput.approvalRecord === undefined ? {} : { approvalRecord: gateInput.approvalRecord }),
         })
         if (JSON.stringify(finalGate) !== JSON.stringify(gate)) {
           throw reviewNotReady('final-design-gate', 'Review design gate changed during capture')
         }
-        const areaTargetsSha256 = await computeAreaTargetsSha256(document.value)
+        const finalLiveGate = await verifyDesignGate({
+          handoff: gateInput.handoff,
+          blueprint: { read: () => reviewEvidenceBytes(gateInput.blueprintJson) },
+          designReviewManifest: { read: () => reviewEvidenceBytes(gateInput.designReviewManifestJson) },
+          designReviewArtifacts,
+          currentDocument: { read: () => reviewEvidenceBytes(finalDocument.json) },
+          ...(gateInput.approvalRecord === undefined ? {} : { approvalRecord: gateInput.approvalRecord }),
+        })
+        if (JSON.stringify(finalLiveGate) !== JSON.stringify(liveGate)) {
+          throw reviewNotReady('final-design-gate', 'Live editable Project design gate changed during capture')
+        }
+        let approvalDocument: unknown
+        try { approvalDocument = JSON.parse(gateInput.currentDocumentJson) } catch {
+          throw reviewNotReady('design-gate', 'Exact current Spec/Project evidence is invalid')
+        }
+        const areaTargetsSha256 = await computeAreaTargetsSha256(approvalDocument)
+        const resolvedProjectAreaTargetsSha256 = await computeAreaTargetsSha256(finalDocument.value)
         assertReviewStateUnchanged(snapshot, 'before-upload')
         assertReviewPlanUnchanged(plan, width, height, 'before-upload-plan')
         const finalValidation = reviewValidation()
@@ -1218,7 +1276,7 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
           assertFidelityReady(returnFidelity)
           completed = true
           return {
-            inputKind: 'label-project-v3',
+            inputKind: gate.documentKind,
             inputRevision: gate.documentRevision,
             inputSha256: gate.documentSha256,
             blueprintRevision: gate.blueprintRevision,
@@ -1226,6 +1284,8 @@ export function createBrowserAgentBridge(bootstrap: AgentBridgeBootstrap): Label
             designReviewManifestSha256: gate.designReviewManifestSha256,
             modelFingerprint: snapshot.modelFingerprint,
             areaTargetsSha256,
+            resolvedProjectJson: finalDocument.json,
+            resolvedProjectAreaTargetsSha256,
             views,
             confirmation: {
               sessionId: reviewSessionId(bootstrap),

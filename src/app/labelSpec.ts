@@ -192,6 +192,7 @@ export function applyStructuredLabelSpec(baseArea: LabelAreaConfig, raw: unknown
       printSpec: printSpec(input.print, baseArea.printSpec),
       layers: [], undoStack: [], redoStack: [], referenceVisible: false,
     }
+    if (input.artboard !== undefined && input.placementPolicy === undefined) next.placementPolicy = 'block'
     // Validation above rejects a forbidden carrier with source substrate. Only
     // remove stale substrate inherited from the editable base during transition.
     if (substrateForbidden && input.substrate === undefined) delete next.substrate

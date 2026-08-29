@@ -309,6 +309,16 @@ describe('label project v3', () => {
     })
   })
 
+  it('defaults a current physical Project v3 to block while preserving legacy omission during migration', () => {
+    const current = physicalProjectFixture() as any
+    delete current.areas[0].placementPolicy
+    expect(parseLabelProject(current).areas[0].placementPolicy).toBe('block')
+
+    const legacy = structuredClone(current)
+    legacy.version = 2
+    expect(parseLabelProject(legacy).areas[0].placementPolicy).toBeUndefined()
+  })
+
   it('rejects normalized design bounds outside the normalized 0..1 domain', () => {
     const project = physicalProjectFixture()
     const layers = (project.areas as Array<Record<string, unknown>>)[0].layers as Array<Record<string, unknown>>

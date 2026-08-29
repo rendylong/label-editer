@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import Ajv2020 from 'ajv/dist/2020.js'
 import { chromium } from 'playwright'
 import designReviewManifestSchema from '../../src/agent/design-review-manifest-v1.schema.json' with { type: 'json' }
 import layoutBlueprintSchema from '../../src/agent/layout-blueprint-v1.schema.json' with { type: 'json' }
-import { publishAtomically, sanitizeArtifactName, sha256Bytes } from './files.mjs'
+import { publishAtomically, sha256Bytes } from './files.mjs'
+import { deriveAreaArtifactTokens } from '../../src/agent/areaArtifactToken.mjs'
+import { assertNoSymlinkPath, readBoundedRegularFile } from './bounded-file-reader.mjs'
 import { isStrictRfc3339DateTime, validateManifestSemantics } from './design-manifest-core.mjs'
 import { validatedSvgGeometry } from './svg-path-core.mjs'
 import { resolveCustomCarrierBoundary } from './carrier-boundary-core.mjs'
@@ -17,6 +19,13 @@ import { resolvePortableTextLayoutMetric } from './text-layout-core.mjs'
 import { orderedPortableLayers } from './layer-order-core.mjs'
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024
+const MAX_BLUEPRINT_BYTES = 4 * 1024 * 1024
+const MAX_REFERENCE_BYTES = 16 * 1024 * 1024
+const MAX_REFERENCE_COUNT = 128
+const MAX_REFERENCE_AGGREGATE_BYTES = 64 * 1024 * 1024
+const MAX_ASSET_AGGREGATE_BYTES = 64 * 1024 * 1024
+const MAX_ASSET_DATA_URL_BYTES = 96 * 1024 * 1024
+const MAX_ASSET_AGGREGATE_PIXELS = 64 * 1024 * 1024
 const MAX_DECODED_IMAGE_PIXELS = 16 * 1024 * 1024
 const MAX_IMAGE_DIMENSION = 16_384
 const MAX_CAPTURE_DIMENSION = 4_096
@@ -268,10 +277,12 @@ function boundaryStyle(area, pxPerMm) {
   return ''
 }
 
-function renderArea(area, options) {
+function renderArea(area, options, capture = false) {
   const dimensions = options.capturePlan.areas.get(area.id)
   if (!dimensions) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Area ${area.id} is missing a capture dimension plan`)
-  const { width, height, left, top } = dimensions
+  const { width, height } = dimensions
+  const left = capture ? 0 : dimensions.left
+  const top = capture ? 0 : dimensions.top
   const customBoundary = area.substrate?.boundary?.shape === 'custom'
   const opaqueSubstrate = area.substrate?.kind === 'opaque'
   const filmSubstrate = area.substrate?.kind === 'transparent'
@@ -286,7 +297,10 @@ function renderArea(area, options) {
     ? ''
     : `<div class="artwork-stack">${orderedPortableLayers(area.layers).map((layer) => renderLayer(layer, area, options)).join('')}</div>`
   const selectiveUnderbase = area.carrier === 'clear_label' && area.layers.some((layer) => layer.processes.some((process) => process.process === 'white_underbase' || process.requiredMask === 'white_underbase'))
-  return `<div class="area-artboard carrier-${attr(area.carrier)}" data-area-id="${attr(area.id)}" data-carrier="${attr(area.carrier)}" data-selective-underbase="${selectiveUnderbase}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px">${substrate}${layers}</div>`
+  const identity = capture
+    ? `data-area-id="${attr(area.id)}" data-capture-area-token="${attr(options.areaTokens.get(area.id))}"`
+    : `data-presentation-area-id="${attr(area.id)}"`
+  return `<div class="area-artboard${capture ? ' area-capture-node' : ''} carrier-${attr(area.carrier)}" ${identity} data-carrier="${attr(area.carrier)}" data-selective-underbase="${selectiveUnderbase}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px">${substrate}${layers}</div>`
 }
 
 function renderView(side, area, options, revision) {
@@ -309,16 +323,19 @@ export function renderBlueprintHtml(blueprint, options) {
   const back = validated.areas.find((area) => area.side === 'back')
   if (!front || !back) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', 'Front/back areas are required')
   const revision = escapeHtml(validated.revision)
+  const areaTokens = deriveAreaArtifactTokens(validated.areas.map((area) => area.id))
   const fontFaces = validated.assets.flatMap((asset) => {
     const resolved = options.assets.get(asset.id)
     if (!resolved || (asset.mimeType !== 'font/woff' && asset.mimeType !== 'font/woff2')) return []
     const format = asset.mimeType === 'font/woff2' ? 'woff2' : 'woff'
     return [`@font-face{font-family:'review-font-${asset.id}';src:url('${resolved.dataUrl}') format('${format}')}`]
   }).join('')
-  const renderOptions = { ...options, geometry: prepared.geometry, capturePlan }
+  const renderOptions = { ...options, geometry: prepared.geometry, capturePlan, areaTokens }
+  const captureAreas = validated.areas.filter((area) => area.carrier !== 'bare')
+    .map((area) => renderArea(area, renderOptions, true)).join('')
   return `<!doctype html><html lang="en" data-blueprint-revision="${revision}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Label design review ${revision}</title><style>
-${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:${PACKAGE_TOP_INSET}px ${PACKAGE_HORIZONTAL_INSET}px ${PACKAGE_BOTTOM_INSET}px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:absolute;overflow:hidden}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.artwork-stack{position:absolute;inset:0;isolation:isolate}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.text-geometry::after{content:'\\200b'}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
-</style></head><body>${renderView('front', front, renderOptions, validated.revision)}${renderView('back', back, renderOptions, validated.revision)}</body></html>`
+${fontFaces}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#e9e7e2;color:#171717;font-family:Arial,sans-serif}body{display:flex;flex-direction:column;align-items:flex-start}.review-view{position:relative;overflow:hidden;background:#f7f5f0}.diagnostic{position:absolute;z-index:1000;left:16px;top:14px;padding:8px 10px;border-radius:6px;background:rgba(255,255,255,.92);font-size:12px}.package-silhouette{position:absolute;inset:${PACKAGE_TOP_INSET}px ${PACKAGE_HORIZONTAL_INSET}px ${PACKAGE_BOTTOM_INSET}px;display:flex;align-items:center;justify-content:center;border-radius:22% 22% 16% 16%;background:linear-gradient(90deg,#d8d4cb,#f2efe8 42%,#cbc6bc);box-shadow:inset -16px 0 30px rgba(0,0,0,.08),0 18px 32px rgba(0,0,0,.12)}.area-artboard{position:absolute;overflow:hidden}.area-capture-deck{display:flex;flex-direction:column;align-items:flex-start}.area-capture-node{position:relative}.carrier-panel,.carrier-film-extent,.carrier-boundary-path{position:absolute;inset:0;width:100%;height:100%}.carrier-film-extent{border:1px solid rgba(70,110,130,.35);background:transparent}.artwork-stack{position:absolute;inset:0;isolation:isolate}.art-layer{position:absolute}.art-layer img,.shape-geometry{display:block;width:100%;height:100%}.text-geometry{display:block;width:100%;height:auto;overflow:hidden}.text-geometry::after{content:'\\200b'}.capture-clean .diagnostic{display:none}.capture-clean .carrier-film-extent{display:none}.capture-clean .carrier-boundary-path[data-diagnostic-film="true"]{display:none}
+</style></head><body>${renderView('front', front, renderOptions, validated.revision)}${renderView('back', back, renderOptions, validated.revision)}<section class="area-capture-deck">${captureAreas}</section></body></html>`
 }
 
 function isWithin(root, target) {
@@ -423,15 +440,22 @@ function verifyMagic(bytes, mimeType, dimensions) {
 }
 
 async function resolveLocalFiles(blueprint, blueprintPath, referencePaths) {
-  const root = await realpath(path.dirname(blueprintPath))
+  const root = path.dirname(path.resolve(blueprintPath))
   const assets = new Map()
+  let assetBytes = 0
+  let dataUrlBytes = 0
+  let imagePixels = 0
   for (const asset of blueprint.assets) {
     const relative = safeRelativePath(asset.path, `Asset ${asset.id}`)
-    const absolute = await realpath(path.resolve(root, relative)).catch(() => { throw new DesignReviewError('PATH_NOT_ALLOWED', `Asset ${asset.id} does not exist`) })
-    if (!isWithin(root, absolute)) throw new DesignReviewError('PATH_NOT_ALLOWED', `Asset ${asset.id} is outside the blueprint root`)
-    const info = await stat(absolute)
-    if (!info.isFile() || info.size > MAX_ASSET_BYTES) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Asset ${asset.id} has an unsupported size`)
-    const bytes = await readFile(absolute)
+    const absolute = await assertNoSymlinkPath(root, relative, {
+      label: `Asset ${asset.id}`, makeError: (code, message) => new DesignReviewError(code, message),
+    })
+    const { bytes } = await readBoundedRegularFile(absolute, {
+      label: `Asset ${asset.id}`, maxBytes: MAX_ASSET_BYTES, code: 'INVALID_LAYOUT_BLUEPRINT',
+      makeError: (code, message) => new DesignReviewError(code, message),
+    })
+    assetBytes += bytes.byteLength
+    if (assetBytes > MAX_ASSET_AGGREGATE_BYTES) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', 'Asset inputs exceed the bounded aggregate size')
     const digest = sha256Bytes(bytes)
     if (digest !== asset.sha256) throw new DesignReviewError('DIGEST_MISMATCH', `Asset ${asset.id} digest mismatch`)
     const dimensions = imageDimensions(bytes, asset.mimeType)
@@ -439,14 +463,31 @@ async function resolveLocalFiles(blueprint, blueprintPath, referencePaths) {
     if (dimensions && ((asset.width && asset.width !== dimensions.width) || (asset.height && asset.height !== dimensions.height))) {
       throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Asset ${asset.id} dimensions mismatch`)
     }
-    assets.set(asset.id, { dataUrl: `data:${asset.mimeType};base64,${Buffer.from(bytes).toString('base64')}`, bytes, mimeType: asset.mimeType })
+    if (dimensions) {
+      imagePixels += dimensions.width * dimensions.height
+      if (imagePixels > MAX_ASSET_AGGREGATE_PIXELS) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', 'Image assets exceed the bounded aggregate pixel budget')
+    }
+    const dataUrl = `data:${asset.mimeType};base64,${Buffer.from(bytes).toString('base64')}`
+    dataUrlBytes += dataUrl.length
+    if (dataUrlBytes > MAX_ASSET_DATA_URL_BYTES) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', 'Asset data URLs exceed the bounded aggregate size')
+    assets.set(asset.id, { dataUrl, mimeType: asset.mimeType })
   }
+  if (!Array.isArray(referencePaths) || referencePaths.length > MAX_REFERENCE_COUNT) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', 'Reference inputs exceed the bounded count limit')
   const references = []
+  let referenceBytes = 0
   for (const input of referencePaths ?? []) {
-    const absolute = await realpath(path.resolve(input)).catch(() => { throw new DesignReviewError('PATH_NOT_ALLOWED', `Reference does not exist: ${input}`) })
+    const absolute = path.resolve(input)
     if (!isWithin(root, absolute)) throw new DesignReviewError('PATH_NOT_ALLOWED', 'Reference is outside the blueprint root')
     const relative = path.relative(root, absolute).split(path.sep).join('/')
-    const bytes = await readFile(absolute)
+    await assertNoSymlinkPath(root, safeRelativePath(relative, 'Reference'), {
+      label: 'Reference', makeError: (code, message) => new DesignReviewError(code, message),
+    })
+    const { bytes } = await readBoundedRegularFile(absolute, {
+      label: 'Reference evidence', maxBytes: MAX_REFERENCE_BYTES, code: 'INVALID_LAYOUT_BLUEPRINT',
+      makeError: (code, message) => new DesignReviewError(code, message),
+    })
+    referenceBytes += bytes.byteLength
+    if (referenceBytes > MAX_REFERENCE_AGGREGATE_BYTES) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', 'Reference evidence exceeds the bounded aggregate size')
     references.push({ path: safeRelativePath(relative, 'Reference'), sha256: sha256Bytes(bytes), role: 'visual_evidence' })
   }
   return { assets, references }
@@ -573,10 +614,11 @@ export async function captureDesignReview({ html, blueprint, width, height, pxPe
       if (!box || box.width !== expected.width || box.height !== expected.height) throw new DesignReviewError('BROWSER_NOT_READY', `${side} panel dimensions changed`)
       capture[side] = { bytes: await locator.screenshot({ type: 'png', animations: 'disabled' }), ...expected }
     }
+    const areaTokens = deriveAreaArtifactTokens(blueprint.areas.map((area) => area.id))
     for (const area of blueprint.areas.filter((candidate) => candidate.carrier !== 'bare')) {
       const expected = plan.areas.get(area.id)
       if (!expected) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Area ${area.id} is missing a capture dimension plan`)
-      const locator = page.locator(`[data-area-id="${area.id}"]`)
+      const locator = page.locator(`[data-capture-area-token="${areaTokens.get(area.id)}"]`)
       const box = await locator.boundingBox()
       if (!box || box.width !== expected.width || box.height !== expected.height) throw new DesignReviewError('BROWSER_NOT_READY', `Area ${area.id} dimensions changed`)
       capture.areas[area.id] = {
@@ -619,10 +661,13 @@ export async function renderDesignReview({
   assertDimension(width, 'width'); assertDimension(height, 'height')
   if (typeof pxPerMm !== 'number' || !Number.isFinite(pxPerMm) || pxPerMm <= 0 || pxPerMm > 100) throw new DesignReviewError('INVALID_USAGE', 'pxPerMm must be a positive number at most 100')
   if (typeof outputDir !== 'string' || outputDir.length === 0) throw new DesignReviewError('INVALID_USAGE', 'outputDir is required')
-  const resolvedBlueprintPath = await realpath(path.resolve(blueprintPath)).catch(() => { throw new DesignReviewError('PATH_NOT_ALLOWED', `Blueprint does not exist: ${blueprintPath}`) })
-  const blueprintBytes = await readFile(resolvedBlueprintPath)
+  const resolvedBlueprintPath = path.resolve(blueprintPath)
+  const { bytes: blueprintBytes } = await readBoundedRegularFile(resolvedBlueprintPath, {
+    label: 'Layout blueprint', maxBytes: MAX_BLUEPRINT_BYTES, code: 'INVALID_LAYOUT_BLUEPRINT',
+    makeError: (code, message) => new DesignReviewError(code, message),
+  })
   let parsed
-  try { parsed = JSON.parse(blueprintBytes.toString('utf8')) } catch (error) { throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Blueprint JSON is invalid: ${error.message}`) }
+  try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(blueprintBytes)) } catch (error) { throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Blueprint JSON is invalid: ${error.message}`) }
   const blueprint = validateLayoutBlueprint(parsed, pxPerMm)
   const capturePlan = resolveCapturePlan(blueprint, width, height, pxPerMm)
   const resolvedOutputDir = path.resolve(outputDir)
@@ -655,13 +700,14 @@ export async function renderDesignReview({
   addArtifact('mockup-html', 'mockup.html', htmlBytes, 'text/html', capturePlan.review.width, capturePlan.review.height, 'mockup-html')
   addArtifact('mockup-front', 'mockup-front.png', captureResult.front.bytes, 'image/png', capturePlan.review.width, capturePlan.review.height, 'mockup-front')
   addArtifact('mockup-back', 'mockup-back.png', captureResult.back.bytes, 'image/png', capturePlan.review.width, capturePlan.review.height, 'mockup-back')
+  const areaTokens = deriveAreaArtifactTokens(blueprint.areas.map((area) => area.id))
   for (const area of blueprint.areas.filter((candidate) => candidate.carrier !== 'bare')) {
     const areaCapture = captureResult.areas?.[area.id]
     const dimensions = capturePlan.areas.get(area.id)
     if (!dimensions) throw new DesignReviewError('INVALID_LAYOUT_BLUEPRINT', `Area ${area.id} is missing a capture dimension plan`)
     assertCapture(areaCapture, dimensions.width, dimensions.height, `area ${area.id}`)
-    const areaToken = sanitizeArtifactName(area.id)
-    addArtifact(`mockup-area-${area.id}`, `areas/${areaToken}.png`, areaCapture.bytes, 'image/png', dimensions.width, dimensions.height, 'mockup-area', area)
+    const areaToken = areaTokens.get(area.id)
+    addArtifact(`mockup-area-${areaToken}`, `areas/${areaToken}.png`, areaCapture.bytes, 'image/png', dimensions.width, dimensions.height, 'mockup-area', area)
   }
   const manifest = buildDesignReviewManifest({
     blueprint, blueprintSha256: sha256Bytes(blueprintBytes), htmlSha256: sha256Bytes(htmlBytes), createdAt, references, artifacts: manifestArtifacts,

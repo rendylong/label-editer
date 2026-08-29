@@ -14,6 +14,7 @@ import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from 
 import { computeLabelSetup } from '../src/app/modelLoader'
 import { extractMeshAccessors, isMeshWorldMirrored, meshLocalFrontDirection, readGlb } from '../src/glb/analyze'
 import { makeDefaultRemap } from '../src/glb/uvRemap'
+import { pngBytes } from './pngTestUtils'
 
 const repoRoot = path.resolve(import.meta.dirname, '..')
 
@@ -27,7 +28,10 @@ const approvalRuntimeFiles = [
   'src/agent/generated/labelSpecV2Validator.ts',
   'scripts/render-design-review.mjs',
   'scripts/lib/design-review.mjs',
+  'scripts/lib/bounded-file-reader.mjs',
   'scripts/lib/review-output.mjs',
+  'scripts/lib/typescript-loader.mjs',
+  'scripts/lib/workflow-gate.mjs',
   'src/agent/areaArtifactToken.mjs',
   'src/agent/areaArtifactToken.d.mts',
   'src/label/cssColor.ts',
@@ -48,6 +52,7 @@ const approvalSkillFiles = [
   'skills/cosmetic-label/scripts/query_labels.py',
   'skills/cosmetic-label-editor/SKILL.md',
   'skills/cosmetic-label-editor/references/quality-control.md',
+  'skills/cosmetic-label-editor/references/workflow-gates.md',
 ] as const
 
 const packagedReviewModelFile = 'public/sample/面霜瓶.glb'
@@ -755,19 +760,27 @@ async function writeInstalledReviewFixture(
   }
   const blueprintJson = JSON.stringify(blueprint)
   const blueprintSha256 = sha256(blueprintJson)
+  const designReviewRoot = path.join(callerRoot, 'design-review')
+  const mockupHtml = '<!doctype html><html><body style="width:1600px;height:1200px"></body></html>'
+  const mockupFront = pngBytes(1600, 1200)
+  const mockupBack = pngBytes(1600, 1200)
+  const mockupArea = pngBytes(1200, 1200)
   const designManifest: DesignReviewManifestV1 = {
     version: 1, createdAt: '2026-08-28T00:00:00.000Z',
     blueprint: { revision: blueprint.revision, sha256: blueprintSha256 },
-    html: { sha256: '1'.repeat(64) }, references: [],
+    html: { sha256: sha256(mockupHtml) }, references: [],
     areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
     artifacts: [{
-      id: 'mockup-front', path: 'mockup-front.png', sha256: '2'.repeat(64),
+      id: 'mockup-html', path: 'mockup.html', sha256: sha256(mockupHtml),
+      mimeType: 'text/html', width: 1600, height: 1200, viewKind: 'mockup-html',
+    }, {
+      id: 'mockup-front', path: 'mockup-front.png', sha256: sha256(mockupFront),
       mimeType: 'image/png', width: 1600, height: 1200, viewKind: 'mockup-front',
     }, {
-      id: 'mockup-back', path: 'mockup-back.png', sha256: '3'.repeat(64),
+      id: 'mockup-back', path: 'mockup-back.png', sha256: sha256(mockupBack),
       mimeType: 'image/png', width: 1600, height: 1200, viewKind: 'mockup-back',
     }, {
-      id: 'mockup-area-front', path: 'areas/front.png', sha256: '4'.repeat(64),
+      id: 'mockup-area-front', path: 'areas/front.png', sha256: sha256(mockupArea),
       mimeType: 'image/png', width: 1200, height: 1200, viewKind: 'mockup-area',
       areaId: 'front', carrier: 'direct_surface_print',
     }],
@@ -777,8 +790,8 @@ async function writeInstalledReviewFixture(
   const handoff: EditorHandoffV2 = {
     handoff_version: 2, status: 'approved',
     source: {
-      design_spec: 'design.md', mockup_html: 'mockup.html', blueprint: 'layout-blueprint.json',
-      design_review_manifest: 'design-review-manifest.json', blueprint_revision: blueprint.revision,
+      design_spec: 'design.md', mockup_html: 'design-review/mockup.html', blueprint: 'layout-blueprint.json',
+      design_review_manifest: 'design-review/design-review-manifest.json', blueprint_revision: blueprint.revision,
       blueprint_sha256: blueprintSha256, review_manifest_sha256: designReviewManifestSha256,
     },
     approval: {
@@ -812,11 +825,16 @@ async function writeInstalledReviewFixture(
   }
   const inputPath = path.join(callerRoot, 'working-label-spec.json')
   const outputDir = path.join(callerRoot, 'production-review-revision-001')
+  await mkdir(path.join(designReviewRoot, 'areas'), { recursive: true })
   await Promise.all([
     writeFile(inputPath, `${JSON.stringify({ version: 2, areas })}\n`),
     writeFile(path.join(callerRoot, 'editor-handoff.json'), `${JSON.stringify(handoff)}\n`),
     writeFile(path.join(callerRoot, 'layout-blueprint.json'), blueprintJson),
-    writeFile(path.join(callerRoot, 'design-review-manifest.json'), designManifestJson),
+    writeFile(path.join(designReviewRoot, 'design-review-manifest.json'), designManifestJson),
+    writeFile(path.join(designReviewRoot, 'mockup.html'), mockupHtml),
+    writeFile(path.join(designReviewRoot, 'mockup-front.png'), mockupFront),
+    writeFile(path.join(designReviewRoot, 'mockup-back.png'), mockupBack),
+    writeFile(path.join(designReviewRoot, 'areas/front.png'), mockupArea),
   ])
   return {
     inputPath,
@@ -1329,7 +1347,7 @@ describe('GLB label editor installer', () => {
   }, 180_000)
 
   it(
-    'publishes and reads back a real clean review through the installed launcher using the packaged sample',
+    'publishes a real clean review and enforces installed gates through the packaged sample',
     async () => {
       const installed = await installedPackage()
       const reviewWithoutPython = await createPythonBlockedEnvironment(installed.root, 'review-launcher')
@@ -1405,13 +1423,18 @@ describe('GLB label editor installer', () => {
         designReviewManifest: { sha256: fixture.designReviewManifestSha256 },
         model: { fingerprint: inspection.fingerprint },
         areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        resolvedProject: {
+          path: 'resolved-project.lbl.json', revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
         areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
       })
       expect(manifest.artifacts).toHaveLength(5)
       const canonicalOutputDir = await realpath(fixture.outputDir)
       const expectedOutputFiles = [
-        'label-front.png', 'model-back.png', 'model-front.png', 'review-manifest.json',
-        'review-sheet.png', 'surface-front.png',
+        'label-front.png', 'model-back.png', 'model-front.png', 'resolved-project.lbl.json',
+        'review-manifest.json', 'review-sheet.png', 'surface-front.png',
       ]
       expect((await readdir(fixture.outputDir)).sort()).toEqual(expectedOutputFiles)
       expect(envelope.data.artifacts).toEqual(manifest.artifacts.map((artifact: { path: string }) => ({
@@ -1430,6 +1453,70 @@ describe('GLB label editor installer', () => {
         expect(bytes.readUInt32BE(20), artifact.path).toBe(320)
         expect(sha256(bytes), artifact.path).toBe(artifact.sha256)
       }
+
+      const productionApproval = {
+        version: 1, gate: 'production', mode: 'explicit_approval', scope: 'current_task',
+        design_revision: manifest.blueprint.revision, blueprint_sha256: manifest.blueprint.sha256,
+        review_manifest_sha256: sha256(await readFile(manifestPath)), spec_revision: manifest.input.revision,
+        model_fingerprint: manifest.model.fingerprint, area_targets_sha256: manifest.areaTargetsSha256,
+        recorded_at: '2026-08-29T00:02:00.000Z',
+      }
+      const productionApprovalPath = path.join(installed.callerRoot, 'production-approval.json')
+      const designGateRequestPath = path.join(installed.callerRoot, 'design-gate-request.json')
+      const productionGateRequestPath = path.join(installed.callerRoot, 'production-gate-request.json')
+      await Promise.all([
+        writeFile(productionApprovalPath, JSON.stringify(productionApproval)),
+        writeFile(designGateRequestPath, JSON.stringify({
+          version: 1, gate: 'design', evidenceRoot: '.', currentDocument: path.basename(fixture.inputPath),
+          handoff: 'editor-handoff.json', blueprint: 'layout-blueprint.json',
+          designReviewManifest: 'design-review/design-review-manifest.json', designReviewEvidenceRoot: 'design-review',
+        })),
+        writeFile(productionGateRequestPath, JSON.stringify({
+          version: 1, gate: 'production', evidenceRoot: '.', currentDocument: path.basename(fixture.inputPath),
+          handoff: 'editor-handoff.json', blueprint: 'layout-blueprint.json',
+          designReviewManifest: 'design-review/design-review-manifest.json', designReviewEvidenceRoot: 'design-review',
+          productionReviewManifest: `${path.basename(fixture.outputDir)}/review-manifest.json`,
+          productionReviewEvidenceRoot: path.basename(fixture.outputDir),
+          productionApprovalRecord: path.basename(productionApprovalPath), model: path.basename(fixture.modelPath),
+        })),
+      ])
+      for (const [gate, requestPath] of [['design', designGateRequestPath], ['production', productionGateRequestPath]] as const) {
+        const gateResult = await runBoundedCommand(`installed ${gate} gate`, process.execPath, [
+          installed.launcherPath, 'gate', gate, path.basename(requestPath), '--json',
+        ], {
+          cwd: installed.callerRoot, timeoutMs: 30_000, maxBufferBytes: 16 * 1024 * 1024,
+          env: reviewWithoutPython.env,
+        })
+        expect(gateResult.status, gateResult.stderr).toBe(0)
+        expect(JSON.parse(gateResult.stdout)).toMatchObject({ ok: true, operation: `gate_${gate}`, data: { valid: true } })
+      }
+
+      const originalSpecBytes = await readFile(fixture.inputPath)
+      const staleSpec = JSON.parse(originalSpecBytes.toString('utf8'))
+      staleSpec.areas[0].target.stableSelector = 'mesh:999/node:999'
+      await writeFile(fixture.inputPath, JSON.stringify(staleSpec))
+      const staleGate = await runBoundedCommand('installed stale production gate', process.execPath, [
+        installed.launcherPath, 'gate', 'production', path.basename(productionGateRequestPath), '--json',
+      ], {
+        cwd: installed.callerRoot, timeoutMs: 30_000, maxBufferBytes: 16 * 1024 * 1024,
+        env: reviewWithoutPython.env,
+      })
+      expect(staleGate.status).not.toBe(0)
+      expect(JSON.parse(staleGate.stdout)).toMatchObject({ ok: false, error: { code: 'STALE_APPROVAL' } })
+      await writeFile(fixture.inputPath, originalSpecBytes)
+
+      const missingArtifactPath = path.join(fixture.outputDir, manifest.artifacts[0].path)
+      const missingArtifactBytes = await readFile(missingArtifactPath)
+      await rm(missingArtifactPath)
+      const missingGate = await runBoundedCommand('installed missing-artifact production gate', process.execPath, [
+        installed.launcherPath, 'gate', 'production', path.basename(productionGateRequestPath), '--json',
+      ], {
+        cwd: installed.callerRoot, timeoutMs: 30_000, maxBufferBytes: 16 * 1024 * 1024,
+        env: reviewWithoutPython.env,
+      })
+      expect(missingGate.status).not.toBe(0)
+      expect(JSON.parse(missingGate.stdout)).toMatchObject({ ok: false, error: { code: 'DIGEST_MISMATCH' } })
+      await writeFile(missingArtifactPath, missingArtifactBytes)
 
       const immutableSnapshot = Object.fromEntries(await Promise.all(expectedOutputFiles.map(async (fileName) => (
         [fileName, sha256(await readFile(path.join(fixture.outputDir, fileName)))]

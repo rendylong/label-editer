@@ -19,6 +19,7 @@
   },
   "$defs": {
     "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "opaqueId": { "type": "string", "minLength": 1, "maxLength": 4096 },
     "revision": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" },
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
@@ -78,7 +79,7 @@
         "carrier": { "$ref": "#/$defs/carrier" },
         "placement": { "$ref": "#/$defs/boundedString" },
         "physical_size_mm": { "$ref": "#/$defs/physicalSize" },
-        "blueprint_area_id": { "$ref": "#/$defs/id" }
+        "blueprint_area_id": { "$ref": "#/$defs/opaqueId" }
       }
     },
     "asset": {

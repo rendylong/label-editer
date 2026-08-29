@@ -36,17 +36,22 @@ function fixture(kind: 'label-spec-v2' | 'label-project-v3' = 'label-spec-v2'): 
     bytes: new Uint8Array(bytes),
   }))
   const input = { kind, revision: `sha256:${'1'.repeat(64)}`, sha256: '1'.repeat(64) }
+  const resolvedProjectBytes = new TextEncoder().encode(JSON.stringify({ version: 3, modelFileName: 'bottle.glb', areas: [] }))
+  const resolvedProject = {
+    path: 'resolved-project.lbl.json', revision: `sha256:${'6'.repeat(64)}`,
+    sha256: sha256(resolvedProjectBytes), areaTargetsSha256: '7'.repeat(64),
+  }
   const areas = [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }]
   const evidence = {
-    inputKind: 'label-project-v3', inputRevision: `sha256:${'9'.repeat(64)}`, inputSha256: '9'.repeat(64),
+    inputKind: kind, inputRevision: input.revision, inputSha256: input.sha256,
     blueprintRevision: 'design-v1', blueprintSha256: '2'.repeat(64),
     designReviewManifestSha256: '3'.repeat(64), modelFingerprint: `sha256:${'4'.repeat(64)}`,
     areaTargetsSha256: '5'.repeat(64), views,
   }
   const manifest = buildReviewManifest({
-    createdAt: '2026-08-27T12:34:56.000Z', input, areas, evidence, artifacts,
+    createdAt: '2026-08-27T12:34:56.000Z', input, resolvedProject, areas, evidence, artifacts,
   })
-  return { manifest, input, areas, evidence, artifacts, bytes }
+  return { manifest, input, resolvedProject, resolvedProjectBytes, areas, evidence, artifacts, bytes }
 }
 
 afterEach(async () => {
@@ -60,6 +65,7 @@ describe('production review manifest', () => {
     expect(value.manifest).toMatchObject({
       version: 1,
       input: { kind, revision: value.input.revision, sha256: value.input.sha256 },
+      resolvedProject: value.resolvedProject,
       blueprint: { revision: 'design-v1', sha256: '2'.repeat(64) },
       designReviewManifest: { sha256: '3'.repeat(64) },
       model: { fingerprint: `sha256:${'4'.repeat(64)}` },
@@ -93,6 +99,7 @@ describe('production review manifest', () => {
   it.each([
     ['createdAt', (value: any) => { value.manifest.createdAt = '2026-08-27' }],
     ['input digest', (value: any) => { value.manifest.input.sha256 = '0'.repeat(64) }],
+    ['resolved Project digest', (value: any) => { value.manifest.resolvedProject.sha256 = '0'.repeat(64) }],
     ['blueprint revision', (value: any) => { value.manifest.blueprint.revision = 'other' }],
     ['design review digest', (value: any) => { value.manifest.designReviewManifest.sha256 = '0'.repeat(64) }],
     ['model fingerprint', (value: any) => { value.manifest.model.fingerprint = `sha256:${'0'.repeat(64)}` }],
@@ -135,12 +142,13 @@ describe('production review manifest', () => {
       const stored = value.artifacts.find((candidate: any) => candidate.id === artifact.id)!
       await writeFile(path.join(output, artifact.path), stored.bytes)
     }
+    await writeFile(path.join(output, value.resolvedProject.path), value.resolvedProjectBytes)
     await writeFile(path.join(output, 'review-manifest.json'), `${JSON.stringify(value.manifest, null, 2)}\n`)
 
     expect(await validateReviewDirectory(output, value)).toEqual(value.manifest)
     expect((await readdir(output)).sort()).toEqual([
-      'label-front.png', 'model-back.png', 'model-front.png', 'review-manifest.json',
-      'review-sheet.png', 'surface-front.png',
+      'label-front.png', 'model-back.png', 'model-front.png', 'resolved-project.lbl.json',
+      'review-manifest.json', 'review-sheet.png', 'surface-front.png',
     ])
     expect(JSON.parse(await readFile(path.join(output, 'review-manifest.json'), 'utf8'))).toEqual(value.manifest)
 
@@ -161,6 +169,7 @@ describe('production review manifest', () => {
       if (artifact.id === 'label-front') await symlink(external, path.join(output, artifact.path))
       else await writeFile(path.join(output, artifact.path), stored.bytes)
     }
+    await writeFile(path.join(output, value.resolvedProject.path), value.resolvedProjectBytes)
     await writeFile(path.join(output, 'review-manifest.json'), `${JSON.stringify(value.manifest, null, 2)}\n`)
     await expect(validateReviewDirectory(output, value)).rejects.toThrow(/non-file|regular file|symlink/i)
   })
@@ -176,6 +185,7 @@ describe('production review manifest', () => {
       const stored = value.artifacts.find((candidate: any) => candidate.id === artifact.id)!
       await writeFile(path.join(output, artifact.path), stored.bytes)
     }
+    await writeFile(path.join(output, value.resolvedProject.path), value.resolvedProjectBytes)
     await writeFile(path.join(output, 'review-manifest.json'), `${JSON.stringify(value.manifest, null, 2)}\n`)
     await symlink(output, alias)
     await expect(validateReviewDirectory(alias, value)).rejects.toThrow(/root|symlink|regular directory/i)

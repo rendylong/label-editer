@@ -134,6 +134,8 @@ export interface ReviewDesignGateEvidence {
   handoff: unknown
   blueprintJson: string
   designReviewManifestJson: string
+  currentDocumentJson: string
+  designReviewArtifacts: Array<{ path: string; base64: string }>
   approvalRecord?: unknown
 }
 
@@ -192,6 +194,8 @@ export interface ReviewEvidenceResult {
   designReviewManifestSha256: string
   modelFingerprint: string
   areaTargetsSha256: string
+  resolvedProjectJson: string
+  resolvedProjectAreaTargetsSha256: string
   views: ReviewViewResult[]
   confirmation: ReviewEvidenceConfirmation
   validation: DesignValidationReport

@@ -78,11 +78,13 @@ describe('browser Agent Bridge guard', () => {
     const received: ReviewEvidenceRequest[] = []
     const bridge = createAgentBridge({
       renderReviewEvidence: async (request) => {
-        received.push(request ?? { designGate: { handoff: {}, blueprintJson: '', designReviewManifestJson: '' } })
+        received.push(request ?? { designGate: { handoff: {}, blueprintJson: '', designReviewManifestJson: '', currentDocumentJson: '', designReviewArtifacts: [] } })
         return {
           inputKind: 'label-project-v3' as const, inputRevision: `sha256:${'1'.repeat(64)}`, inputSha256: '2'.repeat(64),
           blueprintRevision: 'design-v1', blueprintSha256: '3'.repeat(64), designReviewManifestSha256: '4'.repeat(64),
           modelFingerprint: '5'.repeat(64), areaTargetsSha256: '6'.repeat(64), views: [],
+          resolvedProjectJson: '{"version":3,"modelFileName":"model.glb","areas":[]}',
+          resolvedProjectAreaTargetsSha256: '7'.repeat(64),
           confirmation: {
             sessionId: 's1', batchId: 'review-1', leaseToken: 'l'.repeat(32), generation: 1,
             expiresAt: 1_800_000_000_000, artifacts: [],
@@ -93,7 +95,7 @@ describe('browser Agent Bridge guard', () => {
     })
     const request: ReviewEvidenceRequest = {
       width: 1600, height: 1600,
-      designGate: { handoff: {}, blueprintJson: '{}', designReviewManifestJson: '{}' },
+      designGate: { handoff: {}, blueprintJson: '{}', designReviewManifestJson: '{}', currentDocumentJson: '{}', designReviewArtifacts: [] },
     }
 
     await expect(bridge.renderReviewEvidence(request)).resolves.toMatchObject({

@@ -81,11 +81,14 @@ The design stage does not guess meshes, `stableSelector` values, or UVs. The pro
 | `live` | Automatically open a read-only web preview and keep watching the same working spec | No |
 | `preview` | Generate a PNG for Agent visual inspection | Yes |
 | `review` | Capture clean, approval-bound flat-artwork and on-model evidence | Yes |
+| `gate design` / `gate production` | Revalidate approval bindings and every evidence byte from a bounded request file | No |
 | `qc` | Capture diagnostic multi-view evidence for inspection and repair | Yes |
 | `apply` / `export` | Bake, cross-check the GLB, and publish the complete output | Yes |
 | `open` | Explicit human takeover; returns a tokenized local editable URL | No |
 
-The canonical sequence is carrier decision → blueprint/mockup → design approval → `inspect` → create/validate the working spec → `live` → repeat `project` / `patch --force` → `validate` → clean `review` → production approval → diagnostic `qc` / repair / recapture → `apply` or `export`. Never guess a target from a similar node name; use the `stableSelector` returned by inspection. `open` is not part of the default Agent workflow.
+The canonical sequence is carrier decision → blueprint/mockup → design approval → `gate design` → `inspect` → create/validate the working spec → `live` → repeat `project` / `patch --force` → `validate` → clean `review` → production approval → `gate production` → diagnostic `qc` / repair / recapture → fresh `gate production` → `apply` or `export`. Never guess a target from a similar node name; use the `stableSelector` returned by inspection. `open` is not part of the default Agent workflow.
+
+Both approval gates are installed, local-only CLI commands. Run `label-cli gate design design-gate-request.json --json`, then later `label-cli gate production production-gate-request.json --json`. Each request is version 1, declares its matching `gate`, and names one `evidenceRoot` below the request directory. All other paths are portable relative paths below that root. Design requests require `currentDocument`, `handoff`, `blueprint`, `designReviewManifest`, and `designReviewEvidenceRoot`; `designApprovalRecord` is optional when Handoff v2 already carries the exact approval. Production requests add `productionReviewManifest`, `productionReviewEvidenceRoot`, `productionApprovalRecord`, and the exact current `model`. Production review publishes `resolved-project.lbl.json`; its manifest binds that exact Project v3 separately from the truthfully typed original Spec v2 or Project v3 input, and the production gate consumes both. An evidence directory must contain exactly its manifest, the bound resolved Project when applicable, and declared artifacts. A missing, added, renamed, symlinked, non-regular, digest-mismatched, wrong-MIME, or wrong-dimension artifact fails before QC/apply/export.
 
 ## CLI
 
@@ -120,6 +123,9 @@ node scripts/label-cli.mjs review working-label-spec.json \
   --width 1600 \
   --height 1600 \
   --json
+
+# Revalidate the exact approved production request before QC and again before apply/export
+label-cli gate production production-gate-request.json --json
 
 # Capture the standard diagnostic-QC evidence set for the current working revision
 node scripts/label-cli.mjs qc working-label-spec.json \

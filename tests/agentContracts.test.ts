@@ -11,6 +11,8 @@ describe('Agent protocol contracts', () => {
         handoff: { handoff_version: 2, status: 'approved' },
         blueprintJson: '{"version":1}',
         designReviewManifestJson: '{"version":1}',
+        currentDocumentJson: '{"version":2,"areas":[]}',
+        designReviewArtifacts: [{ path: 'design-review-manifest.json', base64: 'e30=' }],
         approvalRecord: { version: 1, gate: 'design' },
       },
     }
@@ -19,6 +21,8 @@ describe('Agent protocol contracts', () => {
       blueprintRevision: 'design-v1', blueprintSha256: '3'.repeat(64),
       designReviewManifestSha256: '4'.repeat(64), modelFingerprint: '5'.repeat(64),
       areaTargetsSha256: '6'.repeat(64), views: [],
+      resolvedProjectJson: '{"version":3,"modelFileName":"model.glb","areas":[]}',
+      resolvedProjectAreaTargetsSha256: '7'.repeat(64),
       confirmation: {
         sessionId: 's1', batchId: 'review-1', leaseToken: 'l'.repeat(32), generation: 1,
         expiresAt: 1_800_000_000_000, artifacts: [],

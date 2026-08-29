@@ -24,6 +24,7 @@ import { createOperations } from '../scripts/lib/operations.mjs'
 import { revisionOf } from '../scripts/lib/project-control.mjs'
 // @ts-expect-error Design review is directly executable ESM.
 import { renderDesignReview } from '../scripts/lib/design-review.mjs'
+import { pngBytes } from './pngTestUtils'
 
 const defaultModel = '/Users/apple/realibox/cosmetic-bottles-glb/02_perfume_glass_with_cap.glb'
 const modelPath = process.env.GLB_LABEL_E2E_MODEL ?? defaultModel
@@ -57,6 +58,14 @@ function requireTask12ExternalFiles(): void {
 
 function hash(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
+}
+
+function designAreaArtifactPath(manifest: DesignReviewManifestV1, areaId: string): string {
+  const artifact = manifest.artifacts.find((candidate) => (
+    candidate.viewKind === 'mockup-area' && candidate.areaId === areaId
+  ))
+  if (!artifact) throw new Error(`Design review manifest is missing the area artifact for ${areaId}`)
+  return artifact.path
 }
 
 type Task12Package = {
@@ -573,7 +582,7 @@ function reviewEvidenceFixture(): { spec: Record<string, unknown>; request: Revi
     areas: [{
       id: 'front', side: 'front', carrier: 'direct_surface_print',
       artboard: { widthMm, heightMm, background: 'transparent' },
-      placementIntent: 'Centered direct print on the front face.', placementPolicy: 'block',
+      placementIntent: 'Centered direct print on the front face.', placementPolicy: 'fit',
       layers: [{
         id: 'browser-mark', kind: 'shape', boundsMm: { x: 16, y: 4, width: 26, height: 22 },
         anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 0,
@@ -584,19 +593,29 @@ function reviewEvidenceFixture(): { spec: Record<string, unknown>; request: Revi
   }
   const blueprintJson = JSON.stringify(blueprint)
   const blueprintSha = hash(new TextEncoder().encode(blueprintJson))
+  const designHtml = '<!doctype html><html><body><section style="width:1600px;height:1200px"></section></body></html>'
+  const artifactFiles = new Map<string, string | Uint8Array>([
+    ['mockup.html', designHtml],
+    ['mockup-front.png', pngBytes(1600, 1200)],
+    ['mockup-back.png', pngBytes(1600, 1200)],
+    ['areas/front.png', pngBytes(1200, 1200)],
+  ])
   const manifest: DesignReviewManifestV1 = {
     version: 1, createdAt: '2026-08-27T10:00:00.000Z',
     blueprint: { revision: blueprint.revision, sha256: blueprintSha },
-    html: { sha256: '1'.repeat(64) }, references: [],
+    html: { sha256: hash(new TextEncoder().encode(designHtml)) }, references: [],
     areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
     artifacts: [{
-      id: 'mockup-front', path: 'mockup-front.png', sha256: '2'.repeat(64),
+      id: 'mockup-html', path: 'mockup.html', sha256: hash(new TextEncoder().encode(designHtml)),
+      mimeType: 'text/html', width: 1600, height: 1200, viewKind: 'mockup-html',
+    }, {
+      id: 'mockup-front', path: 'mockup-front.png', sha256: hash(artifactFiles.get('mockup-front.png') as Uint8Array),
       mimeType: 'image/png', width: 1600, height: 1200, viewKind: 'mockup-front',
     }, {
-      id: 'mockup-back', path: 'mockup-back.png', sha256: '3'.repeat(64),
+      id: 'mockup-back', path: 'mockup-back.png', sha256: hash(artifactFiles.get('mockup-back.png') as Uint8Array),
       mimeType: 'image/png', width: 1600, height: 1200, viewKind: 'mockup-back',
     }, {
-      id: 'mockup-area-front', path: 'areas/front.png', sha256: '4'.repeat(64),
+      id: 'mockup-area-front', path: 'areas/front.png', sha256: hash(artifactFiles.get('areas/front.png') as Uint8Array),
       mimeType: 'image/png', width: 1200, height: 1200, viewKind: 'mockup-area',
       areaId: 'front', carrier: 'direct_surface_print',
     }],
@@ -632,11 +651,19 @@ function reviewEvidenceFixture(): { spec: Record<string, unknown>; request: Revi
     blueprintSha256: blueprintSha,
     reviewManifestSha256: manifestSha,
   }
+  const spec = { version: 2, areas }
   return {
-    spec: { version: 2, areas },
+    spec,
     request: {
       width: 640, height: 640,
-      designGate: { handoff, blueprintJson, designReviewManifestJson },
+      designGate: {
+        handoff, blueprintJson, designReviewManifestJson,
+        currentDocumentJson: JSON.stringify(spec),
+        designReviewArtifacts: [
+          { path: 'design-review-manifest.json', base64: Buffer.from(designReviewManifestJson).toString('base64') },
+          ...[...artifactFiles].map(([artifactPath, bytes]) => ({ path: artifactPath, base64: Buffer.from(bytes).toString('base64') })),
+        ],
+      },
     },
   }
 }
@@ -855,7 +882,7 @@ describe('GLB label plugin E2E', () => {
       }
 
       const parityReviewDir = path.join(evidenceRoot, 'native-parity-design-review')
-      await renderDesignReview({
+      const parityReview = await renderDesignReview({
         blueprintPath: laviraBlueprintPath,
         outputDir: parityReviewDir,
         width: 960,
@@ -864,7 +891,7 @@ describe('GLB label plugin E2E', () => {
         createdAt: '2026-08-28T00:00:00.000Z',
       })
       const [reviewBackStats] = await browserPngStats([
-        path.join(parityReviewDir, 'areas/lavira.back-approved.png'),
+        path.join(parityReviewDir, designAreaArtifactPath(parityReview.manifest, 'lavira.back:approved')),
       ])
       expect(reviewBackStats.center.slice(0, 3).every((channel) => channel < 55)).toBe(true)
       expect(reviewBackStats.copper).toBeGreaterThan(100)
@@ -907,8 +934,8 @@ describe('GLB label plugin E2E', () => {
     expect(laviraHtml).toContain('WOODS IN WHISPER. EMBERS REMAIN.')
     expect(laviraHtml).toContain('PLACEHOLDER')
     expect(laviraHtml).not.toContain('烬木之息')
-    expect(laviraHtml).not.toMatch(/<script|leaseToken|token=/i)
-    expect(directHtml).not.toMatch(/<script|leaseToken|token=/i)
+    expect(laviraHtml).not.toMatch(/<script|\bleaseToken\b|(?:[?&]|&amp;)token=/i)
+    expect(directHtml).not.toMatch(/<script|\bleaseToken\b|(?:[?&]|&amp;)token=/i)
 
     const frontFacts = await browserHtmlFacts(laviraHtml, 'lavira.front:approved')
     const backFacts = await browserHtmlFacts(laviraHtml, 'lavira.back:approved')
@@ -984,6 +1011,11 @@ describe('GLB label plugin E2E', () => {
         designReviewManifest: { sha256: hash(fixture.designManifestBytes) },
         model: { fingerprint: hash(modelBytes) },
         areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        resolvedProject: {
+          path: 'resolved-project.lbl.json', revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
         areas: fixture.blueprint.areas.map(({ id, side, carrier }) => ({ id, side, carrier })),
       })
       expect(manifest.artifacts).toHaveLength(7)
@@ -998,8 +1030,13 @@ describe('GLB label plugin E2E', () => {
         /^[A-Za-z0-9][A-Za-z0-9._-]*\.png$/.test(artifact.path) && !artifact.path.includes(':')
       ))).toBe(true)
       expect(review.manifestBytes.toString('utf8')).not.toMatch(/leaseToken|token=/)
-      const expectedFiles = ['review-manifest.json', ...manifest.artifacts.map((artifact: { path: string }) => artifact.path)].sort()
+      const expectedFiles = [
+        'review-manifest.json', manifest.resolvedProject.path,
+        ...manifest.artifacts.map((artifact: { path: string }) => artifact.path),
+      ].sort()
       expect((await readdir(review.outputDir)).sort()).toEqual(expectedFiles)
+      const resolvedProjectBytes = await readFile(path.join(review.outputDir, manifest.resolvedProject.path))
+      expect(hash(resolvedProjectBytes)).toBe(manifest.resolvedProject.sha256)
       for (const artifact of manifest.artifacts) {
         const bytes = await readFile(path.join(review.outputDir, artifact.path))
         expect(bytes.byteLength, artifact.path).toBeGreaterThan(1_000)
@@ -1019,7 +1056,10 @@ describe('GLB label plugin E2E', () => {
     expect(laviraStats.every((stats) => stats.width === 640 && stats.height === 640)).toBe(true)
     expect(laviraStats.every((stats) => stats.opaque > 0 && stats.colorBuckets > 4)).toBe(true)
     const [laviraDesignBackStats] = await browserPngStats([
-      path.join(lavira.designReviewDir, 'areas/lavira.back-approved.png'),
+      path.join(
+        lavira.designReviewDir,
+        designAreaArtifactPath(laviraDesignManifest, 'lavira.back:approved'),
+      ),
     ])
     const laviraProductionBackStats = laviraStats[2]
     for (const stats of [laviraDesignBackStats, laviraProductionBackStats]) {
@@ -1029,13 +1069,17 @@ describe('GLB label plugin E2E', () => {
       expect(stats.charcoal).toBeGreaterThan(stats.width * stats.height * 0.55)
     }
     const [directAreaStats, directFlatStats, directSurfaceStats] = await browserPngStats([
-      path.join(direct.designReviewDir, 'areas/carrier.direct-curved.png'),
+      path.join(
+        direct.designReviewDir,
+        designAreaArtifactPath(directDesignManifest, 'carrier.direct:curved'),
+      ),
       path.join(directReview.outputDir, 'label-front.png'),
       path.join(directReview.outputDir, 'surface-front.png'),
     ])
     expect(directAreaStats).toMatchObject({ width: 200, height: 200 })
     expect(directAreaStats.colorBuckets).toBeGreaterThan(4)
-    expect(new Set(directAreaStats.corners.map((rgba) => JSON.stringify(rgba))).size).toBeGreaterThan(1)
+    // The clean area capture must not inherit the presentation silhouette's gradient.
+    expect(new Set(directAreaStats.corners.map((rgba) => JSON.stringify(rgba))).size).toBe(1)
     expect(directFlatStats.colorBuckets).toBeGreaterThan(4)
     expect(directSurfaceStats.colorBuckets).toBeGreaterThan(8)
     expect(directSurfaceStats.center).not.toEqual(directSurfaceStats.corners[0])
@@ -1100,7 +1144,7 @@ describe('GLB label plugin E2E', () => {
       expect(rendered, JSON.stringify(rendered)).toMatchObject({
         ok: true, operation: 'render_review_evidence',
         data: {
-          inputKind: 'label-project-v3', blueprintRevision: 'task9-browser-review-v1',
+          inputKind: 'label-spec-v2', blueprintRevision: 'task9-browser-review-v1',
           validation: { ready: true }, fidelity: { pass: true },
           views: [
             { id: 'label-front-fwgwsmlxvrcisx6afqaj5q7wv4zokhvqa6b4c4aa24cr2ftcxe5a' },
@@ -1144,10 +1188,20 @@ describe('GLB label plugin E2E', () => {
     const outputDir = path.join(root, 'review-rev-001')
     const resolvedOutputDir = path.join(await realpath(root), 'review-rev-001')
     const inputBytes = `${JSON.stringify(fixture.spec)}\n`
+    const cliHandoff = structuredClone(fixture.request.designGate.handoff) as EditorHandoffV2
+    cliHandoff.source.design_review_manifest = 'design-review/design-review-manifest.json'
+    const designEvidenceRoot = path.join(root, 'design-review')
     await writeFile(inputPath, inputBytes)
-    await writeFile(path.join(root, 'editor-handoff.json'), `${JSON.stringify(fixture.request.designGate.handoff)}\n`)
+    await writeFile(path.join(root, 'editor-handoff.json'), `${JSON.stringify(cliHandoff)}\n`)
     await writeFile(path.join(root, 'layout-blueprint.json'), fixture.request.designGate.blueprintJson)
-    await writeFile(path.join(root, 'design-review-manifest.json'), fixture.request.designGate.designReviewManifestJson)
+    await mkdir(designEvidenceRoot)
+    await writeFile(path.join(designEvidenceRoot, 'design-review-manifest.json'), fixture.request.designGate.designReviewManifestJson)
+    for (const artifact of fixture.request.designGate.designReviewArtifacts) {
+      if (artifact.path === 'design-review-manifest.json') continue
+      const artifactPath = path.join(designEvidenceRoot, ...artifact.path.split('/'))
+      await mkdir(path.dirname(artifactPath), { recursive: true })
+      await writeFile(artifactPath, Buffer.from(artifact.base64, 'base64'))
+    }
     const runtimeOptions = { allowedRoots: [process.cwd(), path.dirname(modelPath), root] }
     const stdout: string[] = []
     const stderr: string[] = []
@@ -1193,6 +1247,11 @@ describe('GLB label plugin E2E', () => {
       designReviewManifest: { sha256: designReviewManifestSha256 },
       model: { fingerprint: hash(await readFile(modelPath)) },
       areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      resolvedProject: {
+        path: 'resolved-project.lbl.json', revision: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        areaTargetsSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
       areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
       artifacts: [
         {
@@ -1213,8 +1272,8 @@ describe('GLB label plugin E2E', () => {
     expect(outputInfo.isDirectory()).toBe(true)
     expect(outputInfo.isSymbolicLink()).toBe(false)
     expect((await readdir(outputDir)).sort()).toEqual([
-      'label-front.png', 'model-back.png', 'model-front.png', 'review-manifest.json',
-      'review-sheet.png', 'surface-front.png',
+      'label-front.png', 'model-back.png', 'model-front.png', 'resolved-project.lbl.json',
+      'review-manifest.json', 'review-sheet.png', 'surface-front.png',
     ])
     for (const artifact of manifest.artifacts) {
       const artifactPath = path.join(outputDir, artifact.path)
@@ -1228,6 +1287,47 @@ describe('GLB label plugin E2E', () => {
       expect(hash(bytes), artifact.path).toBe(artifact.sha256)
     }
 
+    const gateDesignRoot = path.join(root, 'gate-design-review')
+    await mkdir(path.join(gateDesignRoot, 'areas'), { recursive: true })
+    for (const artifact of fixture.request.designGate.designReviewArtifacts) {
+      const target = path.join(gateDesignRoot, ...artifact.path.split('/'))
+      await mkdir(path.dirname(target), { recursive: true })
+      await writeFile(target, Buffer.from(artifact.base64, 'base64'))
+    }
+    const gateModelPath = path.join(root, 'current-model.glb')
+    await writeFile(gateModelPath, await readFile(modelPath))
+    const productionApproval = {
+      version: 1, gate: 'production', mode: 'explicit_approval', scope: 'current_task',
+      design_revision: manifest.blueprint.revision, blueprint_sha256: manifest.blueprint.sha256,
+      review_manifest_sha256: hash(manifestBytes), spec_revision: manifest.input.revision,
+      model_fingerprint: manifest.model.fingerprint, area_targets_sha256: manifest.areaTargetsSha256,
+      recorded_at: new Date().toISOString(),
+    }
+    await writeFile(path.join(root, 'production-approval.json'), JSON.stringify(productionApproval))
+    const gateRequestPath = path.join(root, 'production-gate.json')
+    await writeFile(gateRequestPath, JSON.stringify({
+      version: 1, gate: 'production', evidenceRoot: '.', currentDocument: 'working.json',
+      handoff: 'editor-handoff.json', blueprint: 'layout-blueprint.json',
+      designReviewManifest: 'design-review/design-review-manifest.json', designReviewEvidenceRoot: 'gate-design-review',
+      productionReviewManifest: 'review-rev-001/review-manifest.json', productionReviewEvidenceRoot: 'review-rev-001',
+      productionApprovalRecord: 'production-approval.json', model: 'current-model.glb',
+    }))
+    const gateStdout: string[] = []
+    expect(await runCli(['gate', 'production', gateRequestPath, '--json'], {
+      runtimeOptions: { allowedRoots: [root] }, stdout: (value: string) => gateStdout.push(value), stderr: () => undefined,
+    })).toBe(0)
+    expect(JSON.parse(gateStdout.pop()!)).toMatchObject({
+      ok: true, operation: 'gate_production', data: { valid: true, documentKind: 'label-spec-v2' },
+    })
+    const mutatedSpec = structuredClone(fixture.spec) as any
+    mutatedSpec.areas[0].target.stableSelector = 'mesh:999/node:stale'
+    await writeFile(inputPath, `${JSON.stringify(mutatedSpec)}\n`)
+    expect(await runCli(['gate', 'production', gateRequestPath, '--json'], {
+      runtimeOptions: { allowedRoots: [root] }, stdout: (value: string) => gateStdout.push(value), stderr: () => undefined,
+    })).not.toBe(0)
+    expect(JSON.parse(gateStdout.pop()!)).toMatchObject({ ok: false, error: { code: 'STALE_APPROVAL' } })
+    await writeFile(inputPath, inputBytes)
+
     const conflictStdout: string[] = []
     const conflictCode = await runCli([
       'review', inputPath, '--glb', modelPath, '--output', outputDir, '--json',
@@ -1239,6 +1339,7 @@ describe('GLB label plugin E2E', () => {
     expect(conflictCode).toBe(9)
     expect(JSON.parse(conflictStdout[0])).toMatchObject({ ok: false, error: { code: 'OUTPUT_CONFLICT' } })
     expect(await readFile(path.join(outputDir, 'review-manifest.json'))).toEqual(manifestBytes)
+
   }, 180_000)
 
   it.runIf(runRealE2E)('applies a front/back design and atomically publishes verified artifacts', async () => {

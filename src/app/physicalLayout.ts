@@ -104,7 +104,7 @@ function validCrop(crop: PhysicalBounds | undefined): crop is PhysicalBounds {
 export function resolveTargetAspect(input: TargetAspectInput): TargetAspectResult {
   const artboardAspect = positiveFinite(input.artboardAspect, 'artboardAspect')
   const targetAspect = positiveFinite(input.targetAspect, 'targetAspect')
-  const policy = input.policy ?? 'fit'
+  const policy = input.policy ?? 'block'
 
   if (policy === 'crop-approved') {
     if (!validCrop(input.approvedCrop) || !aspectMatches(input.approvedCrop.width / input.approvedCrop.height, targetAspect)) {

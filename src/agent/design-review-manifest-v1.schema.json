@@ -21,6 +21,7 @@
   },
   "$defs": {
     "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+    "opaqueId": { "type": "string", "minLength": 1, "maxLength": 4096 },
     "revision": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" },
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "path": { "type": "string", "minLength": 1, "maxLength": 2048 },
@@ -49,7 +50,7 @@
       "additionalProperties": false,
       "required": ["id", "side", "carrier"],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
+        "id": { "$ref": "#/$defs/opaqueId" },
         "side": { "enum": ["front", "back", "left", "right", "wrap", "top", "bottom", "neck", "custom"] },
         "carrier": { "$ref": "#/$defs/carrier" }
       }
@@ -76,7 +77,7 @@
         "width": { "type": "integer", "minimum": 1, "maximum": 32768 },
         "height": { "type": "integer", "minimum": 1, "maximum": 32768 },
         "viewKind": { "enum": ["mockup-html", "mockup-front", "mockup-back", "mockup-area"] },
-        "areaId": { "$ref": "#/$defs/id" },
+        "areaId": { "$ref": "#/$defs/opaqueId" },
         "carrier": { "$ref": "#/$defs/carrier" }
       }
     }

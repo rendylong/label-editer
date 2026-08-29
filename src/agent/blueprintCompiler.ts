@@ -265,7 +265,7 @@ export function compileBlueprintArea(
     carrier: area.carrier,
     artboard: structuredClone(area.artboard),
     ...(area.substrate ? { substrate: structuredClone(area.substrate) } : {}),
-    ...(area.placementPolicy ? { placementPolicy: area.placementPolicy } : {}),
+    placementPolicy: area.placementPolicy ?? 'block',
     blueprintAreaId: area.id,
     layers: canonicalLayerOrder(area.layers).map((layer) => compileLayer(blueprint, area, layer)),
   }

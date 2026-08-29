@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { pathToFileURL } from 'node:url'
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { exitCodeForEnvelope, failure } from './lib/envelope.mjs'
 
 const valueOptions = new Set(['glb', 'output', 'view', 'operations', 'preset', 'camera-config', 'width', 'height'])
@@ -51,6 +52,14 @@ function assertShape(parsed) {
   const { command, positional, options } = parsed
   if (command === 'schema') {
     if (positional.length !== 0) throw usageError('schema accepts no positional arguments')
+    return
+  }
+  if (command === 'gate') {
+    if (positional.length !== 2 || !['design', 'production'].includes(positional[0])) {
+      throw usageError('gate requires design|production and exactly one gate-request.json path')
+    }
+    const unsupported = Object.keys(options).find((name) => name !== 'json')
+    if (unsupported) throw usageError(`--${unsupported} is not supported by gate`)
     return
   }
   if (!['inspect', 'project', 'patch', 'validate', 'apply', 'preview', 'qc', 'review', 'live', 'export', 'open'].includes(command)) {
@@ -144,6 +153,13 @@ export async function runCli(argv, dependencies = {}) {
   try {
     parsed = parseArgv(argv)
     assertShape(parsed)
+    if (parsed.command === 'gate') {
+      const runGate = dependencies.gateRunner
+        ?? (await import('./lib/workflow-gate.mjs')).runWorkflowGate
+      envelope = await runGate(parsed.positional[0], parsed.positional[1], {
+        allowedRoots: dependencies.runtimeOptions?.allowedRoots,
+      })
+    } else {
     let operations = dependencies.operations
     if (!operations) {
       const { createOperations } = await import('./lib/operations.mjs')
@@ -173,6 +189,7 @@ export async function runCli(argv, dependencies = {}) {
       }
     }
     envelope = await invoke(parsed, operations)
+    }
   } catch (error) {
     envelope = failure(parsed?.command ?? 'cli', error)
   }
@@ -191,6 +208,6 @@ export async function runCli(argv, dependencies = {}) {
   return exitCodeForEnvelope(envelope)
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   process.exitCode = await runCli(process.argv.slice(2))
 }

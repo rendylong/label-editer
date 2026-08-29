@@ -4,11 +4,12 @@
   "title": "Label Production Review Manifest v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "createdAt", "input", "blueprint", "designReviewManifest", "model", "areaTargetsSha256", "areas", "artifacts"],
+  "required": ["version", "createdAt", "input", "resolvedProject", "blueprint", "designReviewManifest", "model", "areaTargetsSha256", "areas", "artifacts"],
   "properties": {
     "version": { "const": 1 },
     "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 },
     "input": { "$ref": "#/$defs/input" },
+    "resolvedProject": { "$ref": "#/$defs/resolvedProject" },
     "blueprint": { "$ref": "#/$defs/revisionBinding" },
     "designReviewManifest": { "$ref": "#/$defs/digestBinding" },
     "model": { "$ref": "#/$defs/model" },
@@ -40,6 +41,17 @@
       "properties": {
         "revision": { "$ref": "#/$defs/revision" },
         "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "resolvedProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "revision", "sha256", "areaTargetsSha256"],
+      "properties": {
+        "path": { "const": "resolved-project.lbl.json" },
+        "revision": { "$ref": "#/$defs/revision" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "areaTargetsSha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "digestBinding": {

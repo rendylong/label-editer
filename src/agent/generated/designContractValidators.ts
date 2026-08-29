@@ -3,7 +3,7 @@
 import { isStrictRfc3339DateTime } from '../../../scripts/lib/design-manifest-core.mjs'
 const strictFormats = { 'date-time': { type: 'string', validate: isStrictRfc3339DateTime } }
 export const validateBlueprintSchema = validate20;
-const schema31 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/layout-blueprint-v1.schema.json","title":"Label Layout Blueprint v1","type":"object","additionalProperties":false,"required":["version","revision","carrierDefaults","assets","areas"],"properties":{"version":{"const":1},"revision":{"$ref":"#/$defs/revision"},"carrierDefaults":{"$ref":"#/$defs/carrierDefaults"},"assets":{"type":"array","maxItems":256,"items":{"$ref":"#/$defs/asset"}},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}}},"$defs":{"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"boundedString":{"type":"string","maxLength":4096},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"carrierDefaults":{"type":"object","additionalProperties":false,"required":["carrier"],"properties":{"carrier":{"$ref":"#/$defs/carrier"},"evidence":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/boundedString"}},"alternative":{"$ref":"#/$defs/carrier"},"tradeoff":{"$ref":"#/$defs/boundedString"},"assumptions":{"type":"array","maxItems":64,"items":{"$ref":"#/$defs/boundedString"}}}},"asset":{"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType"],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"type":"string","minLength":1,"maxLength":2048},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[a-z0-9.+-]+/[a-z0-9.+-]+$"},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768}}},"bounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}},"normalizedBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"process":{"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}},"flattenedFallback":{"type":"object","additionalProperties":false,"required":["accepted","nonEditableLayerIds","nonEditableTextIds","lostSeparations","vectorAlternative"],"properties":{"accepted":{"type":"boolean"},"nonEditableLayerIds":{"type":"array","minItems":1,"maxItems":256,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},"nonEditableTextIds":{"type":"array","maxItems":256,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},"lostSeparations":{"type":"array","maxItems":128,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":256}},"vectorAlternative":{"type":"string","minLength":1,"maxLength":4096}}},"layer":{"type":"object","additionalProperties":false,"required":["id","kind","anchor","rotation","opacity","visible","zIndex","processes"],"oneOf":[{"required":["boundsMm"],"properties":{"boundsMm":true}},{"required":["normalizedBounds"],"properties":{"normalizedBounds":true}}],"properties":{"id":{"$ref":"#/$defs/id"},"kind":{"enum":["text","image","shape"]},"boundsMm":{"$ref":"#/$defs/bounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"zIndex":{"type":"integer","minimum":-32768,"maximum":32767},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}},"flattenedFallback":{"$ref":"#/$defs/flattenedFallback"},"text":{"type":"string","maxLength":32768},"language":{"type":"string","minLength":2,"maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},"writingDirection":{"enum":["auto","ltr","rtl"]},"fontAsset":{"$ref":"#/$defs/id"},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":1000},"fontWeight":{"oneOf":[{"type":"integer","minimum":1,"maximum":1000},{"enum":["normal","bold"]}]},"letterSpacingEm":{"type":"number","minimum":-10,"maximum":100},"lineHeight":{"type":"number","exclusiveMinimum":0,"maximum":100},"alignment":{"enum":["left","center","right","justify"]},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1,"maximum":1024},"color":{"type":"string","maxLength":64},"assetId":{"$ref":"#/$defs/id"},"fit":{"enum":["contain","cover","stretch"]},"shape":{"enum":["rectangle","rounded_rectangle","ellipse","line","polygon","path"]},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"fill":{"type":"string","maxLength":64},"stroke":{"type":"string","maxLength":64},"strokeWidthMm":{"type":"number","minimum":0,"maximum":1000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":1000},"points":{"type":"array","maxItems":4096,"items":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"}],"items":false,"minItems":2,"maxItems":2}}}},"boundary":{"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":1000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}},"substrate":{"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"type":"string","maxLength":64},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}},"artboard":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier","artboard","placementIntent","layers"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"placementIntent":{"type":"string","minLength":1,"maxLength":4096},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"layers":{"type":"array","maxItems":2048,"items":{"$ref":"#/$defs/layer"}}}}}};
+const schema31 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/layout-blueprint-v1.schema.json","title":"Label Layout Blueprint v1","type":"object","additionalProperties":false,"required":["version","revision","carrierDefaults","assets","areas"],"properties":{"version":{"const":1},"revision":{"$ref":"#/$defs/revision"},"carrierDefaults":{"$ref":"#/$defs/carrierDefaults"},"assets":{"type":"array","maxItems":256,"items":{"$ref":"#/$defs/asset"}},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}}},"$defs":{"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"opaqueId":{"type":"string","minLength":1,"maxLength":4096},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"boundedString":{"type":"string","maxLength":4096},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"carrierDefaults":{"type":"object","additionalProperties":false,"required":["carrier"],"properties":{"carrier":{"$ref":"#/$defs/carrier"},"evidence":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/boundedString"}},"alternative":{"$ref":"#/$defs/carrier"},"tradeoff":{"$ref":"#/$defs/boundedString"},"assumptions":{"type":"array","maxItems":64,"items":{"$ref":"#/$defs/boundedString"}}}},"asset":{"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType"],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"type":"string","minLength":1,"maxLength":2048},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[a-z0-9.+-]+/[a-z0-9.+-]+$"},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768}}},"bounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number"},"y":{"type":"number"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}},"normalizedBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"process":{"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}},"flattenedFallback":{"type":"object","additionalProperties":false,"required":["accepted","nonEditableLayerIds","nonEditableTextIds","lostSeparations","vectorAlternative"],"properties":{"accepted":{"type":"boolean"},"nonEditableLayerIds":{"type":"array","minItems":1,"maxItems":256,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},"nonEditableTextIds":{"type":"array","maxItems":256,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},"lostSeparations":{"type":"array","maxItems":128,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":256}},"vectorAlternative":{"type":"string","minLength":1,"maxLength":4096}}},"layer":{"type":"object","additionalProperties":false,"required":["id","kind","anchor","rotation","opacity","visible","zIndex","processes"],"oneOf":[{"required":["boundsMm"],"properties":{"boundsMm":true}},{"required":["normalizedBounds"],"properties":{"normalizedBounds":true}}],"properties":{"id":{"$ref":"#/$defs/id"},"kind":{"enum":["text","image","shape"]},"boundsMm":{"$ref":"#/$defs/bounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"rotation":{"type":"number","minimum":-360,"maximum":360},"opacity":{"type":"number","minimum":0,"maximum":1},"visible":{"type":"boolean"},"zIndex":{"type":"integer","minimum":-32768,"maximum":32767},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}},"flattenedFallback":{"$ref":"#/$defs/flattenedFallback"},"text":{"type":"string","maxLength":32768},"language":{"type":"string","minLength":2,"maxLength":64,"pattern":"^[A-Za-z0-9-]+$"},"writingDirection":{"enum":["auto","ltr","rtl"]},"fontAsset":{"$ref":"#/$defs/id"},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":1000},"fontWeight":{"oneOf":[{"type":"integer","minimum":1,"maximum":1000},{"enum":["normal","bold"]}]},"letterSpacingEm":{"type":"number","minimum":-10,"maximum":100},"lineHeight":{"type":"number","exclusiveMinimum":0,"maximum":100},"alignment":{"enum":["left","center","right","justify"]},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1,"maximum":1024},"color":{"type":"string","maxLength":64},"assetId":{"$ref":"#/$defs/id"},"fit":{"enum":["contain","cover","stretch"]},"shape":{"enum":["rectangle","rounded_rectangle","ellipse","line","polygon","path"]},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"fill":{"type":"string","maxLength":64},"stroke":{"type":"string","maxLength":64},"strokeWidthMm":{"type":"number","minimum":0,"maximum":1000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":1000},"points":{"type":"array","maxItems":4096,"items":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"}],"items":false,"minItems":2,"maxItems":2}}}},"boundary":{"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":1000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}},"substrate":{"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"type":"string","maxLength":64},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}},"artboard":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier","artboard","placementIntent","layers"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"placementIntent":{"type":"string","minLength":1,"maxLength":4096},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"],"default":"block"},"layers":{"type":"array","maxItems":2048,"items":{"$ref":"#/$defs/layer"}}}}}};
 const schema32 = {"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"};
 import func1 from "ajv/dist/runtime/ucs2length";
 const pattern4 = new RegExp("^[A-Za-z0-9][A-Za-z0-9._:/-]*$", "u");
@@ -519,7 +519,8 @@ return errors === 0;
 }
 validate23.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema42 = {"type":"object","additionalProperties":false,"required":["id","side","carrier","artboard","placementIntent","layers"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"placementIntent":{"type":"string","minLength":1,"maxLength":4096},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"layers":{"type":"array","maxItems":2048,"items":{"$ref":"#/$defs/layer"}}}};
+const schema42 = {"type":"object","additionalProperties":false,"required":["id","side","carrier","artboard","placementIntent","layers"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"placementIntent":{"type":"string","minLength":1,"maxLength":4096},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"],"default":"block"},"layers":{"type":"array","maxItems":2048,"items":{"$ref":"#/$defs/layer"}}}};
+const schema43 = {"type":"string","minLength":1,"maxLength":4096};
 const schema45 = {"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}};
 const schema46 = {"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"type":"string","maxLength":64},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}};
 const schema47 = {"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":1000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}};
@@ -831,8 +832,8 @@ const schema50 = {"type":"object","additionalProperties":false,"required":["x","
 const schema51 = {"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}};
 const schema52 = {"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}};
 const func23 = Object.prototype.hasOwnProperty;
-const pattern12 = new RegExp("^[A-Za-z0-9-]+$", "u");
-const pattern14 = new RegExp("^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$", "u");
+const pattern11 = new RegExp("^[A-Za-z0-9-]+$", "u");
+const pattern13 = new RegExp("^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$", "u");
 const schema53 = {"type":"object","additionalProperties":false,"required":["accepted","nonEditableLayerIds","nonEditableTextIds","lostSeparations","vectorAlternative"],"properties":{"accepted":{"type":"boolean"},"nonEditableLayerIds":{"type":"array","minItems":1,"maxItems":256,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},"nonEditableTextIds":{"type":"array","maxItems":256,"uniqueItems":true,"items":{"$ref":"#/$defs/id"}},"lostSeparations":{"type":"array","maxItems":128,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":256}},"vectorAlternative":{"type":"string","minLength":1,"maxLength":4096}}};
 import func0 from "ajv/dist/runtime/equal";
 
@@ -2175,7 +2176,7 @@ vErrors.push(err73);
 }
 errors++;
 }
-if(!pattern12.test(data24)){
+if(!pattern11.test(data24)){
 const err74 = {instancePath:instancePath+"/language",schemaPath:"#/properties/language/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9-]+$"},message:"must match pattern \""+"^[A-Za-z0-9-]+$"+"\""};
 if(vErrors === null){
 vErrors = [err74];
@@ -2302,7 +2303,7 @@ vErrors.push(err84);
 }
 errors++;
 }
-if(!pattern14.test(data28)){
+if(!pattern13.test(data28)){
 const err85 = {instancePath:instancePath+"/fontStack/" + i1,schemaPath:"#/properties/fontStack/items/pattern",keyword:"pattern",params:{pattern: "^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"},message:"must match pattern \""+"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"+"\""};
 if(vErrors === null){
 vErrors = [err85];
@@ -3154,8 +3155,8 @@ errors++;
 if(data.id !== undefined){
 let data0 = data.id;
 if(typeof data0 === "string"){
-if(func1(data0) > 128){
-const err7 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+if(func1(data0) > 4096){
+const err7 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/opaqueId/maxLength",keyword:"maxLength",params:{limit: 4096},message:"must NOT have more than 4096 characters"};
 if(vErrors === null){
 vErrors = [err7];
 }
@@ -3165,7 +3166,7 @@ vErrors.push(err7);
 errors++;
 }
 if(func1(data0) < 1){
-const err8 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+const err8 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/opaqueId/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err8];
 }
@@ -3174,8 +3175,9 @@ vErrors.push(err8);
 }
 errors++;
 }
-if(!pattern5.test(data0)){
-const err9 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},message:"must match pattern \""+"^[A-Za-z0-9][A-Za-z0-9._:-]*$"+"\""};
+}
+else {
+const err9 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/opaqueId/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err9];
 }
@@ -3185,8 +3187,10 @@ vErrors.push(err9);
 errors++;
 }
 }
-else {
-const err10 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data.side !== undefined){
+let data1 = data.side;
+if(!(((((((((data1 === "front") || (data1 === "back")) || (data1 === "left")) || (data1 === "right")) || (data1 === "wrap")) || (data1 === "top")) || (data1 === "bottom")) || (data1 === "neck")) || (data1 === "custom"))){
+const err10 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema42.properties.side.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err10];
 }
@@ -3196,10 +3200,10 @@ vErrors.push(err10);
 errors++;
 }
 }
-if(data.side !== undefined){
-let data1 = data.side;
-if(!(((((((((data1 === "front") || (data1 === "back")) || (data1 === "left")) || (data1 === "right")) || (data1 === "wrap")) || (data1 === "top")) || (data1 === "bottom")) || (data1 === "neck")) || (data1 === "custom"))){
-const err11 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema42.properties.side.enum},message:"must be equal to one of the allowed values"};
+if(data.carrier !== undefined){
+let data2 = data.carrier;
+if(!((((((data2 === "direct_surface_print") || (data2 === "applied_label")) || (data2 === "clear_label")) || (data2 === "in_mold")) || (data2 === "foil_or_ink_only")) || (data2 === "bare"))){
+const err11 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema34.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err11];
 }
@@ -3209,10 +3213,11 @@ vErrors.push(err11);
 errors++;
 }
 }
-if(data.carrier !== undefined){
-let data2 = data.carrier;
-if(!((((((data2 === "direct_surface_print") || (data2 === "applied_label")) || (data2 === "clear_label")) || (data2 === "in_mold")) || (data2 === "foil_or_ink_only")) || (data2 === "bare"))){
-const err12 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema34.enum},message:"must be equal to one of the allowed values"};
+if(data.artboard !== undefined){
+let data3 = data.artboard;
+if(data3 && typeof data3 == "object" && !Array.isArray(data3)){
+if(data3.widthMm === undefined){
+const err12 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "widthMm"},message:"must have required property '"+"widthMm"+"'"};
 if(vErrors === null){
 vErrors = [err12];
 }
@@ -3221,12 +3226,8 @@ vErrors.push(err12);
 }
 errors++;
 }
-}
-if(data.artboard !== undefined){
-let data3 = data.artboard;
-if(data3 && typeof data3 == "object" && !Array.isArray(data3)){
-if(data3.widthMm === undefined){
-const err13 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "widthMm"},message:"must have required property '"+"widthMm"+"'"};
+if(data3.heightMm === undefined){
+const err13 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "heightMm"},message:"must have required property '"+"heightMm"+"'"};
 if(vErrors === null){
 vErrors = [err13];
 }
@@ -3235,8 +3236,8 @@ vErrors.push(err13);
 }
 errors++;
 }
-if(data3.heightMm === undefined){
-const err14 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "heightMm"},message:"must have required property '"+"heightMm"+"'"};
+if(data3.background === undefined){
+const err14 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "background"},message:"must have required property '"+"background"+"'"};
 if(vErrors === null){
 vErrors = [err14];
 }
@@ -3245,8 +3246,9 @@ vErrors.push(err14);
 }
 errors++;
 }
-if(data3.background === undefined){
-const err15 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/required",keyword:"required",params:{missingProperty: "background"},message:"must have required property '"+"background"+"'"};
+for(const key1 in data3){
+if(!(((key1 === "widthMm") || (key1 === "heightMm")) || (key1 === "background"))){
+const err15 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err15];
 }
@@ -3255,9 +3257,12 @@ vErrors.push(err15);
 }
 errors++;
 }
-for(const key1 in data3){
-if(!(((key1 === "widthMm") || (key1 === "heightMm")) || (key1 === "background"))){
-const err16 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key1},message:"must NOT have additional properties"};
+}
+if(data3.widthMm !== undefined){
+let data4 = data3.widthMm;
+if((typeof data4 == "number") && (isFinite(data4))){
+if(data4 > 10000 || isNaN(data4)){
+const err16 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
 if(vErrors === null){
 vErrors = [err16];
 }
@@ -3266,12 +3271,8 @@ vErrors.push(err16);
 }
 errors++;
 }
-}
-if(data3.widthMm !== undefined){
-let data4 = data3.widthMm;
-if((typeof data4 == "number") && (isFinite(data4))){
-if(data4 > 10000 || isNaN(data4)){
-const err17 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
+if(data4 <= 0 || isNaN(data4)){
+const err17 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
 if(vErrors === null){
 vErrors = [err17];
 }
@@ -3280,8 +3281,9 @@ vErrors.push(err17);
 }
 errors++;
 }
-if(data4 <= 0 || isNaN(data4)){
-const err18 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+}
+else {
+const err18 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err18];
 }
@@ -3291,8 +3293,11 @@ vErrors.push(err18);
 errors++;
 }
 }
-else {
-const err19 = {instancePath:instancePath+"/artboard/widthMm",schemaPath:"#/$defs/artboard/properties/widthMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data3.heightMm !== undefined){
+let data5 = data3.heightMm;
+if((typeof data5 == "number") && (isFinite(data5))){
+if(data5 > 10000 || isNaN(data5)){
+const err19 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
 if(vErrors === null){
 vErrors = [err19];
 }
@@ -3301,12 +3306,8 @@ vErrors.push(err19);
 }
 errors++;
 }
-}
-if(data3.heightMm !== undefined){
-let data5 = data3.heightMm;
-if((typeof data5 == "number") && (isFinite(data5))){
-if(data5 > 10000 || isNaN(data5)){
-const err20 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/maximum",keyword:"maximum",params:{comparison: "<=", limit: 10000},message:"must be <= 10000"};
+if(data5 <= 0 || isNaN(data5)){
+const err20 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
 if(vErrors === null){
 vErrors = [err20];
 }
@@ -3315,8 +3316,9 @@ vErrors.push(err20);
 }
 errors++;
 }
-if(data5 <= 0 || isNaN(data5)){
-const err21 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/exclusiveMinimum",keyword:"exclusiveMinimum",params:{comparison: ">", limit: 0},message:"must be > 0"};
+}
+else {
+const err21 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
 if(vErrors === null){
 vErrors = [err21];
 }
@@ -3326,8 +3328,11 @@ vErrors.push(err21);
 errors++;
 }
 }
-else {
-const err22 = {instancePath:instancePath+"/artboard/heightMm",schemaPath:"#/$defs/artboard/properties/heightMm/type",keyword:"type",params:{type: "number"},message:"must be number"};
+if(data3.background !== undefined){
+let data6 = data3.background;
+if(typeof data6 === "string"){
+if(func1(data6) > 64){
+const err22 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
 if(vErrors === null){
 vErrors = [err22];
 }
@@ -3336,12 +3341,8 @@ vErrors.push(err22);
 }
 errors++;
 }
-}
-if(data3.background !== undefined){
-let data6 = data3.background;
-if(typeof data6 === "string"){
-if(func1(data6) > 64){
-const err23 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(func1(data6) < 1){
+const err23 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err23];
 }
@@ -3350,8 +3351,9 @@ vErrors.push(err23);
 }
 errors++;
 }
-if(func1(data6) < 1){
-const err24 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+}
+else {
+const err24 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err24];
 }
@@ -3361,8 +3363,9 @@ vErrors.push(err24);
 errors++;
 }
 }
+}
 else {
-const err25 = {instancePath:instancePath+"/artboard/background",schemaPath:"#/$defs/artboard/properties/background/type",keyword:"type",params:{type: "string"},message:"must be string"};
+const err25 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err25];
 }
@@ -3372,9 +3375,11 @@ vErrors.push(err25);
 errors++;
 }
 }
-}
-else {
-const err26 = {instancePath:instancePath+"/artboard",schemaPath:"#/$defs/artboard/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(data.placementIntent !== undefined){
+let data7 = data.placementIntent;
+if(typeof data7 === "string"){
+if(func1(data7) > 4096){
+const err26 = {instancePath:instancePath+"/placementIntent",schemaPath:"#/properties/placementIntent/maxLength",keyword:"maxLength",params:{limit: 4096},message:"must NOT have more than 4096 characters"};
 if(vErrors === null){
 vErrors = [err26];
 }
@@ -3383,12 +3388,8 @@ vErrors.push(err26);
 }
 errors++;
 }
-}
-if(data.placementIntent !== undefined){
-let data7 = data.placementIntent;
-if(typeof data7 === "string"){
-if(func1(data7) > 4096){
-const err27 = {instancePath:instancePath+"/placementIntent",schemaPath:"#/properties/placementIntent/maxLength",keyword:"maxLength",params:{limit: 4096},message:"must NOT have more than 4096 characters"};
+if(func1(data7) < 1){
+const err27 = {instancePath:instancePath+"/placementIntent",schemaPath:"#/properties/placementIntent/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err27];
 }
@@ -3397,24 +3398,14 @@ vErrors.push(err27);
 }
 errors++;
 }
-if(func1(data7) < 1){
-const err28 = {instancePath:instancePath+"/placementIntent",schemaPath:"#/properties/placementIntent/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+}
+else {
+const err28 = {instancePath:instancePath+"/placementIntent",schemaPath:"#/properties/placementIntent/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err28];
 }
 else {
 vErrors.push(err28);
-}
-errors++;
-}
-}
-else {
-const err29 = {instancePath:instancePath+"/placementIntent",schemaPath:"#/properties/placementIntent/type",keyword:"type",params:{type: "string"},message:"must be string"};
-if(vErrors === null){
-vErrors = [err29];
-}
-else {
-vErrors.push(err29);
 }
 errors++;
 }
@@ -3428,12 +3419,12 @@ errors = vErrors.length;
 if(data.placementPolicy !== undefined){
 let data9 = data.placementPolicy;
 if(!(((data9 === "fit") || (data9 === "crop-approved")) || (data9 === "block"))){
-const err30 = {instancePath:instancePath+"/placementPolicy",schemaPath:"#/properties/placementPolicy/enum",keyword:"enum",params:{allowedValues: schema42.properties.placementPolicy.enum},message:"must be equal to one of the allowed values"};
+const err29 = {instancePath:instancePath+"/placementPolicy",schemaPath:"#/properties/placementPolicy/enum",keyword:"enum",params:{allowedValues: schema42.properties.placementPolicy.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
-vErrors = [err30];
+vErrors = [err29];
 }
 else {
-vErrors.push(err30);
+vErrors.push(err29);
 }
 errors++;
 }
@@ -3442,12 +3433,12 @@ if(data.layers !== undefined){
 let data10 = data.layers;
 if(Array.isArray(data10)){
 if(data10.length > 2048){
-const err31 = {instancePath:instancePath+"/layers",schemaPath:"#/properties/layers/maxItems",keyword:"maxItems",params:{limit: 2048},message:"must NOT have more than 2048 items"};
+const err30 = {instancePath:instancePath+"/layers",schemaPath:"#/properties/layers/maxItems",keyword:"maxItems",params:{limit: 2048},message:"must NOT have more than 2048 items"};
 if(vErrors === null){
-vErrors = [err31];
+vErrors = [err30];
 }
 else {
-vErrors.push(err31);
+vErrors.push(err30);
 }
 errors++;
 }
@@ -3460,24 +3451,24 @@ errors = vErrors.length;
 }
 }
 else {
-const err32 = {instancePath:instancePath+"/layers",schemaPath:"#/properties/layers/type",keyword:"type",params:{type: "array"},message:"must be array"};
+const err31 = {instancePath:instancePath+"/layers",schemaPath:"#/properties/layers/type",keyword:"type",params:{type: "array"},message:"must be array"};
 if(vErrors === null){
-vErrors = [err32];
+vErrors = [err31];
 }
 else {
-vErrors.push(err32);
+vErrors.push(err31);
 }
 errors++;
 }
 }
 }
 else {
-const err33 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+const err32 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
-vErrors = [err33];
+vErrors = [err32];
 }
 else {
-vErrors.push(err33);
+vErrors.push(err32);
 }
 errors++;
 }
@@ -3715,7 +3706,7 @@ return errors === 0;
 validate20.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateHandoffSchema = validate33;
-const schema58 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/editor-handoff-v2.schema.json","title":"Cosmetic Label Editor Handoff v2","type":"object","additionalProperties":false,"required":["handoff_version","status","source","approval","model","areas","assets","production_constraints","assumptions","blockers"],"properties":{"handoff_version":{"const":2},"status":{"enum":["awaiting_user_approval","approved","continuous_authorized"]},"source":{"$ref":"#/$defs/source"},"approval":{"$ref":"#/$defs/approval"},"model":{"$ref":"#/$defs/model"},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}},"assets":{"type":"array","maxItems":256,"items":{"$ref":"#/$defs/asset"}},"production_constraints":{"$ref":"#/$defs/productionConstraints"},"assumptions":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/boundedString"}},"blockers":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/boundedString"}}},"$defs":{"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"path":{"type":"string","minLength":1,"maxLength":2048},"boundedString":{"type":"string","minLength":1,"maxLength":4096},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"source":{"type":"object","additionalProperties":false,"required":["design_spec","mockup_html","blueprint","design_review_manifest","blueprint_revision","blueprint_sha256","review_manifest_sha256"],"properties":{"design_spec":{"$ref":"#/$defs/path"},"mockup_html":{"$ref":"#/$defs/path"},"blueprint":{"$ref":"#/$defs/path"},"design_review_manifest":{"$ref":"#/$defs/path"},"blueprint_revision":{"$ref":"#/$defs/revision"},"blueprint_sha256":{"$ref":"#/$defs/sha256"},"review_manifest_sha256":{"$ref":"#/$defs/sha256"}}},"approval":{"type":"object","additionalProperties":false,"required":["mode","scope","blueprint_revision","blueprint_sha256","review_manifest_sha256"],"properties":{"mode":{"enum":["explicit_approval","continuous_authorized"]},"scope":{"const":"current_task"},"blueprint_revision":{"$ref":"#/$defs/revision"},"blueprint_sha256":{"$ref":"#/$defs/sha256"},"review_manifest_sha256":{"$ref":"#/$defs/sha256"}}},"model":{"type":"object","additionalProperties":false,"required":["package_type"],"properties":{"glb_path":{"$ref":"#/$defs/path"},"package_type":{"enum":["bottle","jar","tube","compact","other"]}}},"physicalSize":{"type":"object","additionalProperties":false,"required":["width","height"],"properties":{"width":{"oneOf":[{"type":"number","exclusiveMinimum":0},{"const":"unknown"}]},"height":{"oneOf":[{"type":"number","exclusiveMinimum":0},{"const":"unknown"}]}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier","placement","physical_size_mm","blueprint_area_id"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"placement":{"$ref":"#/$defs/boundedString"},"physical_size_mm":{"$ref":"#/$defs/physicalSize"},"blueprint_area_id":{"$ref":"#/$defs/id"}}},"asset":{"type":"object","additionalProperties":false,"required":["id","path","sha256"],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mime_type":{"type":"string","minLength":1,"maxLength":128}}},"productionConstraints":{"type":"object","additionalProperties":false,"properties":{"budget":{"$ref":"#/$defs/boundedString"},"durability":{"$ref":"#/$defs/boundedString"},"process_capabilities":{"type":"array","maxItems":64,"items":{"$ref":"#/$defs/boundedString"}},"notes":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/boundedString"}}}}}};
+const schema58 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/editor-handoff-v2.schema.json","title":"Cosmetic Label Editor Handoff v2","type":"object","additionalProperties":false,"required":["handoff_version","status","source","approval","model","areas","assets","production_constraints","assumptions","blockers"],"properties":{"handoff_version":{"const":2},"status":{"enum":["awaiting_user_approval","approved","continuous_authorized"]},"source":{"$ref":"#/$defs/source"},"approval":{"$ref":"#/$defs/approval"},"model":{"$ref":"#/$defs/model"},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}},"assets":{"type":"array","maxItems":256,"items":{"$ref":"#/$defs/asset"}},"production_constraints":{"$ref":"#/$defs/productionConstraints"},"assumptions":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/boundedString"}},"blockers":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/boundedString"}}},"$defs":{"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"opaqueId":{"type":"string","minLength":1,"maxLength":4096},"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"path":{"type":"string","minLength":1,"maxLength":2048},"boundedString":{"type":"string","minLength":1,"maxLength":4096},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"source":{"type":"object","additionalProperties":false,"required":["design_spec","mockup_html","blueprint","design_review_manifest","blueprint_revision","blueprint_sha256","review_manifest_sha256"],"properties":{"design_spec":{"$ref":"#/$defs/path"},"mockup_html":{"$ref":"#/$defs/path"},"blueprint":{"$ref":"#/$defs/path"},"design_review_manifest":{"$ref":"#/$defs/path"},"blueprint_revision":{"$ref":"#/$defs/revision"},"blueprint_sha256":{"$ref":"#/$defs/sha256"},"review_manifest_sha256":{"$ref":"#/$defs/sha256"}}},"approval":{"type":"object","additionalProperties":false,"required":["mode","scope","blueprint_revision","blueprint_sha256","review_manifest_sha256"],"properties":{"mode":{"enum":["explicit_approval","continuous_authorized"]},"scope":{"const":"current_task"},"blueprint_revision":{"$ref":"#/$defs/revision"},"blueprint_sha256":{"$ref":"#/$defs/sha256"},"review_manifest_sha256":{"$ref":"#/$defs/sha256"}}},"model":{"type":"object","additionalProperties":false,"required":["package_type"],"properties":{"glb_path":{"$ref":"#/$defs/path"},"package_type":{"enum":["bottle","jar","tube","compact","other"]}}},"physicalSize":{"type":"object","additionalProperties":false,"required":["width","height"],"properties":{"width":{"oneOf":[{"type":"number","exclusiveMinimum":0},{"const":"unknown"}]},"height":{"oneOf":[{"type":"number","exclusiveMinimum":0},{"const":"unknown"}]}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier","placement","physical_size_mm","blueprint_area_id"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"placement":{"$ref":"#/$defs/boundedString"},"physical_size_mm":{"$ref":"#/$defs/physicalSize"},"blueprint_area_id":{"$ref":"#/$defs/opaqueId"}}},"asset":{"type":"object","additionalProperties":false,"required":["id","path","sha256"],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mime_type":{"type":"string","minLength":1,"maxLength":128}}},"productionConstraints":{"type":"object","additionalProperties":false,"properties":{"budget":{"$ref":"#/$defs/boundedString"},"durability":{"$ref":"#/$defs/boundedString"},"process_capabilities":{"type":"array","maxItems":64,"items":{"$ref":"#/$defs/boundedString"}},"notes":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/boundedString"}}}}}};
 const schema76 = {"type":"string","minLength":1,"maxLength":4096};
 const schema59 = {"type":"object","additionalProperties":false,"required":["design_spec","mockup_html","blueprint","design_review_manifest","blueprint_revision","blueprint_sha256","review_manifest_sha256"],"properties":{"design_spec":{"$ref":"#/$defs/path"},"mockup_html":{"$ref":"#/$defs/path"},"blueprint":{"$ref":"#/$defs/path"},"design_review_manifest":{"$ref":"#/$defs/path"},"blueprint_revision":{"$ref":"#/$defs/revision"},"blueprint_sha256":{"$ref":"#/$defs/sha256"},"review_manifest_sha256":{"$ref":"#/$defs/sha256"}}};
 const schema60 = {"type":"string","minLength":1,"maxLength":2048};
@@ -4376,10 +4367,11 @@ return errors === 0;
 }
 validate38.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema73 = {"type":"object","additionalProperties":false,"required":["id","side","carrier","placement","physical_size_mm","blueprint_area_id"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"placement":{"$ref":"#/$defs/boundedString"},"physical_size_mm":{"$ref":"#/$defs/physicalSize"},"blueprint_area_id":{"$ref":"#/$defs/id"}}};
+const schema73 = {"type":"object","additionalProperties":false,"required":["id","side","carrier","placement","physical_size_mm","blueprint_area_id"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"},"placement":{"$ref":"#/$defs/boundedString"},"physical_size_mm":{"$ref":"#/$defs/physicalSize"},"blueprint_area_id":{"$ref":"#/$defs/opaqueId"}}};
 const schema74 = {"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"};
 const schema75 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
 const schema77 = {"type":"object","additionalProperties":false,"required":["width","height"],"properties":{"width":{"oneOf":[{"type":"number","exclusiveMinimum":0},{"const":"unknown"}]},"height":{"oneOf":[{"type":"number","exclusiveMinimum":0},{"const":"unknown"}]}}};
+const schema78 = {"type":"string","minLength":1,"maxLength":4096};
 
 function validate40(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -4774,8 +4766,8 @@ errors++;
 if(data.blueprint_area_id !== undefined){
 let data7 = data.blueprint_area_id;
 if(typeof data7 === "string"){
-if(func1(data7) > 128){
-const err28 = {instancePath:instancePath+"/blueprint_area_id",schemaPath:"#/$defs/id/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+if(func1(data7) > 4096){
+const err28 = {instancePath:instancePath+"/blueprint_area_id",schemaPath:"#/$defs/opaqueId/maxLength",keyword:"maxLength",params:{limit: 4096},message:"must NOT have more than 4096 characters"};
 if(vErrors === null){
 vErrors = [err28];
 }
@@ -4785,7 +4777,7 @@ vErrors.push(err28);
 errors++;
 }
 if(func1(data7) < 1){
-const err29 = {instancePath:instancePath+"/blueprint_area_id",schemaPath:"#/$defs/id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+const err29 = {instancePath:instancePath+"/blueprint_area_id",schemaPath:"#/$defs/opaqueId/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err29];
 }
@@ -4794,8 +4786,9 @@ vErrors.push(err29);
 }
 errors++;
 }
-if(!pattern5.test(data7)){
-const err30 = {instancePath:instancePath+"/blueprint_area_id",schemaPath:"#/$defs/id/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},message:"must match pattern \""+"^[A-Za-z0-9][A-Za-z0-9._:-]*$"+"\""};
+}
+else {
+const err30 = {instancePath:instancePath+"/blueprint_area_id",schemaPath:"#/$defs/opaqueId/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err30];
 }
@@ -4805,25 +4798,14 @@ vErrors.push(err30);
 errors++;
 }
 }
+}
 else {
-const err31 = {instancePath:instancePath+"/blueprint_area_id",schemaPath:"#/$defs/id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+const err31 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err31];
 }
 else {
 vErrors.push(err31);
-}
-errors++;
-}
-}
-}
-else {
-const err32 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
-if(vErrors === null){
-vErrors = [err32];
-}
-else {
-vErrors.push(err32);
 }
 errors++;
 }
@@ -6084,7 +6066,7 @@ return errors === 0;
 validate46.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateDesignManifestSchema = validate47;
-const schema97 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/design-review-manifest-v1.schema.json","title":"Label Design Review Manifest v1","type":"object","additionalProperties":false,"required":["version","createdAt","blueprint","html","references","areas","artifacts"],"properties":{"version":{"const":1},"createdAt":{"type":"string","format":"date-time","maxLength":64},"blueprint":{"$ref":"#/$defs/revisionBinding"},"html":{"type":"object","additionalProperties":false,"required":["sha256"],"properties":{"sha256":{"$ref":"#/$defs/sha256"}}},"references":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/reference"}},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}},"artifacts":{"type":"array","minItems":1,"maxItems":512,"items":{"$ref":"#/$defs/artifact"}}},"$defs":{"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"path":{"type":"string","minLength":1,"maxLength":2048},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"revisionBinding":{"type":"object","additionalProperties":false,"required":["revision","sha256"],"properties":{"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}},"reference":{"type":"object","additionalProperties":false,"required":["path","role"],"properties":{"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"role":{"const":"visual_evidence"}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}},"artifact":{"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"const":"mockup-area"}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"enum":["text/html","image/png"]},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["mockup-html","mockup-front","mockup-back","mockup-area"]},"areaId":{"$ref":"#/$defs/id"},"carrier":{"$ref":"#/$defs/carrier"}}}}};
+const schema97 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/design-review-manifest-v1.schema.json","title":"Label Design Review Manifest v1","type":"object","additionalProperties":false,"required":["version","createdAt","blueprint","html","references","areas","artifacts"],"properties":{"version":{"const":1},"createdAt":{"type":"string","format":"date-time","maxLength":64},"blueprint":{"$ref":"#/$defs/revisionBinding"},"html":{"type":"object","additionalProperties":false,"required":["sha256"],"properties":{"sha256":{"$ref":"#/$defs/sha256"}}},"references":{"type":"array","maxItems":128,"items":{"$ref":"#/$defs/reference"}},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}},"artifacts":{"type":"array","minItems":1,"maxItems":512,"items":{"$ref":"#/$defs/artifact"}}},"$defs":{"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"opaqueId":{"type":"string","minLength":1,"maxLength":4096},"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"path":{"type":"string","minLength":1,"maxLength":2048},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"revisionBinding":{"type":"object","additionalProperties":false,"required":["revision","sha256"],"properties":{"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}},"reference":{"type":"object","additionalProperties":false,"required":["path","role"],"properties":{"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"role":{"const":"visual_evidence"}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}},"artifact":{"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"const":"mockup-area"}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"enum":["text/html","image/png"]},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["mockup-html","mockup-front","mockup-back","mockup-area"]},"areaId":{"$ref":"#/$defs/opaqueId"},"carrier":{"$ref":"#/$defs/carrier"}}}}};
 const schema100 = {"type":"string","pattern":"^[a-f0-9]{64}$"};
 const schema98 = {"type":"object","additionalProperties":false,"required":["revision","sha256"],"properties":{"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}};
 const schema99 = {"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"};
@@ -6352,8 +6334,8 @@ return errors === 0;
 }
 validate50.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema105 = {"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/id"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}};
-const schema106 = {"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"};
+const schema105 = {"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}};
+const schema106 = {"type":"string","minLength":1,"maxLength":4096};
 const schema107 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
 
 function validate52(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -6412,8 +6394,8 @@ errors++;
 if(data.id !== undefined){
 let data0 = data.id;
 if(typeof data0 === "string"){
-if(func1(data0) > 128){
-const err4 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+if(func1(data0) > 4096){
+const err4 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/opaqueId/maxLength",keyword:"maxLength",params:{limit: 4096},message:"must NOT have more than 4096 characters"};
 if(vErrors === null){
 vErrors = [err4];
 }
@@ -6423,7 +6405,7 @@ vErrors.push(err4);
 errors++;
 }
 if(func1(data0) < 1){
-const err5 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+const err5 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/opaqueId/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err5];
 }
@@ -6432,8 +6414,9 @@ vErrors.push(err5);
 }
 errors++;
 }
-if(!pattern5.test(data0)){
-const err6 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},message:"must match pattern \""+"^[A-Za-z0-9][A-Za-z0-9._:-]*$"+"\""};
+}
+else {
+const err6 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/opaqueId/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err6];
 }
@@ -6443,8 +6426,10 @@ vErrors.push(err6);
 errors++;
 }
 }
-else {
-const err7 = {instancePath:instancePath+"/id",schemaPath:"#/$defs/id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data.side !== undefined){
+let data1 = data.side;
+if(!(((((((((data1 === "front") || (data1 === "back")) || (data1 === "left")) || (data1 === "right")) || (data1 === "wrap")) || (data1 === "top")) || (data1 === "bottom")) || (data1 === "neck")) || (data1 === "custom"))){
+const err7 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema105.properties.side.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err7];
 }
@@ -6454,10 +6439,10 @@ vErrors.push(err7);
 errors++;
 }
 }
-if(data.side !== undefined){
-let data1 = data.side;
-if(!(((((((((data1 === "front") || (data1 === "back")) || (data1 === "left")) || (data1 === "right")) || (data1 === "wrap")) || (data1 === "top")) || (data1 === "bottom")) || (data1 === "neck")) || (data1 === "custom"))){
-const err8 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema105.properties.side.enum},message:"must be equal to one of the allowed values"};
+if(data.carrier !== undefined){
+let data2 = data.carrier;
+if(!((((((data2 === "direct_surface_print") || (data2 === "applied_label")) || (data2 === "clear_label")) || (data2 === "in_mold")) || (data2 === "foil_or_ink_only")) || (data2 === "bare"))){
+const err8 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema107.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err8];
 }
@@ -6467,10 +6452,9 @@ vErrors.push(err8);
 errors++;
 }
 }
-if(data.carrier !== undefined){
-let data2 = data.carrier;
-if(!((((((data2 === "direct_surface_print") || (data2 === "applied_label")) || (data2 === "clear_label")) || (data2 === "in_mold")) || (data2 === "foil_or_ink_only")) || (data2 === "bare"))){
-const err9 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema107.enum},message:"must be equal to one of the allowed values"};
+}
+else {
+const err9 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err9];
 }
@@ -6479,24 +6463,13 @@ vErrors.push(err9);
 }
 errors++;
 }
-}
-}
-else {
-const err10 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
-if(vErrors === null){
-vErrors = [err10];
-}
-else {
-vErrors.push(err10);
-}
-errors++;
-}
 validate52.errors = vErrors;
 return errors === 0;
 }
 validate52.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema108 = {"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"const":"mockup-area"}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"enum":["text/html","image/png"]},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["mockup-html","mockup-front","mockup-back","mockup-area"]},"areaId":{"$ref":"#/$defs/id"},"carrier":{"$ref":"#/$defs/carrier"}}};
+const schema108 = {"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"const":"mockup-area"}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"enum":["text/html","image/png"]},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["mockup-html","mockup-front","mockup-back","mockup-area"]},"areaId":{"$ref":"#/$defs/opaqueId"},"carrier":{"$ref":"#/$defs/carrier"}}};
+const schema109 = {"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"};
 
 function validate54(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
@@ -6878,8 +6851,8 @@ errors++;
 if(data.areaId !== undefined){
 let data8 = data.areaId;
 if(typeof data8 === "string"){
-if(func1(data8) > 128){
-const err30 = {instancePath:instancePath+"/areaId",schemaPath:"#/$defs/id/maxLength",keyword:"maxLength",params:{limit: 128},message:"must NOT have more than 128 characters"};
+if(func1(data8) > 4096){
+const err30 = {instancePath:instancePath+"/areaId",schemaPath:"#/$defs/opaqueId/maxLength",keyword:"maxLength",params:{limit: 4096},message:"must NOT have more than 4096 characters"};
 if(vErrors === null){
 vErrors = [err30];
 }
@@ -6889,7 +6862,7 @@ vErrors.push(err30);
 errors++;
 }
 if(func1(data8) < 1){
-const err31 = {instancePath:instancePath+"/areaId",schemaPath:"#/$defs/id/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+const err31 = {instancePath:instancePath+"/areaId",schemaPath:"#/$defs/opaqueId/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
 if(vErrors === null){
 vErrors = [err31];
 }
@@ -6898,8 +6871,9 @@ vErrors.push(err31);
 }
 errors++;
 }
-if(!pattern5.test(data8)){
-const err32 = {instancePath:instancePath+"/areaId",schemaPath:"#/$defs/id/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},message:"must match pattern \""+"^[A-Za-z0-9][A-Za-z0-9._:-]*$"+"\""};
+}
+else {
+const err32 = {instancePath:instancePath+"/areaId",schemaPath:"#/$defs/opaqueId/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err32];
 }
@@ -6909,8 +6883,10 @@ vErrors.push(err32);
 errors++;
 }
 }
-else {
-const err33 = {instancePath:instancePath+"/areaId",schemaPath:"#/$defs/id/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(data.carrier !== undefined){
+let data9 = data.carrier;
+if(!((((((data9 === "direct_surface_print") || (data9 === "applied_label")) || (data9 === "clear_label")) || (data9 === "in_mold")) || (data9 === "foil_or_ink_only")) || (data9 === "bare"))){
+const err33 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema107.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err33];
 }
@@ -6920,27 +6896,14 @@ vErrors.push(err33);
 errors++;
 }
 }
-if(data.carrier !== undefined){
-let data9 = data.carrier;
-if(!((((((data9 === "direct_surface_print") || (data9 === "applied_label")) || (data9 === "clear_label")) || (data9 === "in_mold")) || (data9 === "foil_or_ink_only")) || (data9 === "bare"))){
-const err34 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema107.enum},message:"must be equal to one of the allowed values"};
+}
+else {
+const err34 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
 if(vErrors === null){
 vErrors = [err34];
 }
 else {
 vErrors.push(err34);
-}
-errors++;
-}
-}
-}
-else {
-const err35 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
-if(vErrors === null){
-vErrors = [err35];
-}
-else {
-vErrors.push(err35);
 }
 errors++;
 }
@@ -7292,7 +7255,7 @@ return errors === 0;
 validate47.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 export const validateProductionManifestSchema = validate56;
-const schema114 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/review-manifest-v1.schema.json","title":"Label Production Review Manifest v1","type":"object","additionalProperties":false,"required":["version","createdAt","input","blueprint","designReviewManifest","model","areaTargetsSha256","areas","artifacts"],"properties":{"version":{"const":1},"createdAt":{"type":"string","format":"date-time","maxLength":64},"input":{"$ref":"#/$defs/input"},"blueprint":{"$ref":"#/$defs/revisionBinding"},"designReviewManifest":{"$ref":"#/$defs/digestBinding"},"model":{"$ref":"#/$defs/model"},"areaTargetsSha256":{"$ref":"#/$defs/sha256"},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}},"artifacts":{"type":"array","minItems":1,"maxItems":512,"items":{"$ref":"#/$defs/artifact"}}},"$defs":{"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"opaqueId":{"type":"string","minLength":1,"maxLength":256},"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"path":{"type":"string","minLength":1,"maxLength":2048},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"input":{"type":"object","additionalProperties":false,"required":["kind","revision","sha256"],"properties":{"kind":{"enum":["label-spec-v2","label-project-v3"]},"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}},"revisionBinding":{"type":"object","additionalProperties":false,"required":["revision","sha256"],"properties":{"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}},"digestBinding":{"type":"object","additionalProperties":false,"required":["sha256"],"properties":{"sha256":{"$ref":"#/$defs/sha256"}}},"model":{"type":"object","additionalProperties":false,"required":["fingerprint"],"properties":{"fingerprint":{"$ref":"#/$defs/revision"}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}},"vector3":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":3,"maxItems":3},"camera":{"type":"object","additionalProperties":false,"required":["position","direction","target","up","fov"],"properties":{"position":{"$ref":"#/$defs/vector3"},"direction":{"$ref":"#/$defs/vector3"},"target":{"$ref":"#/$defs/vector3"},"up":{"$ref":"#/$defs/vector3"},"fov":{"type":"number","exclusiveMinimum":0,"maximum":180}}},"artifact":{"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"enum":["flat-artwork","surface-face"]}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["flat-artwork","surface-face","model-front","model-back","review-sheet"]},"camera":{"$ref":"#/$defs/camera"},"areaId":{"$ref":"#/$defs/opaqueId"},"carrier":{"$ref":"#/$defs/carrier"}}}}};
+const schema114 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/review-manifest-v1.schema.json","title":"Label Production Review Manifest v1","type":"object","additionalProperties":false,"required":["version","createdAt","input","resolvedProject","blueprint","designReviewManifest","model","areaTargetsSha256","areas","artifacts"],"properties":{"version":{"const":1},"createdAt":{"type":"string","format":"date-time","maxLength":64},"input":{"$ref":"#/$defs/input"},"resolvedProject":{"$ref":"#/$defs/resolvedProject"},"blueprint":{"$ref":"#/$defs/revisionBinding"},"designReviewManifest":{"$ref":"#/$defs/digestBinding"},"model":{"$ref":"#/$defs/model"},"areaTargetsSha256":{"$ref":"#/$defs/sha256"},"areas":{"type":"array","minItems":1,"maxItems":64,"items":{"$ref":"#/$defs/area"}},"artifacts":{"type":"array","minItems":1,"maxItems":512,"items":{"$ref":"#/$defs/artifact"}}},"$defs":{"id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"},"opaqueId":{"type":"string","minLength":1,"maxLength":256},"revision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"path":{"type":"string","minLength":1,"maxLength":2048},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"input":{"type":"object","additionalProperties":false,"required":["kind","revision","sha256"],"properties":{"kind":{"enum":["label-spec-v2","label-project-v3"]},"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}},"revisionBinding":{"type":"object","additionalProperties":false,"required":["revision","sha256"],"properties":{"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}},"resolvedProject":{"type":"object","additionalProperties":false,"required":["path","revision","sha256","areaTargetsSha256"],"properties":{"path":{"const":"resolved-project.lbl.json"},"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"},"areaTargetsSha256":{"$ref":"#/$defs/sha256"}}},"digestBinding":{"type":"object","additionalProperties":false,"required":["sha256"],"properties":{"sha256":{"$ref":"#/$defs/sha256"}}},"model":{"type":"object","additionalProperties":false,"required":["fingerprint"],"properties":{"fingerprint":{"$ref":"#/$defs/revision"}}},"area":{"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}},"vector3":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":3,"maxItems":3},"camera":{"type":"object","additionalProperties":false,"required":["position","direction","target","up","fov"],"properties":{"position":{"$ref":"#/$defs/vector3"},"direction":{"$ref":"#/$defs/vector3"},"target":{"$ref":"#/$defs/vector3"},"up":{"$ref":"#/$defs/vector3"},"fov":{"type":"number","exclusiveMinimum":0,"maximum":180}}},"artifact":{"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"enum":["flat-artwork","surface-face"]}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["flat-artwork","surface-face","model-front","model-back","review-sheet"]},"camera":{"$ref":"#/$defs/camera"},"areaId":{"$ref":"#/$defs/opaqueId"},"carrier":{"$ref":"#/$defs/carrier"}}}}};
 const schema117 = {"type":"string","pattern":"^[a-f0-9]{64}$"};
 const schema115 = {"type":"object","additionalProperties":false,"required":["kind","revision","sha256"],"properties":{"kind":{"enum":["label-spec-v2","label-project-v3"]},"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}};
 const schema116 = {"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"};
@@ -7449,12 +7412,200 @@ return errors === 0;
 }
 validate57.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema118 = {"type":"object","additionalProperties":false,"required":["revision","sha256"],"properties":{"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}};
+const schema118 = {"type":"object","additionalProperties":false,"required":["path","revision","sha256","areaTargetsSha256"],"properties":{"path":{"const":"resolved-project.lbl.json"},"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"},"areaTargetsSha256":{"$ref":"#/$defs/sha256"}}};
 
 function validate59(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
 const evaluated0 = validate59.evaluated;
+if(evaluated0.dynamicProps){
+evaluated0.props = undefined;
+}
+if(evaluated0.dynamicItems){
+evaluated0.items = undefined;
+}
+if(data && typeof data == "object" && !Array.isArray(data)){
+if(data.path === undefined){
+const err0 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "path"},message:"must have required property '"+"path"+"'"};
+if(vErrors === null){
+vErrors = [err0];
+}
+else {
+vErrors.push(err0);
+}
+errors++;
+}
+if(data.revision === undefined){
+const err1 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "revision"},message:"must have required property '"+"revision"+"'"};
+if(vErrors === null){
+vErrors = [err1];
+}
+else {
+vErrors.push(err1);
+}
+errors++;
+}
+if(data.sha256 === undefined){
+const err2 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "sha256"},message:"must have required property '"+"sha256"+"'"};
+if(vErrors === null){
+vErrors = [err2];
+}
+else {
+vErrors.push(err2);
+}
+errors++;
+}
+if(data.areaTargetsSha256 === undefined){
+const err3 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "areaTargetsSha256"},message:"must have required property '"+"areaTargetsSha256"+"'"};
+if(vErrors === null){
+vErrors = [err3];
+}
+else {
+vErrors.push(err3);
+}
+errors++;
+}
+for(const key0 in data){
+if(!((((key0 === "path") || (key0 === "revision")) || (key0 === "sha256")) || (key0 === "areaTargetsSha256"))){
+const err4 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(vErrors === null){
+vErrors = [err4];
+}
+else {
+vErrors.push(err4);
+}
+errors++;
+}
+}
+if(data.path !== undefined){
+if("resolved-project.lbl.json" !== data.path){
+const err5 = {instancePath:instancePath+"/path",schemaPath:"#/properties/path/const",keyword:"const",params:{allowedValue: "resolved-project.lbl.json"},message:"must be equal to constant"};
+if(vErrors === null){
+vErrors = [err5];
+}
+else {
+vErrors.push(err5);
+}
+errors++;
+}
+}
+if(data.revision !== undefined){
+let data1 = data.revision;
+if(typeof data1 === "string"){
+if(func1(data1) > 256){
+const err6 = {instancePath:instancePath+"/revision",schemaPath:"#/$defs/revision/maxLength",keyword:"maxLength",params:{limit: 256},message:"must NOT have more than 256 characters"};
+if(vErrors === null){
+vErrors = [err6];
+}
+else {
+vErrors.push(err6);
+}
+errors++;
+}
+if(func1(data1) < 1){
+const err7 = {instancePath:instancePath+"/revision",schemaPath:"#/$defs/revision/minLength",keyword:"minLength",params:{limit: 1},message:"must NOT have fewer than 1 characters"};
+if(vErrors === null){
+vErrors = [err7];
+}
+else {
+vErrors.push(err7);
+}
+errors++;
+}
+if(!pattern4.test(data1)){
+const err8 = {instancePath:instancePath+"/revision",schemaPath:"#/$defs/revision/pattern",keyword:"pattern",params:{pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},message:"must match pattern \""+"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"+"\""};
+if(vErrors === null){
+vErrors = [err8];
+}
+else {
+vErrors.push(err8);
+}
+errors++;
+}
+}
+else {
+const err9 = {instancePath:instancePath+"/revision",schemaPath:"#/$defs/revision/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err9];
+}
+else {
+vErrors.push(err9);
+}
+errors++;
+}
+}
+if(data.sha256 !== undefined){
+let data2 = data.sha256;
+if(typeof data2 === "string"){
+if(!pattern6.test(data2)){
+const err10 = {instancePath:instancePath+"/sha256",schemaPath:"#/$defs/sha256/pattern",keyword:"pattern",params:{pattern: "^[a-f0-9]{64}$"},message:"must match pattern \""+"^[a-f0-9]{64}$"+"\""};
+if(vErrors === null){
+vErrors = [err10];
+}
+else {
+vErrors.push(err10);
+}
+errors++;
+}
+}
+else {
+const err11 = {instancePath:instancePath+"/sha256",schemaPath:"#/$defs/sha256/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err11];
+}
+else {
+vErrors.push(err11);
+}
+errors++;
+}
+}
+if(data.areaTargetsSha256 !== undefined){
+let data3 = data.areaTargetsSha256;
+if(typeof data3 === "string"){
+if(!pattern6.test(data3)){
+const err12 = {instancePath:instancePath+"/areaTargetsSha256",schemaPath:"#/$defs/sha256/pattern",keyword:"pattern",params:{pattern: "^[a-f0-9]{64}$"},message:"must match pattern \""+"^[a-f0-9]{64}$"+"\""};
+if(vErrors === null){
+vErrors = [err12];
+}
+else {
+vErrors.push(err12);
+}
+errors++;
+}
+}
+else {
+const err13 = {instancePath:instancePath+"/areaTargetsSha256",schemaPath:"#/$defs/sha256/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err13];
+}
+else {
+vErrors.push(err13);
+}
+errors++;
+}
+}
+}
+else {
+const err14 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
+}
+errors++;
+}
+validate59.errors = vErrors;
+return errors === 0;
+}
+validate59.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+
+const schema122 = {"type":"object","additionalProperties":false,"required":["revision","sha256"],"properties":{"revision":{"$ref":"#/$defs/revision"},"sha256":{"$ref":"#/$defs/sha256"}}};
+
+function validate61(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+let vErrors = null;
+let errors = 0;
+const evaluated0 = validate61.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -7575,17 +7726,17 @@ vErrors.push(err9);
 }
 errors++;
 }
-validate59.errors = vErrors;
+validate61.errors = vErrors;
 return errors === 0;
 }
-validate59.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate61.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema121 = {"type":"object","additionalProperties":false,"required":["sha256"],"properties":{"sha256":{"$ref":"#/$defs/sha256"}}};
+const schema125 = {"type":"object","additionalProperties":false,"required":["sha256"],"properties":{"sha256":{"$ref":"#/$defs/sha256"}}};
 
-function validate61(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate63(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate61.evaluated;
+const evaluated0 = validate63.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -7651,17 +7802,17 @@ vErrors.push(err4);
 }
 errors++;
 }
-validate61.errors = vErrors;
+validate63.errors = vErrors;
 return errors === 0;
 }
-validate61.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate63.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema123 = {"type":"object","additionalProperties":false,"required":["fingerprint"],"properties":{"fingerprint":{"$ref":"#/$defs/revision"}}};
+const schema127 = {"type":"object","additionalProperties":false,"required":["fingerprint"],"properties":{"fingerprint":{"$ref":"#/$defs/revision"}}};
 
-function validate63(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate65(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate63.evaluated;
+const evaluated0 = validate65.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -7747,19 +7898,19 @@ vErrors.push(err6);
 }
 errors++;
 }
-validate63.errors = vErrors;
+validate65.errors = vErrors;
 return errors === 0;
 }
-validate63.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate65.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema126 = {"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}};
-const schema127 = {"type":"string","minLength":1,"maxLength":256};
-const schema128 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
+const schema130 = {"type":"object","additionalProperties":false,"required":["id","side","carrier"],"properties":{"id":{"$ref":"#/$defs/opaqueId"},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"carrier":{"$ref":"#/$defs/carrier"}}};
+const schema131 = {"type":"string","minLength":1,"maxLength":256};
+const schema132 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
 
-function validate65(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate67(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate65.evaluated;
+const evaluated0 = validate67.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -7847,7 +7998,7 @@ errors++;
 if(data.side !== undefined){
 let data1 = data.side;
 if(!(((((((((data1 === "front") || (data1 === "back")) || (data1 === "left")) || (data1 === "right")) || (data1 === "wrap")) || (data1 === "top")) || (data1 === "bottom")) || (data1 === "neck")) || (data1 === "custom"))){
-const err7 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema126.properties.side.enum},message:"must be equal to one of the allowed values"};
+const err7 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema130.properties.side.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err7];
 }
@@ -7860,7 +8011,7 @@ errors++;
 if(data.carrier !== undefined){
 let data2 = data.carrier;
 if(!((((((data2 === "direct_surface_print") || (data2 === "applied_label")) || (data2 === "clear_label")) || (data2 === "in_mold")) || (data2 === "foil_or_ink_only")) || (data2 === "bare"))){
-const err8 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema128.enum},message:"must be equal to one of the allowed values"};
+const err8 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema132.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err8];
 }
@@ -7881,21 +8032,21 @@ vErrors.push(err9);
 }
 errors++;
 }
-validate65.errors = vErrors;
+validate67.errors = vErrors;
 return errors === 0;
 }
-validate65.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate67.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema129 = {"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"enum":["flat-artwork","surface-face"]}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["flat-artwork","surface-face","model-front","model-back","review-sheet"]},"camera":{"$ref":"#/$defs/camera"},"areaId":{"$ref":"#/$defs/opaqueId"},"carrier":{"$ref":"#/$defs/carrier"}}};
-const schema130 = {"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"};
-const schema131 = {"type":"string","minLength":1,"maxLength":2048};
-const schema133 = {"type":"object","additionalProperties":false,"required":["position","direction","target","up","fov"],"properties":{"position":{"$ref":"#/$defs/vector3"},"direction":{"$ref":"#/$defs/vector3"},"target":{"$ref":"#/$defs/vector3"},"up":{"$ref":"#/$defs/vector3"},"fov":{"type":"number","exclusiveMinimum":0,"maximum":180}}};
-const schema134 = {"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":3,"maxItems":3};
+const schema133 = {"type":"object","additionalProperties":false,"required":["id","path","sha256","mimeType","width","height","viewKind"],"allOf":[{"if":{"properties":{"viewKind":{"enum":["flat-artwork","surface-face"]}},"required":["viewKind"]},"then":{"required":["areaId","carrier"],"properties":{"areaId":true,"carrier":true}}}],"properties":{"id":{"$ref":"#/$defs/id"},"path":{"$ref":"#/$defs/path"},"sha256":{"$ref":"#/$defs/sha256"},"mimeType":{"const":"image/png"},"width":{"type":"integer","minimum":1,"maximum":32768},"height":{"type":"integer","minimum":1,"maximum":32768},"viewKind":{"enum":["flat-artwork","surface-face","model-front","model-back","review-sheet"]},"camera":{"$ref":"#/$defs/camera"},"areaId":{"$ref":"#/$defs/opaqueId"},"carrier":{"$ref":"#/$defs/carrier"}}};
+const schema134 = {"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:-]*$"};
+const schema135 = {"type":"string","minLength":1,"maxLength":2048};
+const schema137 = {"type":"object","additionalProperties":false,"required":["position","direction","target","up","fov"],"properties":{"position":{"$ref":"#/$defs/vector3"},"direction":{"$ref":"#/$defs/vector3"},"target":{"$ref":"#/$defs/vector3"},"up":{"$ref":"#/$defs/vector3"},"fov":{"type":"number","exclusiveMinimum":0,"maximum":180}}};
+const schema138 = {"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"}],"items":false,"minItems":3,"maxItems":3};
 
-function validate68(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate70(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate68.evaluated;
+const evaluated0 = validate70.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -8355,16 +8506,16 @@ vErrors.push(err37);
 }
 errors++;
 }
-validate68.errors = vErrors;
+validate70.errors = vErrors;
 return errors === 0;
 }
-validate68.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate70.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate67(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate69(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate67.evaluated;
+const evaluated0 = validate69.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -8527,7 +8678,7 @@ vErrors.push(err11);
 errors++;
 }
 for(const key0 in data){
-if(!(func23.call(schema129.properties, key0))){
+if(!(func23.call(schema133.properties, key0))){
 const err12 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err12];
@@ -8728,7 +8879,7 @@ errors++;
 if(data.viewKind !== undefined){
 let data7 = data.viewKind;
 if(!(((((data7 === "flat-artwork") || (data7 === "surface-face")) || (data7 === "model-front")) || (data7 === "model-back")) || (data7 === "review-sheet"))){
-const err29 = {instancePath:instancePath+"/viewKind",schemaPath:"#/properties/viewKind/enum",keyword:"enum",params:{allowedValues: schema129.properties.viewKind.enum},message:"must be equal to one of the allowed values"};
+const err29 = {instancePath:instancePath+"/viewKind",schemaPath:"#/properties/viewKind/enum",keyword:"enum",params:{allowedValues: schema133.properties.viewKind.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err29];
 }
@@ -8739,8 +8890,8 @@ errors++;
 }
 }
 if(data.camera !== undefined){
-if(!(validate68(data.camera, {instancePath:instancePath+"/camera",parentData:data,parentDataProperty:"camera",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate68.errors : vErrors.concat(validate68.errors);
+if(!(validate70(data.camera, {instancePath:instancePath+"/camera",parentData:data,parentDataProperty:"camera",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate70.errors : vErrors.concat(validate70.errors);
 errors = vErrors.length;
 }
 }
@@ -8782,7 +8933,7 @@ errors++;
 if(data.carrier !== undefined){
 let data10 = data.carrier;
 if(!((((((data10 === "direct_surface_print") || (data10 === "applied_label")) || (data10 === "clear_label")) || (data10 === "in_mold")) || (data10 === "foil_or_ink_only")) || (data10 === "bare"))){
-const err33 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema128.enum},message:"must be equal to one of the allowed values"};
+const err33 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema132.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err33];
 }
@@ -8803,10 +8954,10 @@ vErrors.push(err34);
 }
 errors++;
 }
-validate67.errors = vErrors;
+validate69.errors = vErrors;
 return errors === 0;
 }
-validate67.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate69.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
 function validate56(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
@@ -8851,8 +9002,8 @@ vErrors.push(err2);
 }
 errors++;
 }
-if(data.blueprint === undefined){
-const err3 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "blueprint"},message:"must have required property '"+"blueprint"+"'"};
+if(data.resolvedProject === undefined){
+const err3 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "resolvedProject"},message:"must have required property '"+"resolvedProject"+"'"};
 if(vErrors === null){
 vErrors = [err3];
 }
@@ -8861,8 +9012,8 @@ vErrors.push(err3);
 }
 errors++;
 }
-if(data.designReviewManifest === undefined){
-const err4 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "designReviewManifest"},message:"must have required property '"+"designReviewManifest"+"'"};
+if(data.blueprint === undefined){
+const err4 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "blueprint"},message:"must have required property '"+"blueprint"+"'"};
 if(vErrors === null){
 vErrors = [err4];
 }
@@ -8871,8 +9022,8 @@ vErrors.push(err4);
 }
 errors++;
 }
-if(data.model === undefined){
-const err5 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "model"},message:"must have required property '"+"model"+"'"};
+if(data.designReviewManifest === undefined){
+const err5 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "designReviewManifest"},message:"must have required property '"+"designReviewManifest"+"'"};
 if(vErrors === null){
 vErrors = [err5];
 }
@@ -8881,8 +9032,8 @@ vErrors.push(err5);
 }
 errors++;
 }
-if(data.areaTargetsSha256 === undefined){
-const err6 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "areaTargetsSha256"},message:"must have required property '"+"areaTargetsSha256"+"'"};
+if(data.model === undefined){
+const err6 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "model"},message:"must have required property '"+"model"+"'"};
 if(vErrors === null){
 vErrors = [err6];
 }
@@ -8891,8 +9042,8 @@ vErrors.push(err6);
 }
 errors++;
 }
-if(data.areas === undefined){
-const err7 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "areas"},message:"must have required property '"+"areas"+"'"};
+if(data.areaTargetsSha256 === undefined){
+const err7 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "areaTargetsSha256"},message:"must have required property '"+"areaTargetsSha256"+"'"};
 if(vErrors === null){
 vErrors = [err7];
 }
@@ -8901,8 +9052,8 @@ vErrors.push(err7);
 }
 errors++;
 }
-if(data.artifacts === undefined){
-const err8 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "artifacts"},message:"must have required property '"+"artifacts"+"'"};
+if(data.areas === undefined){
+const err8 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "areas"},message:"must have required property '"+"areas"+"'"};
 if(vErrors === null){
 vErrors = [err8];
 }
@@ -8911,9 +9062,8 @@ vErrors.push(err8);
 }
 errors++;
 }
-for(const key0 in data){
-if(!(func23.call(schema114.properties, key0))){
-const err9 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
+if(data.artifacts === undefined){
+const err9 = {instancePath,schemaPath:"#/required",keyword:"required",params:{missingProperty: "artifacts"},message:"must have required property '"+"artifacts"+"'"};
 if(vErrors === null){
 vErrors = [err9];
 }
@@ -8922,10 +9072,9 @@ vErrors.push(err9);
 }
 errors++;
 }
-}
-if(data.version !== undefined){
-if(1 !== data.version){
-const err10 = {instancePath:instancePath+"/version",schemaPath:"#/properties/version/const",keyword:"const",params:{allowedValue: 1},message:"must be equal to constant"};
+for(const key0 in data){
+if(!(func23.call(schema114.properties, key0))){
+const err10 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err10];
 }
@@ -8935,11 +9084,9 @@ vErrors.push(err10);
 errors++;
 }
 }
-if(data.createdAt !== undefined){
-let data1 = data.createdAt;
-if(typeof data1 === "string"){
-if(func1(data1) > 64){
-const err11 = {instancePath:instancePath+"/createdAt",schemaPath:"#/properties/createdAt/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
+if(data.version !== undefined){
+if(1 !== data.version){
+const err11 = {instancePath:instancePath+"/version",schemaPath:"#/properties/version/const",keyword:"const",params:{allowedValue: 1},message:"must be equal to constant"};
 if(vErrors === null){
 vErrors = [err11];
 }
@@ -8948,8 +9095,12 @@ vErrors.push(err11);
 }
 errors++;
 }
-if(!(formats0.validate(data1))){
-const err12 = {instancePath:instancePath+"/createdAt",schemaPath:"#/properties/createdAt/format",keyword:"format",params:{format: "date-time"},message:"must match format \""+"date-time"+"\""};
+}
+if(data.createdAt !== undefined){
+let data1 = data.createdAt;
+if(typeof data1 === "string"){
+if(func1(data1) > 64){
+const err12 = {instancePath:instancePath+"/createdAt",schemaPath:"#/properties/createdAt/maxLength",keyword:"maxLength",params:{limit: 64},message:"must NOT have more than 64 characters"};
 if(vErrors === null){
 vErrors = [err12];
 }
@@ -8958,14 +9109,24 @@ vErrors.push(err12);
 }
 errors++;
 }
-}
-else {
-const err13 = {instancePath:instancePath+"/createdAt",schemaPath:"#/properties/createdAt/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(!(formats0.validate(data1))){
+const err13 = {instancePath:instancePath+"/createdAt",schemaPath:"#/properties/createdAt/format",keyword:"format",params:{format: "date-time"},message:"must match format \""+"date-time"+"\""};
 if(vErrors === null){
 vErrors = [err13];
 }
 else {
 vErrors.push(err13);
+}
+errors++;
+}
+}
+else {
+const err14 = {instancePath:instancePath+"/createdAt",schemaPath:"#/properties/createdAt/type",keyword:"type",params:{type: "string"},message:"must be string"};
+if(vErrors === null){
+vErrors = [err14];
+}
+else {
+vErrors.push(err14);
 }
 errors++;
 }
@@ -8976,40 +9137,35 @@ vErrors = vErrors === null ? validate57.errors : vErrors.concat(validate57.error
 errors = vErrors.length;
 }
 }
-if(data.blueprint !== undefined){
-if(!(validate59(data.blueprint, {instancePath:instancePath+"/blueprint",parentData:data,parentDataProperty:"blueprint",rootData,dynamicAnchors}))){
+if(data.resolvedProject !== undefined){
+if(!(validate59(data.resolvedProject, {instancePath:instancePath+"/resolvedProject",parentData:data,parentDataProperty:"resolvedProject",rootData,dynamicAnchors}))){
 vErrors = vErrors === null ? validate59.errors : vErrors.concat(validate59.errors);
 errors = vErrors.length;
 }
 }
-if(data.designReviewManifest !== undefined){
-if(!(validate61(data.designReviewManifest, {instancePath:instancePath+"/designReviewManifest",parentData:data,parentDataProperty:"designReviewManifest",rootData,dynamicAnchors}))){
+if(data.blueprint !== undefined){
+if(!(validate61(data.blueprint, {instancePath:instancePath+"/blueprint",parentData:data,parentDataProperty:"blueprint",rootData,dynamicAnchors}))){
 vErrors = vErrors === null ? validate61.errors : vErrors.concat(validate61.errors);
 errors = vErrors.length;
 }
 }
-if(data.model !== undefined){
-if(!(validate63(data.model, {instancePath:instancePath+"/model",parentData:data,parentDataProperty:"model",rootData,dynamicAnchors}))){
+if(data.designReviewManifest !== undefined){
+if(!(validate63(data.designReviewManifest, {instancePath:instancePath+"/designReviewManifest",parentData:data,parentDataProperty:"designReviewManifest",rootData,dynamicAnchors}))){
 vErrors = vErrors === null ? validate63.errors : vErrors.concat(validate63.errors);
 errors = vErrors.length;
 }
 }
+if(data.model !== undefined){
+if(!(validate65(data.model, {instancePath:instancePath+"/model",parentData:data,parentDataProperty:"model",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate65.errors : vErrors.concat(validate65.errors);
+errors = vErrors.length;
+}
+}
 if(data.areaTargetsSha256 !== undefined){
-let data6 = data.areaTargetsSha256;
-if(typeof data6 === "string"){
-if(!pattern6.test(data6)){
-const err14 = {instancePath:instancePath+"/areaTargetsSha256",schemaPath:"#/$defs/sha256/pattern",keyword:"pattern",params:{pattern: "^[a-f0-9]{64}$"},message:"must match pattern \""+"^[a-f0-9]{64}$"+"\""};
-if(vErrors === null){
-vErrors = [err14];
-}
-else {
-vErrors.push(err14);
-}
-errors++;
-}
-}
-else {
-const err15 = {instancePath:instancePath+"/areaTargetsSha256",schemaPath:"#/$defs/sha256/type",keyword:"type",params:{type: "string"},message:"must be string"};
+let data7 = data.areaTargetsSha256;
+if(typeof data7 === "string"){
+if(!pattern6.test(data7)){
+const err15 = {instancePath:instancePath+"/areaTargetsSha256",schemaPath:"#/$defs/sha256/pattern",keyword:"pattern",params:{pattern: "^[a-f0-9]{64}$"},message:"must match pattern \""+"^[a-f0-9]{64}$"+"\""};
 if(vErrors === null){
 vErrors = [err15];
 }
@@ -9019,11 +9175,8 @@ vErrors.push(err15);
 errors++;
 }
 }
-if(data.areas !== undefined){
-let data7 = data.areas;
-if(Array.isArray(data7)){
-if(data7.length > 64){
-const err16 = {instancePath:instancePath+"/areas",schemaPath:"#/properties/areas/maxItems",keyword:"maxItems",params:{limit: 64},message:"must NOT have more than 64 items"};
+else {
+const err16 = {instancePath:instancePath+"/areaTargetsSha256",schemaPath:"#/$defs/sha256/type",keyword:"type",params:{type: "string"},message:"must be string"};
 if(vErrors === null){
 vErrors = [err16];
 }
@@ -9032,8 +9185,12 @@ vErrors.push(err16);
 }
 errors++;
 }
-if(data7.length < 1){
-const err17 = {instancePath:instancePath+"/areas",schemaPath:"#/properties/areas/minItems",keyword:"minItems",params:{limit: 1},message:"must NOT have fewer than 1 items"};
+}
+if(data.areas !== undefined){
+let data8 = data.areas;
+if(Array.isArray(data8)){
+if(data8.length > 64){
+const err17 = {instancePath:instancePath+"/areas",schemaPath:"#/properties/areas/maxItems",keyword:"maxItems",params:{limit: 64},message:"must NOT have more than 64 items"};
 if(vErrors === null){
 vErrors = [err17];
 }
@@ -9042,16 +9199,8 @@ vErrors.push(err17);
 }
 errors++;
 }
-const len0 = data7.length;
-for(let i0=0; i0<len0; i0++){
-if(!(validate65(data7[i0], {instancePath:instancePath+"/areas/" + i0,parentData:data7,parentDataProperty:i0,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate65.errors : vErrors.concat(validate65.errors);
-errors = vErrors.length;
-}
-}
-}
-else {
-const err18 = {instancePath:instancePath+"/areas",schemaPath:"#/properties/areas/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(data8.length < 1){
+const err18 = {instancePath:instancePath+"/areas",schemaPath:"#/properties/areas/minItems",keyword:"minItems",params:{limit: 1},message:"must NOT have fewer than 1 items"};
 if(vErrors === null){
 vErrors = [err18];
 }
@@ -9060,12 +9209,16 @@ vErrors.push(err18);
 }
 errors++;
 }
+const len0 = data8.length;
+for(let i0=0; i0<len0; i0++){
+if(!(validate67(data8[i0], {instancePath:instancePath+"/areas/" + i0,parentData:data8,parentDataProperty:i0,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate67.errors : vErrors.concat(validate67.errors);
+errors = vErrors.length;
 }
-if(data.artifacts !== undefined){
-let data9 = data.artifacts;
-if(Array.isArray(data9)){
-if(data9.length > 512){
-const err19 = {instancePath:instancePath+"/artifacts",schemaPath:"#/properties/artifacts/maxItems",keyword:"maxItems",params:{limit: 512},message:"must NOT have more than 512 items"};
+}
+}
+else {
+const err19 = {instancePath:instancePath+"/areas",schemaPath:"#/properties/areas/type",keyword:"type",params:{type: "array"},message:"must be array"};
 if(vErrors === null){
 vErrors = [err19];
 }
@@ -9074,8 +9227,12 @@ vErrors.push(err19);
 }
 errors++;
 }
-if(data9.length < 1){
-const err20 = {instancePath:instancePath+"/artifacts",schemaPath:"#/properties/artifacts/minItems",keyword:"minItems",params:{limit: 1},message:"must NOT have fewer than 1 items"};
+}
+if(data.artifacts !== undefined){
+let data10 = data.artifacts;
+if(Array.isArray(data10)){
+if(data10.length > 512){
+const err20 = {instancePath:instancePath+"/artifacts",schemaPath:"#/properties/artifacts/maxItems",keyword:"maxItems",params:{limit: 512},message:"must NOT have more than 512 items"};
 if(vErrors === null){
 vErrors = [err20];
 }
@@ -9084,16 +9241,8 @@ vErrors.push(err20);
 }
 errors++;
 }
-const len1 = data9.length;
-for(let i1=0; i1<len1; i1++){
-if(!(validate67(data9[i1], {instancePath:instancePath+"/artifacts/" + i1,parentData:data9,parentDataProperty:i1,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate67.errors : vErrors.concat(validate67.errors);
-errors = vErrors.length;
-}
-}
-}
-else {
-const err21 = {instancePath:instancePath+"/artifacts",schemaPath:"#/properties/artifacts/type",keyword:"type",params:{type: "array"},message:"must be array"};
+if(data10.length < 1){
+const err21 = {instancePath:instancePath+"/artifacts",schemaPath:"#/properties/artifacts/minItems",keyword:"minItems",params:{limit: 1},message:"must NOT have fewer than 1 items"};
 if(vErrors === null){
 vErrors = [err21];
 }
@@ -9102,10 +9251,16 @@ vErrors.push(err21);
 }
 errors++;
 }
+const len1 = data10.length;
+for(let i1=0; i1<len1; i1++){
+if(!(validate69(data10[i1], {instancePath:instancePath+"/artifacts/" + i1,parentData:data10,parentDataProperty:i1,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate69.errors : vErrors.concat(validate69.errors);
+errors = vErrors.length;
+}
 }
 }
 else {
-const err22 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+const err22 = {instancePath:instancePath+"/artifacts",schemaPath:"#/properties/artifacts/type",keyword:"type",params:{type: "array"},message:"must be array"};
 if(vErrors === null){
 vErrors = [err22];
 }
@@ -9114,29 +9269,41 @@ vErrors.push(err22);
 }
 errors++;
 }
+}
+}
+else {
+const err23 = {instancePath,schemaPath:"#/type",keyword:"type",params:{type: "object"},message:"must be object"};
+if(vErrors === null){
+vErrors = [err23];
+}
+else {
+vErrors.push(err23);
+}
+errors++;
+}
 validate56.errors = vErrors;
 return errors === 0;
 }
 validate56.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-export const validateWorkflowProjectSchema = validate71;
-const schema140 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/label-project-v3.schema.json","title":"GLB Label Editor Project v3","type":"object","additionalProperties":false,"required":["version","modelFileName","areas"],"properties":{"version":{"const":3},"modelFileName":{"type":"string"},"areas":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/area"}}},"$defs":{"finiteNumber":{"type":"number"},"color":{"type":"string","minLength":1,"maxLength":64},"vector3":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":3,"maxItems":3},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"physicalBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}},"normalizedBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"artboard":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}},"boundary":{"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}},"substrate":{"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"$ref":"#/$defs/color"},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}},"process":{"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}},"designMetrics":{"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1},"strokeWidthMm":{"type":"number","minimum":0,"maximum":10000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":10000}}},"designBinding":{"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}},"craftParams":{"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"$ref":"#/$defs/color"},"foilSpotName":{"type":"string","not":{"const":"white_underbase"}},"gradientAngle":{"$ref":"#/$defs/finiteNumber"},"highlight":{"$ref":"#/$defs/finiteNumber"},"depth":{"$ref":"#/$defs/finiteNumber"},"lightAngle":{"$ref":"#/$defs/finiteNumber"},"intensity":{"$ref":"#/$defs/finiteNumber"},"noise":{"$ref":"#/$defs/finiteNumber"},"gloss":{"$ref":"#/$defs/finiteNumber"},"strokeColor":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"}}},"craft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["foil","emboss","deboss","matte","uv","stroke"]},"params":{"$ref":"#/$defs/craftParams"}}},"craftList":{"type":"array","items":{"$ref":"#/$defs/craft"}},"commonLayer":{"type":"object","required":["id","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}},"textLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","text","fontFamily","fontSize","fontWeight","letterSpacing","lineHeight","color","align","italic","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSize":{"$ref":"#/$defs/finiteNumber"},"fontWeight":{"oneOf":[{"$ref":"#/$defs/finiteNumber"},{"enum":["normal","bold"]}]},"letterSpacing":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"color":{"$ref":"#/$defs/color"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"imageLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"type":"number","minimum":1,"maximum":8192},"naturalHeight":{"type":"number","minimum":1,"maximum":8192},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"shapeGeometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}},"shapeLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]},"layer":{"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]},"remap":{"type":"object","additionalProperties":false,"required":["mode","axis","origin","radius","wrap","offset","planarBox"],"properties":{"mode":{"enum":["cylindrical","planar"]},"axis":{"$ref":"#/$defs/vector3"},"origin":{"$ref":"#/$defs/vector3"},"radius":{"type":"number","exclusiveMinimum":0},"wrap":{"type":"number","exclusiveMinimum":0},"offset":{"$ref":"#/$defs/finiteNumber"},"mirrorU":{"type":"boolean"},"planarBox":{"type":"object","additionalProperties":false,"required":["min","max"],"properties":{"min":{"$ref":"#/$defs/vector3"},"max":{"$ref":"#/$defs/vector3"}}}}},"range":{"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"canvas":{"type":"object","additionalProperties":false,"required":["width","height","aspect"],"properties":{"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"aspect":{"type":"number","exclusiveMinimum":0}}},"paper":{"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string"},"opacity":{"type":"number","minimum":0,"maximum":1}}},"printSpec":{"type":"object","additionalProperties":false,"required":["physicalWidthMm","physicalHeightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"physicalWidthMm":{"type":"number","exclusiveMinimum":0},"physicalHeightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","items":{"type":"string","minLength":1,"not":{"const":"white_underbase"}}}}},"font":{"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}},"area":{"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"},"contains":{"$ref":"#/$defs/imageLayer"},"minContains":0,"maxContains":64},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}}}};
-const schema141 = {"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"]},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"},"contains":{"$ref":"#/$defs/imageLayer"},"minContains":0,"maxContains":64},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}};
-const schema148 = {"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}};
-const schema149 = {"type":"object","additionalProperties":false,"required":["width","height","aspect"],"properties":{"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"aspect":{"type":"number","exclusiveMinimum":0}}};
-const schema150 = {"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string"},"opacity":{"type":"number","minimum":0,"maximum":1}}};
-const schema151 = {"type":"object","additionalProperties":false,"required":["physicalWidthMm","physicalHeightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"physicalWidthMm":{"type":"number","exclusiveMinimum":0},"physicalHeightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","items":{"type":"string","minLength":1,"not":{"const":"white_underbase"}}}}};
-const schema152 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
-const schema153 = {"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}};
-const schema234 = {"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}};
-const schema144 = {"type":"number"};
-const schema142 = {"type":"object","additionalProperties":false,"required":["mode","axis","origin","radius","wrap","offset","planarBox"],"properties":{"mode":{"enum":["cylindrical","planar"]},"axis":{"$ref":"#/$defs/vector3"},"origin":{"$ref":"#/$defs/vector3"},"radius":{"type":"number","exclusiveMinimum":0},"wrap":{"type":"number","exclusiveMinimum":0},"offset":{"$ref":"#/$defs/finiteNumber"},"mirrorU":{"type":"boolean"},"planarBox":{"type":"object","additionalProperties":false,"required":["min","max"],"properties":{"min":{"$ref":"#/$defs/vector3"},"max":{"$ref":"#/$defs/vector3"}}}}};
-const schema143 = {"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":3,"maxItems":3};
+export const validateWorkflowProjectSchema = validate73;
+const schema144 = {"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://realibox.local/schemas/label-project-v3.schema.json","title":"GLB Label Editor Project v3","type":"object","additionalProperties":false,"required":["version","modelFileName","areas"],"properties":{"version":{"const":3},"modelFileName":{"type":"string"},"areas":{"type":"array","minItems":1,"items":{"$ref":"#/$defs/area"}}},"$defs":{"finiteNumber":{"type":"number"},"color":{"type":"string","minLength":1,"maxLength":64},"vector3":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":3,"maxItems":3},"carrier":{"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]},"physicalBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}},"normalizedBounds":{"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"artboard":{"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}},"boundary":{"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}},"substrate":{"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"$ref":"#/$defs/color"},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}},"process":{"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}},"designMetrics":{"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1},"strokeWidthMm":{"type":"number","minimum":0,"maximum":10000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":10000}}},"designBinding":{"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}},"craftParams":{"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"$ref":"#/$defs/color"},"foilSpotName":{"type":"string","not":{"const":"white_underbase"}},"gradientAngle":{"$ref":"#/$defs/finiteNumber"},"highlight":{"$ref":"#/$defs/finiteNumber"},"depth":{"$ref":"#/$defs/finiteNumber"},"lightAngle":{"$ref":"#/$defs/finiteNumber"},"intensity":{"$ref":"#/$defs/finiteNumber"},"noise":{"$ref":"#/$defs/finiteNumber"},"gloss":{"$ref":"#/$defs/finiteNumber"},"strokeColor":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"}}},"craft":{"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["foil","emboss","deboss","matte","uv","stroke"]},"params":{"$ref":"#/$defs/craftParams"}}},"craftList":{"type":"array","items":{"$ref":"#/$defs/craft"}},"commonLayer":{"type":"object","required":["id","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}},"textLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","text","fontFamily","fontSize","fontWeight","letterSpacing","lineHeight","color","align","italic","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSize":{"$ref":"#/$defs/finiteNumber"},"fontWeight":{"oneOf":[{"$ref":"#/$defs/finiteNumber"},{"enum":["normal","bold"]}]},"letterSpacing":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"color":{"$ref":"#/$defs/color"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"imageLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"type":"number","minimum":1,"maximum":8192},"naturalHeight":{"type":"number","minimum":1,"maximum":8192},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]},"shapeGeometry":{"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}},"shapeLayer":{"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]},"layer":{"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]},"remap":{"type":"object","additionalProperties":false,"required":["mode","axis","origin","radius","wrap","offset","planarBox"],"properties":{"mode":{"enum":["cylindrical","planar"]},"axis":{"$ref":"#/$defs/vector3"},"origin":{"$ref":"#/$defs/vector3"},"radius":{"type":"number","exclusiveMinimum":0},"wrap":{"type":"number","exclusiveMinimum":0},"offset":{"$ref":"#/$defs/finiteNumber"},"mirrorU":{"type":"boolean"},"planarBox":{"type":"object","additionalProperties":false,"required":["min","max"],"properties":{"min":{"$ref":"#/$defs/vector3"},"max":{"$ref":"#/$defs/vector3"}}}}},"range":{"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}},"canvas":{"type":"object","additionalProperties":false,"required":["width","height","aspect"],"properties":{"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"aspect":{"type":"number","exclusiveMinimum":0}}},"paper":{"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string"},"opacity":{"type":"number","minimum":0,"maximum":1}}},"printSpec":{"type":"object","additionalProperties":false,"required":["physicalWidthMm","physicalHeightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"physicalWidthMm":{"type":"number","exclusiveMinimum":0},"physicalHeightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","items":{"type":"string","minLength":1,"not":{"const":"white_underbase"}}}}},"font":{"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}},"area":{"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"],"default":"block"},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"},"contains":{"$ref":"#/$defs/imageLayer"},"minContains":0,"maxContains":64},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}}}};
+const schema145 = {"type":"object","additionalProperties":false,"required":["id","name","meshIndex","nodeName","surfaceMode","remap","range","canvas","paper","layers","globalCraft","fonts","referenceVisible"],"allOf":[{"if":{"properties":{"carrier":{"enum":["direct_surface_print","in_mold","foil_or_ink_only","bare"]}},"required":["carrier"]},"then":{"properties":{"substrate":false}}}],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},"meshIndex":{"type":"integer","minimum":0},"nodeName":{"type":"string","minLength":1},"surfaceMode":{"enum":["overlay","replace"]},"side":{"enum":["front","back","left","right","wrap","top","bottom","neck","custom"]},"remap":{"$ref":"#/$defs/remap"},"range":{"$ref":"#/$defs/range"},"canvas":{"$ref":"#/$defs/canvas"},"paper":{"$ref":"#/$defs/paper"},"printSpec":{"$ref":"#/$defs/printSpec"},"carrier":{"$ref":"#/$defs/carrier"},"artboard":{"$ref":"#/$defs/artboard"},"substrate":{"$ref":"#/$defs/substrate"},"placementPolicy":{"enum":["fit","crop-approved","block"],"default":"block"},"blueprintAreaId":{"type":"string","minLength":1,"maxLength":128},"designBinding":{"$ref":"#/$defs/designBinding"},"layers":{"type":"array","items":{"$ref":"#/$defs/layer"},"contains":{"$ref":"#/$defs/imageLayer"},"minContains":0,"maxContains":64},"globalCraft":{"type":"object","additionalProperties":false,"required":["craft"],"properties":{"craft":{"$ref":"#/$defs/craftList"}}},"fonts":{"type":"array","items":{"$ref":"#/$defs/font"}},"referenceVisible":{"type":"boolean"},"axisMin":{"$ref":"#/$defs/finiteNumber"},"axisMax":{"$ref":"#/$defs/finiteNumber"}}};
+const schema152 = {"type":"object","additionalProperties":false,"required":["uStart","uWidth","vStart","vHeight"],"properties":{"uStart":{"type":"number","minimum":0,"maximum":1},"uWidth":{"type":"number","exclusiveMinimum":0,"maximum":1},"vStart":{"type":"number","minimum":0,"maximum":1},"vHeight":{"type":"number","exclusiveMinimum":0,"maximum":1}}};
+const schema153 = {"type":"object","additionalProperties":false,"required":["width","height","aspect"],"properties":{"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1},"aspect":{"type":"number","exclusiveMinimum":0}}};
+const schema154 = {"type":"object","additionalProperties":false,"required":["enabled","color","opacity"],"properties":{"enabled":{"type":"boolean"},"color":{"type":"string"},"opacity":{"type":"number","minimum":0,"maximum":1}}};
+const schema155 = {"type":"object","additionalProperties":false,"required":["physicalWidthMm","physicalHeightMm","bleedMm","cornerRadiusMm","minTextHeightMm","dieCutShape","spotColors"],"properties":{"physicalWidthMm":{"type":"number","exclusiveMinimum":0},"physicalHeightMm":{"type":"number","exclusiveMinimum":0},"bleedMm":{"type":"number","minimum":0},"cornerRadiusMm":{"type":"number","minimum":0},"minTextHeightMm":{"type":"number","exclusiveMinimum":0},"dieCutShape":{"enum":["rectangle","rounded-rectangle","custom"]},"spotColors":{"type":"array","items":{"type":"string","minLength":1,"not":{"const":"white_underbase"}}}}};
+const schema156 = {"enum":["direct_surface_print","applied_label","clear_label","in_mold","foil_or_ink_only","bare"]};
+const schema157 = {"type":"object","additionalProperties":false,"required":["widthMm","heightMm","background"],"properties":{"widthMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"heightMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"background":{"type":"string","minLength":1,"maxLength":64}}};
+const schema238 = {"type":"object","additionalProperties":false,"required":["name","dataUrl"],"properties":{"name":{"type":"string","minLength":1},"dataUrl":{"type":"string","minLength":1}}};
+const schema148 = {"type":"number"};
+const schema146 = {"type":"object","additionalProperties":false,"required":["mode","axis","origin","radius","wrap","offset","planarBox"],"properties":{"mode":{"enum":["cylindrical","planar"]},"axis":{"$ref":"#/$defs/vector3"},"origin":{"$ref":"#/$defs/vector3"},"radius":{"type":"number","exclusiveMinimum":0},"wrap":{"type":"number","exclusiveMinimum":0},"offset":{"$ref":"#/$defs/finiteNumber"},"mirrorU":{"type":"boolean"},"planarBox":{"type":"object","additionalProperties":false,"required":["min","max"],"properties":{"min":{"$ref":"#/$defs/vector3"},"max":{"$ref":"#/$defs/vector3"}}}}};
+const schema147 = {"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":3,"maxItems":3};
 
-function validate74(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate76(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate74.evaluated;
+const evaluated0 = validate76.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -9226,16 +9393,16 @@ vErrors.push(err6);
 }
 errors++;
 }
-validate74.errors = vErrors;
+validate76.errors = vErrors;
 return errors === 0;
 }
-validate74.evaluated = {"items":true,"dynamicProps":false,"dynamicItems":false};
+validate76.evaluated = {"items":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate73(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate75(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate73.evaluated;
+const evaluated0 = validate75.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -9328,7 +9495,7 @@ errors++;
 if(data.mode !== undefined){
 let data0 = data.mode;
 if(!((data0 === "cylindrical") || (data0 === "planar"))){
-const err8 = {instancePath:instancePath+"/mode",schemaPath:"#/properties/mode/enum",keyword:"enum",params:{allowedValues: schema142.properties.mode.enum},message:"must be equal to one of the allowed values"};
+const err8 = {instancePath:instancePath+"/mode",schemaPath:"#/properties/mode/enum",keyword:"enum",params:{allowedValues: schema146.properties.mode.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err8];
 }
@@ -9339,14 +9506,14 @@ errors++;
 }
 }
 if(data.axis !== undefined){
-if(!(validate74(data.axis, {instancePath:instancePath+"/axis",parentData:data,parentDataProperty:"axis",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate74.errors : vErrors.concat(validate74.errors);
+if(!(validate76(data.axis, {instancePath:instancePath+"/axis",parentData:data,parentDataProperty:"axis",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate76.errors : vErrors.concat(validate76.errors);
 errors = vErrors.length;
 }
 }
 if(data.origin !== undefined){
-if(!(validate74(data.origin, {instancePath:instancePath+"/origin",parentData:data,parentDataProperty:"origin",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate74.errors : vErrors.concat(validate74.errors);
+if(!(validate76(data.origin, {instancePath:instancePath+"/origin",parentData:data,parentDataProperty:"origin",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate76.errors : vErrors.concat(validate76.errors);
 errors = vErrors.length;
 }
 }
@@ -9461,14 +9628,14 @@ errors++;
 }
 }
 if(data7.min !== undefined){
-if(!(validate74(data7.min, {instancePath:instancePath+"/planarBox/min",parentData:data7,parentDataProperty:"min",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate74.errors : vErrors.concat(validate74.errors);
+if(!(validate76(data7.min, {instancePath:instancePath+"/planarBox/min",parentData:data7,parentDataProperty:"min",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate76.errors : vErrors.concat(validate76.errors);
 errors = vErrors.length;
 }
 }
 if(data7.max !== undefined){
-if(!(validate74(data7.max, {instancePath:instancePath+"/planarBox/max",parentData:data7,parentDataProperty:"max",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate74.errors : vErrors.concat(validate74.errors);
+if(!(validate76(data7.max, {instancePath:instancePath+"/planarBox/max",parentData:data7,parentDataProperty:"max",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate76.errors : vErrors.concat(validate76.errors);
 errors = vErrors.length;
 }
 }
@@ -9495,19 +9662,19 @@ vErrors.push(err19);
 }
 errors++;
 }
-validate73.errors = vErrors;
+validate75.errors = vErrors;
 return errors === 0;
 }
-validate73.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate75.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema154 = {"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"$ref":"#/$defs/color"},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}};
-const schema155 = {"type":"string","minLength":1,"maxLength":64};
-const schema156 = {"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}};
+const schema158 = {"type":"object","additionalProperties":false,"required":["kind","opacity"],"properties":{"kind":{"enum":["opaque","transparent"]},"color":{"$ref":"#/$defs/color"},"opacity":{"type":"number","minimum":0,"maximum":1},"boundary":{"$ref":"#/$defs/boundary"},"material":{"type":"string","maxLength":256},"adhesive":{"type":"string","maxLength":256}}};
+const schema159 = {"type":"string","minLength":1,"maxLength":64};
+const schema160 = {"type":"object","additionalProperties":false,"required":["shape"],"properties":{"shape":{"enum":["rectangle","rounded_rectangle","ellipse","custom"]},"radiusMm":{"type":"number","minimum":0,"maximum":10000},"pathData":{"type":"string","minLength":1,"maxLength":131072}}};
 
-function validate80(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate82(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate80.evaluated;
+const evaluated0 = validate82.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -9550,7 +9717,7 @@ errors++;
 if(data.kind !== undefined){
 let data0 = data.kind;
 if(!((data0 === "opaque") || (data0 === "transparent"))){
-const err3 = {instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/enum",keyword:"enum",params:{allowedValues: schema154.properties.kind.enum},message:"must be equal to one of the allowed values"};
+const err3 = {instancePath:instancePath+"/kind",schemaPath:"#/properties/kind/enum",keyword:"enum",params:{allowedValues: schema158.properties.kind.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err3];
 }
@@ -9658,7 +9825,7 @@ errors++;
 if(data3.shape !== undefined){
 let data4 = data3.shape;
 if(!((((data4 === "rectangle") || (data4 === "rounded_rectangle")) || (data4 === "ellipse")) || (data4 === "custom"))){
-const err12 = {instancePath:instancePath+"/boundary/shape",schemaPath:"#/$defs/boundary/properties/shape/enum",keyword:"enum",params:{allowedValues: schema156.properties.shape.enum},message:"must be equal to one of the allowed values"};
+const err12 = {instancePath:instancePath+"/boundary/shape",schemaPath:"#/$defs/boundary/properties/shape/enum",keyword:"enum",params:{allowedValues: schema160.properties.shape.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err12];
 }
@@ -9811,18 +9978,18 @@ vErrors.push(err24);
 }
 errors++;
 }
-validate80.errors = vErrors;
+validate82.errors = vErrors;
 return errors === 0;
 }
-validate80.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate82.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema157 = {"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}};
-const schema158 = {"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}};
+const schema161 = {"type":"object","additionalProperties":false,"required":["blueprintRevision","blueprintSha256","reviewManifestSha256"],"properties":{"blueprintRevision":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9][A-Za-z0-9._:/-]*$"},"blueprintSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"reviewManifestSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"approvedCrop":{"$ref":"#/$defs/physicalBounds"}}};
+const schema162 = {"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"height":{"type":"number","exclusiveMinimum":0}}};
 
-function validate83(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate85(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate83.evaluated;
+const evaluated0 = validate85.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -9969,16 +10136,16 @@ vErrors.push(err11);
 }
 errors++;
 }
-validate83.errors = vErrors;
+validate85.errors = vErrors;
 return errors === 0;
 }
-validate83.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate85.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate82(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate84(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate82.evaluated;
+const evaluated0 = validate84.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -10124,8 +10291,8 @@ errors++;
 }
 }
 if(data.approvedCrop !== undefined){
-if(!(validate83(data.approvedCrop, {instancePath:instancePath+"/approvedCrop",parentData:data,parentDataProperty:"approvedCrop",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate83.errors : vErrors.concat(validate83.errors);
+if(!(validate85(data.approvedCrop, {instancePath:instancePath+"/approvedCrop",parentData:data,parentDataProperty:"approvedCrop",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate85.errors : vErrors.concat(validate85.errors);
 errors = vErrors.length;
 }
 }
@@ -10140,23 +10307,23 @@ vErrors.push(err12);
 }
 errors++;
 }
-validate82.errors = vErrors;
+validate84.errors = vErrors;
 return errors === 0;
 }
-validate82.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate84.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema161 = {"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]};
-const schema162 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","text","fontFamily","fontSize","fontWeight","letterSpacing","lineHeight","color","align","italic","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSize":{"$ref":"#/$defs/finiteNumber"},"fontWeight":{"oneOf":[{"$ref":"#/$defs/finiteNumber"},{"enum":["normal","bold"]}]},"letterSpacing":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"color":{"$ref":"#/$defs/color"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]};
-const schema185 = {"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}};
-const schema163 = {"type":"object","required":["id","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}};
-const schema169 = {"type":"array","items":{"$ref":"#/$defs/craft"}};
-const schema170 = {"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["foil","emboss","deboss","matte","uv","stroke"]},"params":{"$ref":"#/$defs/craftParams"}}};
-const schema171 = {"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"$ref":"#/$defs/color"},"foilSpotName":{"type":"string","not":{"const":"white_underbase"}},"gradientAngle":{"$ref":"#/$defs/finiteNumber"},"highlight":{"$ref":"#/$defs/finiteNumber"},"depth":{"$ref":"#/$defs/finiteNumber"},"lightAngle":{"$ref":"#/$defs/finiteNumber"},"intensity":{"$ref":"#/$defs/finiteNumber"},"noise":{"$ref":"#/$defs/finiteNumber"},"gloss":{"$ref":"#/$defs/finiteNumber"},"strokeColor":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"}}};
+const schema165 = {"oneOf":[{"$ref":"#/$defs/textLayer"},{"$ref":"#/$defs/imageLayer"},{"$ref":"#/$defs/shapeLayer"}]};
+const schema166 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","text","fontFamily","fontSize","fontWeight","letterSpacing","lineHeight","color","align","italic","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"text"},"text":{"type":"string"},"fontFamily":{"type":"string","minLength":1},"fontStack":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"}},"fontSize":{"$ref":"#/$defs/finiteNumber"},"fontWeight":{"oneOf":[{"$ref":"#/$defs/finiteNumber"},{"enum":["normal","bold"]}]},"letterSpacing":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"$ref":"#/$defs/finiteNumber"},"width":{"type":"number","exclusiveMinimum":0},"color":{"$ref":"#/$defs/color"},"align":{"enum":["left","center","right"]},"italic":{"type":"boolean"},"direction":{"enum":["horizontal","vertical"]},"writingDirection":{"enum":["auto","ltr","rtl"]},"language":{"type":"string"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]};
+const schema189 = {"type":"object","additionalProperties":false,"required":["process"],"properties":{"process":{"enum":["screen_print","pad_print","digital_print","offset_print","white_underbase","varnish","hot_stamp_foil","emboss","deboss","in_mold","batch_code"]},"spotName":{"type":"string","minLength":1,"maxLength":128,"not":{"const":"white_underbase"}},"requiredMask":{"enum":["color","metalness","roughness","bump","white_underbase"]}}};
+const schema167 = {"type":"object","required":["id","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}};
+const schema173 = {"type":"array","items":{"$ref":"#/$defs/craft"}};
+const schema174 = {"type":"object","additionalProperties":false,"required":["type","params"],"properties":{"type":{"enum":["foil","emboss","deboss","matte","uv","stroke"]},"params":{"$ref":"#/$defs/craftParams"}}};
+const schema175 = {"type":"object","additionalProperties":false,"properties":{"foilColor":{"enum":["gold","silver","rose","champagne","holographic","custom"]},"foilCustomColor":{"$ref":"#/$defs/color"},"foilSpotName":{"type":"string","not":{"const":"white_underbase"}},"gradientAngle":{"$ref":"#/$defs/finiteNumber"},"highlight":{"$ref":"#/$defs/finiteNumber"},"depth":{"$ref":"#/$defs/finiteNumber"},"lightAngle":{"$ref":"#/$defs/finiteNumber"},"intensity":{"$ref":"#/$defs/finiteNumber"},"noise":{"$ref":"#/$defs/finiteNumber"},"gloss":{"$ref":"#/$defs/finiteNumber"},"strokeColor":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"}}};
 
-function validate91(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate93(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate91.evaluated;
+const evaluated0 = validate93.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -10165,7 +10332,7 @@ evaluated0.items = undefined;
 }
 if(data && typeof data == "object" && !Array.isArray(data)){
 for(const key0 in data){
-if(!(func23.call(schema171.properties, key0))){
+if(!(func23.call(schema175.properties, key0))){
 const err0 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err0];
@@ -10179,7 +10346,7 @@ errors++;
 if(data.foilColor !== undefined){
 let data0 = data.foilColor;
 if(!((((((data0 === "gold") || (data0 === "silver")) || (data0 === "rose")) || (data0 === "champagne")) || (data0 === "holographic")) || (data0 === "custom"))){
-const err1 = {instancePath:instancePath+"/foilColor",schemaPath:"#/properties/foilColor/enum",keyword:"enum",params:{allowedValues: schema171.properties.foilColor.enum},message:"must be equal to one of the allowed values"};
+const err1 = {instancePath:instancePath+"/foilColor",schemaPath:"#/properties/foilColor/enum",keyword:"enum",params:{allowedValues: schema175.properties.foilColor.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err1];
 }
@@ -10421,16 +10588,16 @@ vErrors.push(err19);
 }
 errors++;
 }
-validate91.errors = vErrors;
+validate93.errors = vErrors;
 return errors === 0;
 }
-validate91.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate93.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate90(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate92(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate90.evaluated;
+const evaluated0 = validate92.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -10473,7 +10640,7 @@ errors++;
 if(data.type !== undefined){
 let data0 = data.type;
 if(!((((((data0 === "foil") || (data0 === "emboss")) || (data0 === "deboss")) || (data0 === "matte")) || (data0 === "uv")) || (data0 === "stroke"))){
-const err3 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/enum",keyword:"enum",params:{allowedValues: schema170.properties.type.enum},message:"must be equal to one of the allowed values"};
+const err3 = {instancePath:instancePath+"/type",schemaPath:"#/properties/type/enum",keyword:"enum",params:{allowedValues: schema174.properties.type.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err3];
 }
@@ -10484,8 +10651,8 @@ errors++;
 }
 }
 if(data.params !== undefined){
-if(!(validate91(data.params, {instancePath:instancePath+"/params",parentData:data,parentDataProperty:"params",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate91.errors : vErrors.concat(validate91.errors);
+if(!(validate93(data.params, {instancePath:instancePath+"/params",parentData:data,parentDataProperty:"params",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate93.errors : vErrors.concat(validate93.errors);
 errors = vErrors.length;
 }
 }
@@ -10500,16 +10667,16 @@ vErrors.push(err4);
 }
 errors++;
 }
-validate90.errors = vErrors;
+validate92.errors = vErrors;
 return errors === 0;
 }
-validate90.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate92.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate89(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate91(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate89.evaluated;
+const evaluated0 = validate91.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -10519,8 +10686,8 @@ evaluated0.items = undefined;
 if(Array.isArray(data)){
 const len0 = data.length;
 for(let i0=0; i0<len0; i0++){
-if(!(validate90(data[i0], {instancePath:instancePath+"/" + i0,parentData:data,parentDataProperty:i0,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate90.errors : vErrors.concat(validate90.errors);
+if(!(validate92(data[i0], {instancePath:instancePath+"/" + i0,parentData:data,parentDataProperty:i0,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate92.errors : vErrors.concat(validate92.errors);
 errors = vErrors.length;
 }
 }
@@ -10535,18 +10702,18 @@ vErrors.push(err0);
 }
 errors++;
 }
-validate89.errors = vErrors;
+validate91.errors = vErrors;
 return errors === 0;
 }
-validate89.evaluated = {"items":true,"dynamicProps":false,"dynamicItems":false};
+validate91.evaluated = {"items":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema182 = {"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1},"strokeWidthMm":{"type":"number","minimum":0,"maximum":10000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":10000}}};
-const schema183 = {"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}};
+const schema186 = {"type":"object","additionalProperties":false,"required":["anchor"],"properties":{"boundsMm":{"$ref":"#/$defs/physicalBounds"},"normalizedBounds":{"$ref":"#/$defs/normalizedBounds"},"anchor":{"enum":["top_left","top_center","center","baseline_left","baseline_center"]},"fontSizeMm":{"type":"number","exclusiveMinimum":0,"maximum":10000},"letterSpacingEm":{"$ref":"#/$defs/finiteNumber"},"lineHeight":{"type":"number","exclusiveMinimum":0},"wrapPolicy":{"enum":["none","word","character"]},"maxLines":{"type":"integer","minimum":1},"strokeWidthMm":{"type":"number","minimum":0,"maximum":10000},"cornerRadiusMm":{"type":"number","minimum":0,"maximum":10000}}};
+const schema187 = {"type":"object","additionalProperties":false,"required":["x","y","width","height"],"properties":{"x":{"type":"number","minimum":0,"maximum":1},"y":{"type":"number","minimum":0,"maximum":1},"width":{"type":"number","exclusiveMinimum":0,"maximum":1},"height":{"type":"number","exclusiveMinimum":0,"maximum":1}}};
 
-function validate95(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate97(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate95.evaluated;
+const evaluated0 = validate97.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -10565,7 +10732,7 @@ vErrors.push(err0);
 errors++;
 }
 for(const key0 in data){
-if(!(func23.call(schema182.properties, key0))){
+if(!(func23.call(schema186.properties, key0))){
 const err1 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err1];
@@ -10577,8 +10744,8 @@ errors++;
 }
 }
 if(data.boundsMm !== undefined){
-if(!(validate83(data.boundsMm, {instancePath:instancePath+"/boundsMm",parentData:data,parentDataProperty:"boundsMm",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate83.errors : vErrors.concat(validate83.errors);
+if(!(validate85(data.boundsMm, {instancePath:instancePath+"/boundsMm",parentData:data,parentDataProperty:"boundsMm",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate85.errors : vErrors.concat(validate85.errors);
 errors = vErrors.length;
 }
 }
@@ -10792,7 +10959,7 @@ errors++;
 if(data.anchor !== undefined){
 let data6 = data.anchor;
 if(!(((((data6 === "top_left") || (data6 === "top_center")) || (data6 === "center")) || (data6 === "baseline_left")) || (data6 === "baseline_center"))){
-const err20 = {instancePath:instancePath+"/anchor",schemaPath:"#/properties/anchor/enum",keyword:"enum",params:{allowedValues: schema182.properties.anchor.enum},message:"must be equal to one of the allowed values"};
+const err20 = {instancePath:instancePath+"/anchor",schemaPath:"#/properties/anchor/enum",keyword:"enum",params:{allowedValues: schema186.properties.anchor.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err20];
 }
@@ -10878,7 +11045,7 @@ errors++;
 if(data.wrapPolicy !== undefined){
 let data10 = data.wrapPolicy;
 if(!(((data10 === "none") || (data10 === "word")) || (data10 === "character"))){
-const err27 = {instancePath:instancePath+"/wrapPolicy",schemaPath:"#/properties/wrapPolicy/enum",keyword:"enum",params:{allowedValues: schema182.properties.wrapPolicy.enum},message:"must be equal to one of the allowed values"};
+const err27 = {instancePath:instancePath+"/wrapPolicy",schemaPath:"#/properties/wrapPolicy/enum",keyword:"enum",params:{allowedValues: schema186.properties.wrapPolicy.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err27];
 }
@@ -10994,16 +11161,16 @@ vErrors.push(err36);
 }
 errors++;
 }
-validate95.errors = vErrors;
+validate97.errors = vErrors;
 return errors === 0;
 }
-validate95.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate97.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate88(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate90(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate88.evaluated;
+const evaluated0 = validate90.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -11216,14 +11383,14 @@ errors++;
 }
 }
 if(data.craft !== undefined){
-if(!(validate89(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
+if(!(validate91(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate91.errors : vErrors.concat(validate91.errors);
 errors = vErrors.length;
 }
 }
 if(data.designMetrics !== undefined){
-if(!(validate95(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate95.errors : vErrors.concat(validate95.errors);
+if(!(validate97(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate97.errors : vErrors.concat(validate97.errors);
 errors = vErrors.length;
 }
 }
@@ -11269,7 +11436,7 @@ errors++;
 if(data11.process !== undefined){
 let data12 = data11.process;
 if(!(((((((((((data12 === "screen_print") || (data12 === "pad_print")) || (data12 === "digital_print")) || (data12 === "offset_print")) || (data12 === "white_underbase")) || (data12 === "varnish")) || (data12 === "hot_stamp_foil")) || (data12 === "emboss")) || (data12 === "deboss")) || (data12 === "in_mold")) || (data12 === "batch_code"))){
-const err21 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema185.properties.process.enum},message:"must be equal to one of the allowed values"};
+const err21 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema189.properties.process.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err21];
 }
@@ -11351,7 +11518,7 @@ errors++;
 if(data11.requiredMask !== undefined){
 let data14 = data11.requiredMask;
 if(!(((((data14 === "color") || (data14 === "metalness")) || (data14 === "roughness")) || (data14 === "bump")) || (data14 === "white_underbase"))){
-const err27 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema185.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+const err27 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema189.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err27];
 }
@@ -11396,24 +11563,24 @@ vErrors.push(err30);
 }
 errors++;
 }
-validate88.errors = vErrors;
+validate90.errors = vErrors;
 return errors === 0;
 }
-validate88.evaluated = {"props":{"id":true,"x":true,"y":true,"rotation":true,"opacity":true,"visible":true,"locked":true,"zIndex":true,"craft":true,"designMetrics":true,"processes":true},"dynamicProps":false,"dynamicItems":false};
+validate90.evaluated = {"props":{"id":true,"x":true,"y":true,"rotation":true,"opacity":true,"visible":true,"locked":true,"zIndex":true,"craft":true,"designMetrics":true,"processes":true},"dynamicProps":false,"dynamicItems":false};
 
 
-function validate87(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate89(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate87.evaluated;
+const evaluated0 = validate89.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
 if(evaluated0.dynamicItems){
 evaluated0.items = undefined;
 }
-if(!(validate88(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate88.errors : vErrors.concat(validate88.errors);
+if(!(validate90(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate90.errors : vErrors.concat(validate90.errors);
 errors = vErrors.length;
 }
 if(data && typeof data == "object" && !Array.isArray(data)){
@@ -11608,7 +11775,7 @@ vErrors.push(err18);
 errors++;
 }
 for(const key0 in data){
-if(!(func23.call(schema162.allOf[1].properties, key0))){
+if(!(func23.call(schema166.allOf[1].properties, key0))){
 const err19 = {instancePath,schemaPath:"#/allOf/1/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err19];
@@ -11740,7 +11907,7 @@ vErrors.push(err29);
 }
 errors++;
 }
-if(!pattern14.test(data5)){
+if(!pattern13.test(data5)){
 const err30 = {instancePath:instancePath+"/fontStack/" + i0,schemaPath:"#/allOf/1/properties/fontStack/items/pattern",keyword:"pattern",params:{pattern: "^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"},message:"must match pattern \""+"^(?=.*[^ ])[\\p{L}\\p{N} ._-]+$"+"\""};
 if(vErrors === null){
 vErrors = [err30];
@@ -11810,7 +11977,7 @@ passing0 = 0;
 }
 const _errs23 = errors;
 if(!((data7 === "normal") || (data7 === "bold"))){
-const err35 = {instancePath:instancePath+"/fontWeight",schemaPath:"#/allOf/1/properties/fontWeight/oneOf/1/enum",keyword:"enum",params:{allowedValues: schema162.allOf[1].properties.fontWeight.oneOf[1].enum},message:"must be equal to one of the allowed values"};
+const err35 = {instancePath:instancePath+"/fontWeight",schemaPath:"#/allOf/1/properties/fontWeight/oneOf/1/enum",keyword:"enum",params:{allowedValues: schema166.allOf[1].properties.fontWeight.oneOf[1].enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err35];
 }
@@ -11941,7 +12108,7 @@ errors++;
 if(data.align !== undefined){
 let data12 = data.align;
 if(!(((data12 === "left") || (data12 === "center")) || (data12 === "right"))){
-const err44 = {instancePath:instancePath+"/align",schemaPath:"#/allOf/1/properties/align/enum",keyword:"enum",params:{allowedValues: schema162.allOf[1].properties.align.enum},message:"must be equal to one of the allowed values"};
+const err44 = {instancePath:instancePath+"/align",schemaPath:"#/allOf/1/properties/align/enum",keyword:"enum",params:{allowedValues: schema166.allOf[1].properties.align.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err44];
 }
@@ -11966,7 +12133,7 @@ errors++;
 if(data.direction !== undefined){
 let data14 = data.direction;
 if(!((data14 === "horizontal") || (data14 === "vertical"))){
-const err46 = {instancePath:instancePath+"/direction",schemaPath:"#/allOf/1/properties/direction/enum",keyword:"enum",params:{allowedValues: schema162.allOf[1].properties.direction.enum},message:"must be equal to one of the allowed values"};
+const err46 = {instancePath:instancePath+"/direction",schemaPath:"#/allOf/1/properties/direction/enum",keyword:"enum",params:{allowedValues: schema166.allOf[1].properties.direction.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err46];
 }
@@ -11979,7 +12146,7 @@ errors++;
 if(data.writingDirection !== undefined){
 let data15 = data.writingDirection;
 if(!(((data15 === "auto") || (data15 === "ltr")) || (data15 === "rtl"))){
-const err47 = {instancePath:instancePath+"/writingDirection",schemaPath:"#/allOf/1/properties/writingDirection/enum",keyword:"enum",params:{allowedValues: schema162.allOf[1].properties.writingDirection.enum},message:"must be equal to one of the allowed values"};
+const err47 = {instancePath:instancePath+"/writingDirection",schemaPath:"#/allOf/1/properties/writingDirection/enum",keyword:"enum",params:{allowedValues: schema166.allOf[1].properties.writingDirection.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err47];
 }
@@ -12091,14 +12258,14 @@ errors++;
 }
 }
 if(data.craft !== undefined){
-if(!(validate89(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
+if(!(validate91(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate91.errors : vErrors.concat(validate91.errors);
 errors = vErrors.length;
 }
 }
 if(data.designMetrics !== undefined){
-if(!(validate95(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate95.errors : vErrors.concat(validate95.errors);
+if(!(validate97(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate97.errors : vErrors.concat(validate97.errors);
 errors = vErrors.length;
 }
 }
@@ -12144,7 +12311,7 @@ errors++;
 if(data27.process !== undefined){
 let data28 = data27.process;
 if(!(((((((((((data28 === "screen_print") || (data28 === "pad_print")) || (data28 === "digital_print")) || (data28 === "offset_print")) || (data28 === "white_underbase")) || (data28 === "varnish")) || (data28 === "hot_stamp_foil")) || (data28 === "emboss")) || (data28 === "deboss")) || (data28 === "in_mold")) || (data28 === "batch_code"))){
-const err59 = {instancePath:instancePath+"/processes/" + i1+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema185.properties.process.enum},message:"must be equal to one of the allowed values"};
+const err59 = {instancePath:instancePath+"/processes/" + i1+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema189.properties.process.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err59];
 }
@@ -12226,7 +12393,7 @@ errors++;
 if(data27.requiredMask !== undefined){
 let data30 = data27.requiredMask;
 if(!(((((data30 === "color") || (data30 === "metalness")) || (data30 === "roughness")) || (data30 === "bump")) || (data30 === "white_underbase"))){
-const err65 = {instancePath:instancePath+"/processes/" + i1+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema185.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+const err65 = {instancePath:instancePath+"/processes/" + i1+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema189.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err65];
 }
@@ -12271,25 +12438,25 @@ vErrors.push(err68);
 }
 errors++;
 }
-validate87.errors = vErrors;
+validate89.errors = vErrors;
 return errors === 0;
 }
-validate87.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate89.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema197 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"type":"number","minimum":1,"maximum":8192},"naturalHeight":{"type":"number","minimum":1,"maximum":8192},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]};
+const schema201 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","src","naturalWidth","naturalHeight","width","height","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"image"},"src":{"type":"string","minLength":1},"fit":{"enum":["contain","cover","stretch"]},"naturalWidth":{"type":"number","minimum":1,"maximum":8192},"naturalHeight":{"type":"number","minimum":1,"maximum":8192},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}}}]};
 
-function validate102(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate104(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate102.evaluated;
+const evaluated0 = validate104.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
 if(evaluated0.dynamicItems){
 evaluated0.items = undefined;
 }
-if(!(validate88(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate88.errors : vErrors.concat(validate88.errors);
+if(!(validate90(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate90.errors : vErrors.concat(validate90.errors);
 errors = vErrors.length;
 }
 if(data && typeof data == "object" && !Array.isArray(data)){
@@ -12444,7 +12611,7 @@ vErrors.push(err14);
 errors++;
 }
 for(const key0 in data){
-if(!(func23.call(schema197.allOf[1].properties, key0))){
+if(!(func23.call(schema201.allOf[1].properties, key0))){
 const err15 = {instancePath,schemaPath:"#/allOf/1/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err15];
@@ -12520,7 +12687,7 @@ errors++;
 if(data.fit !== undefined){
 let data3 = data.fit;
 if(!(((data3 === "contain") || (data3 === "cover")) || (data3 === "stretch"))){
-const err21 = {instancePath:instancePath+"/fit",schemaPath:"#/allOf/1/properties/fit/enum",keyword:"enum",params:{allowedValues: schema197.allOf[1].properties.fit.enum},message:"must be equal to one of the allowed values"};
+const err21 = {instancePath:instancePath+"/fit",schemaPath:"#/allOf/1/properties/fit/enum",keyword:"enum",params:{allowedValues: schema201.allOf[1].properties.fit.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err21];
 }
@@ -12716,14 +12883,14 @@ errors++;
 }
 }
 if(data.craft !== undefined){
-if(!(validate89(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
+if(!(validate91(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate91.errors : vErrors.concat(validate91.errors);
 errors = vErrors.length;
 }
 }
 if(data.designMetrics !== undefined){
-if(!(validate95(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate95.errors : vErrors.concat(validate95.errors);
+if(!(validate97(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate97.errors : vErrors.concat(validate97.errors);
 errors = vErrors.length;
 }
 }
@@ -12769,7 +12936,7 @@ errors++;
 if(data18.process !== undefined){
 let data19 = data18.process;
 if(!(((((((((((data19 === "screen_print") || (data19 === "pad_print")) || (data19 === "digital_print")) || (data19 === "offset_print")) || (data19 === "white_underbase")) || (data19 === "varnish")) || (data19 === "hot_stamp_foil")) || (data19 === "emboss")) || (data19 === "deboss")) || (data19 === "in_mold")) || (data19 === "batch_code"))){
-const err40 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema185.properties.process.enum},message:"must be equal to one of the allowed values"};
+const err40 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema189.properties.process.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err40];
 }
@@ -12851,7 +13018,7 @@ errors++;
 if(data18.requiredMask !== undefined){
 let data21 = data18.requiredMask;
 if(!(((((data21 === "color") || (data21 === "metalness")) || (data21 === "roughness")) || (data21 === "bump")) || (data21 === "white_underbase"))){
-const err46 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema185.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+const err46 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema189.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err46];
 }
@@ -12896,18 +13063,18 @@ vErrors.push(err49);
 }
 errors++;
 }
-validate102.errors = vErrors;
+validate104.errors = vErrors;
 return errors === 0;
 }
-validate102.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate104.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
-const schema206 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]};
-const schema207 = {"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}};
+const schema210 = {"allOf":[{"$ref":"#/$defs/commonLayer"},{"type":"object","additionalProperties":false,"required":["id","kind","shape","width","height","fill","stroke","strokeWidth","cornerRadius","x","y","rotation","opacity","visible","locked","zIndex","craft"],"properties":{"id":{"type":"string","minLength":1},"kind":{"const":"shape"},"shape":{"enum":["rectangle","ellipse","triangle","diamond","polygon","star","line","wave","burst","cross","bracket","dot-grid","frame","path"]},"geometry":{"$ref":"#/$defs/shapeGeometry"},"width":{"$ref":"#/$defs/finiteNumber"},"height":{"$ref":"#/$defs/finiteNumber"},"fill":{"$ref":"#/$defs/color"},"stroke":{"$ref":"#/$defs/color"},"strokeWidth":{"$ref":"#/$defs/finiteNumber"},"cornerRadius":{"$ref":"#/$defs/finiteNumber"},"pathData":{"type":"string","minLength":1,"maxLength":131072},"pathViewBox":{"type":"array","prefixItems":[{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"},{"$ref":"#/$defs/finiteNumber"}],"items":false,"minItems":4,"maxItems":4},"fillRule":{"enum":["nonzero","evenodd"]},"x":{"$ref":"#/$defs/finiteNumber"},"y":{"$ref":"#/$defs/finiteNumber"},"rotation":{"$ref":"#/$defs/finiteNumber"},"opacity":{"$ref":"#/$defs/finiteNumber"},"visible":{"type":"boolean"},"locked":{"type":"boolean"},"zIndex":{"$ref":"#/$defs/finiteNumber"},"craft":{"$ref":"#/$defs/craftList"},"designMetrics":{"$ref":"#/$defs/designMetrics"},"processes":{"type":"array","maxItems":32,"items":{"$ref":"#/$defs/process"}}},"allOf":[{"if":{"properties":{"shape":{"const":"path"}},"required":["shape"]},"then":{"required":["pathData","pathViewBox"],"properties":{"pathData":true,"pathViewBox":true}}}]}]};
+const schema211 = {"type":"object","additionalProperties":false,"properties":{"sides":{"$ref":"#/$defs/finiteNumber"},"points":{"$ref":"#/$defs/finiteNumber"},"innerRatio":{"$ref":"#/$defs/finiteNumber"},"amplitude":{"$ref":"#/$defs/finiteNumber"},"frequency":{"$ref":"#/$defs/finiteNumber"},"arrowStart":{"type":"boolean"},"arrowEnd":{"type":"boolean"},"parallel":{"type":"boolean"},"dash":{"type":"array","items":{"$ref":"#/$defs/finiteNumber"}},"inset":{"$ref":"#/$defs/finiteNumber"},"rows":{"$ref":"#/$defs/finiteNumber"},"columns":{"$ref":"#/$defs/finiteNumber"},"gap":{"$ref":"#/$defs/finiteNumber"}}};
 
-function validate109(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate111(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate109.evaluated;
+const evaluated0 = validate111.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -12916,7 +13083,7 @@ evaluated0.items = undefined;
 }
 if(data && typeof data == "object" && !Array.isArray(data)){
 for(const key0 in data){
-if(!(func23.call(schema207.properties, key0))){
+if(!(func23.call(schema211.properties, key0))){
 const err0 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err0];
@@ -13120,24 +13287,24 @@ vErrors.push(err15);
 }
 errors++;
 }
-validate109.errors = vErrors;
+validate111.errors = vErrors;
 return errors === 0;
 }
-validate109.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate111.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate107(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate109(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate107.evaluated;
+const evaluated0 = validate109.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
 if(evaluated0.dynamicItems){
 evaluated0.items = undefined;
 }
-if(!(validate88(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate88.errors : vErrors.concat(validate88.errors);
+if(!(validate90(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate90.errors : vErrors.concat(validate90.errors);
 errors = vErrors.length;
 }
 const _errs4 = errors;
@@ -13395,7 +13562,7 @@ vErrors.push(err21);
 errors++;
 }
 for(const key0 in data){
-if(!(func23.call(schema206.allOf[1].properties, key0))){
+if(!(func23.call(schema210.allOf[1].properties, key0))){
 const err22 = {instancePath,schemaPath:"#/allOf/1/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err22];
@@ -13446,7 +13613,7 @@ errors++;
 if(data.shape !== undefined){
 let data3 = data.shape;
 if(!((((((((((((((data3 === "rectangle") || (data3 === "ellipse")) || (data3 === "triangle")) || (data3 === "diamond")) || (data3 === "polygon")) || (data3 === "star")) || (data3 === "line")) || (data3 === "wave")) || (data3 === "burst")) || (data3 === "cross")) || (data3 === "bracket")) || (data3 === "dot-grid")) || (data3 === "frame")) || (data3 === "path"))){
-const err26 = {instancePath:instancePath+"/shape",schemaPath:"#/allOf/1/properties/shape/enum",keyword:"enum",params:{allowedValues: schema206.allOf[1].properties.shape.enum},message:"must be equal to one of the allowed values"};
+const err26 = {instancePath:instancePath+"/shape",schemaPath:"#/allOf/1/properties/shape/enum",keyword:"enum",params:{allowedValues: schema210.allOf[1].properties.shape.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err26];
 }
@@ -13457,8 +13624,8 @@ errors++;
 }
 }
 if(data.geometry !== undefined){
-if(!(validate109(data.geometry, {instancePath:instancePath+"/geometry",parentData:data,parentDataProperty:"geometry",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate109.errors : vErrors.concat(validate109.errors);
+if(!(validate111(data.geometry, {instancePath:instancePath+"/geometry",parentData:data,parentDataProperty:"geometry",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate111.errors : vErrors.concat(validate111.errors);
 errors = vErrors.length;
 }
 }
@@ -13721,7 +13888,7 @@ errors++;
 if(data.fillRule !== undefined){
 let data17 = data.fillRule;
 if(!((data17 === "nonzero") || (data17 === "evenodd"))){
-const err48 = {instancePath:instancePath+"/fillRule",schemaPath:"#/allOf/1/properties/fillRule/enum",keyword:"enum",params:{allowedValues: schema206.allOf[1].properties.fillRule.enum},message:"must be equal to one of the allowed values"};
+const err48 = {instancePath:instancePath+"/fillRule",schemaPath:"#/allOf/1/properties/fillRule/enum",keyword:"enum",params:{allowedValues: schema210.allOf[1].properties.fillRule.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err48];
 }
@@ -13821,14 +13988,14 @@ errors++;
 }
 }
 if(data.craft !== undefined){
-if(!(validate89(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
+if(!(validate91(data.craft, {instancePath:instancePath+"/craft",parentData:data,parentDataProperty:"craft",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate91.errors : vErrors.concat(validate91.errors);
 errors = vErrors.length;
 }
 }
 if(data.designMetrics !== undefined){
-if(!(validate95(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate95.errors : vErrors.concat(validate95.errors);
+if(!(validate97(data.designMetrics, {instancePath:instancePath+"/designMetrics",parentData:data,parentDataProperty:"designMetrics",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate97.errors : vErrors.concat(validate97.errors);
 errors = vErrors.length;
 }
 }
@@ -13874,7 +14041,7 @@ errors++;
 if(data28.process !== undefined){
 let data29 = data28.process;
 if(!(((((((((((data29 === "screen_print") || (data29 === "pad_print")) || (data29 === "digital_print")) || (data29 === "offset_print")) || (data29 === "white_underbase")) || (data29 === "varnish")) || (data29 === "hot_stamp_foil")) || (data29 === "emboss")) || (data29 === "deboss")) || (data29 === "in_mold")) || (data29 === "batch_code"))){
-const err59 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema185.properties.process.enum},message:"must be equal to one of the allowed values"};
+const err59 = {instancePath:instancePath+"/processes/" + i0+"/process",schemaPath:"#/$defs/process/properties/process/enum",keyword:"enum",params:{allowedValues: schema189.properties.process.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err59];
 }
@@ -13956,7 +14123,7 @@ errors++;
 if(data28.requiredMask !== undefined){
 let data31 = data28.requiredMask;
 if(!(((((data31 === "color") || (data31 === "metalness")) || (data31 === "roughness")) || (data31 === "bump")) || (data31 === "white_underbase"))){
-const err65 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema185.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
+const err65 = {instancePath:instancePath+"/processes/" + i0+"/requiredMask",schemaPath:"#/$defs/process/properties/requiredMask/enum",keyword:"enum",params:{allowedValues: schema189.properties.requiredMask.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err65];
 }
@@ -14001,16 +14168,16 @@ vErrors.push(err68);
 }
 errors++;
 }
-validate107.errors = vErrors;
+validate109.errors = vErrors;
 return errors === 0;
 }
-validate107.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate109.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate86(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate88(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate86.evaluated;
+const evaluated0 = validate88.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -14021,8 +14188,8 @@ const _errs0 = errors;
 let valid0 = false;
 let passing0 = null;
 const _errs1 = errors;
-if(!(validate87(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate87.errors : vErrors.concat(validate87.errors);
+if(!(validate89(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
 errors = vErrors.length;
 }
 var _valid0 = _errs1 === errors;
@@ -14032,8 +14199,8 @@ passing0 = 0;
 var props0 = true;
 }
 const _errs2 = errors;
-if(!(validate102(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate102.errors : vErrors.concat(validate102.errors);
+if(!(validate104(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate104.errors : vErrors.concat(validate104.errors);
 errors = vErrors.length;
 }
 var _valid0 = _errs2 === errors;
@@ -14050,8 +14217,8 @@ props0 = true;
 }
 }
 const _errs3 = errors;
-if(!(validate107(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate107.errors : vErrors.concat(validate107.errors);
+if(!(validate109(data, {instancePath,parentData,parentDataProperty,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate109.errors : vErrors.concat(validate109.errors);
 errors = vErrors.length;
 }
 var _valid0 = _errs3 === errors;
@@ -14090,17 +14257,17 @@ vErrors = null;
 }
 }
 }
-validate86.errors = vErrors;
+validate88.errors = vErrors;
 evaluated0.props = props0;
 return errors === 0;
 }
-validate86.evaluated = {"dynamicProps":true,"dynamicItems":false};
+validate88.evaluated = {"dynamicProps":true,"dynamicItems":false};
 
 
-function validate72(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate74(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate72.evaluated;
+const evaluated0 = validate74.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -14312,7 +14479,7 @@ vErrors.push(err16);
 errors++;
 }
 for(const key0 in data){
-if(!(func23.call(schema141.properties, key0))){
+if(!(func23.call(schema145.properties, key0))){
 const err17 = {instancePath,schemaPath:"#/additionalProperties",keyword:"additionalProperties",params:{additionalProperty: key0},message:"must NOT have additional properties"};
 if(vErrors === null){
 vErrors = [err17];
@@ -14426,7 +14593,7 @@ errors++;
 if(data.surfaceMode !== undefined){
 let data6 = data.surfaceMode;
 if(!((data6 === "overlay") || (data6 === "replace"))){
-const err26 = {instancePath:instancePath+"/surfaceMode",schemaPath:"#/properties/surfaceMode/enum",keyword:"enum",params:{allowedValues: schema141.properties.surfaceMode.enum},message:"must be equal to one of the allowed values"};
+const err26 = {instancePath:instancePath+"/surfaceMode",schemaPath:"#/properties/surfaceMode/enum",keyword:"enum",params:{allowedValues: schema145.properties.surfaceMode.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err26];
 }
@@ -14439,7 +14606,7 @@ errors++;
 if(data.side !== undefined){
 let data7 = data.side;
 if(!(((((((((data7 === "front") || (data7 === "back")) || (data7 === "left")) || (data7 === "right")) || (data7 === "wrap")) || (data7 === "top")) || (data7 === "bottom")) || (data7 === "neck")) || (data7 === "custom"))){
-const err27 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema141.properties.side.enum},message:"must be equal to one of the allowed values"};
+const err27 = {instancePath:instancePath+"/side",schemaPath:"#/properties/side/enum",keyword:"enum",params:{allowedValues: schema145.properties.side.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err27];
 }
@@ -14450,8 +14617,8 @@ errors++;
 }
 }
 if(data.remap !== undefined){
-if(!(validate73(data.remap, {instancePath:instancePath+"/remap",parentData:data,parentDataProperty:"remap",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate73.errors : vErrors.concat(validate73.errors);
+if(!(validate75(data.remap, {instancePath:instancePath+"/remap",parentData:data,parentDataProperty:"remap",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate75.errors : vErrors.concat(validate75.errors);
 errors = vErrors.length;
 }
 }
@@ -15123,7 +15290,7 @@ errors++;
 if(data22.dieCutShape !== undefined){
 let data28 = data22.dieCutShape;
 if(!(((data28 === "rectangle") || (data28 === "rounded-rectangle")) || (data28 === "custom"))){
-const err85 = {instancePath:instancePath+"/printSpec/dieCutShape",schemaPath:"#/$defs/printSpec/properties/dieCutShape/enum",keyword:"enum",params:{allowedValues: schema151.properties.dieCutShape.enum},message:"must be equal to one of the allowed values"};
+const err85 = {instancePath:instancePath+"/printSpec/dieCutShape",schemaPath:"#/$defs/printSpec/properties/dieCutShape/enum",keyword:"enum",params:{allowedValues: schema155.properties.dieCutShape.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err85];
 }
@@ -15223,7 +15390,7 @@ errors++;
 if(data.carrier !== undefined){
 let data31 = data.carrier;
 if(!((((((data31 === "direct_surface_print") || (data31 === "applied_label")) || (data31 === "clear_label")) || (data31 === "in_mold")) || (data31 === "foil_or_ink_only")) || (data31 === "bare"))){
-const err92 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema152.enum},message:"must be equal to one of the allowed values"};
+const err92 = {instancePath:instancePath+"/carrier",schemaPath:"#/$defs/carrier/enum",keyword:"enum",params:{allowedValues: schema156.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err92];
 }
@@ -15396,15 +15563,15 @@ errors++;
 }
 }
 if(data.substrate !== undefined){
-if(!(validate80(data.substrate, {instancePath:instancePath+"/substrate",parentData:data,parentDataProperty:"substrate",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate80.errors : vErrors.concat(validate80.errors);
+if(!(validate82(data.substrate, {instancePath:instancePath+"/substrate",parentData:data,parentDataProperty:"substrate",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate82.errors : vErrors.concat(validate82.errors);
 errors = vErrors.length;
 }
 }
 if(data.placementPolicy !== undefined){
 let data37 = data.placementPolicy;
 if(!(((data37 === "fit") || (data37 === "crop-approved")) || (data37 === "block"))){
-const err107 = {instancePath:instancePath+"/placementPolicy",schemaPath:"#/properties/placementPolicy/enum",keyword:"enum",params:{allowedValues: schema141.properties.placementPolicy.enum},message:"must be equal to one of the allowed values"};
+const err107 = {instancePath:instancePath+"/placementPolicy",schemaPath:"#/properties/placementPolicy/enum",keyword:"enum",params:{allowedValues: schema145.properties.placementPolicy.enum},message:"must be equal to one of the allowed values"};
 if(vErrors === null){
 vErrors = [err107];
 }
@@ -15450,8 +15617,8 @@ errors++;
 }
 }
 if(data.designBinding !== undefined){
-if(!(validate82(data.designBinding, {instancePath:instancePath+"/designBinding",parentData:data,parentDataProperty:"designBinding",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate82.errors : vErrors.concat(validate82.errors);
+if(!(validate84(data.designBinding, {instancePath:instancePath+"/designBinding",parentData:data,parentDataProperty:"designBinding",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate84.errors : vErrors.concat(validate84.errors);
 errors = vErrors.length;
 }
 }
@@ -15460,8 +15627,8 @@ let data40 = data.layers;
 if(Array.isArray(data40)){
 const len1 = data40.length;
 for(let i1=0; i1<len1; i1++){
-if(!(validate86(data40[i1], {instancePath:instancePath+"/layers/" + i1,parentData:data40,parentDataProperty:i1,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate86.errors : vErrors.concat(validate86.errors);
+if(!(validate88(data40[i1], {instancePath:instancePath+"/layers/" + i1,parentData:data40,parentDataProperty:i1,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate88.errors : vErrors.concat(validate88.errors);
 errors = vErrors.length;
 }
 }
@@ -15472,8 +15639,8 @@ if(data40.length > 0){
 let count0 = 0;
 for(let i2=0; i2<len2; i2++){
 const _errs92 = errors;
-if(!(validate102(data40[i2], {instancePath:instancePath+"/layers/" + i2,parentData:data40,parentDataProperty:i2,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate102.errors : vErrors.concat(validate102.errors);
+if(!(validate104(data40[i2], {instancePath:instancePath+"/layers/" + i2,parentData:data40,parentDataProperty:i2,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate104.errors : vErrors.concat(validate104.errors);
 errors = vErrors.length;
 }
 var _valid1 = _errs92 === errors;
@@ -15548,8 +15715,8 @@ errors++;
 }
 }
 if(data43.craft !== undefined){
-if(!(validate89(data43.craft, {instancePath:instancePath+"/globalCraft/craft",parentData:data43,parentDataProperty:"craft",rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate89.errors : vErrors.concat(validate89.errors);
+if(!(validate91(data43.craft, {instancePath:instancePath+"/globalCraft/craft",parentData:data43,parentDataProperty:"craft",rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate91.errors : vErrors.concat(validate91.errors);
 errors = vErrors.length;
 }
 }
@@ -15727,17 +15894,17 @@ vErrors.push(err128);
 }
 errors++;
 }
-validate72.errors = vErrors;
+validate74.errors = vErrors;
 return errors === 0;
 }
-validate72.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate74.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
 
 
-function validate71(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
+function validate73(data, {instancePath="", parentData, parentDataProperty, rootData=data, dynamicAnchors={}}={}){
 /*# sourceURL="https://realibox.local/schemas/label-project-v3.schema.json" */;
 let vErrors = null;
 let errors = 0;
-const evaluated0 = validate71.evaluated;
+const evaluated0 = validate73.evaluated;
 if(evaluated0.dynamicProps){
 evaluated0.props = undefined;
 }
@@ -15826,8 +15993,8 @@ errors++;
 }
 const len0 = data2.length;
 for(let i0=0; i0<len0; i0++){
-if(!(validate72(data2[i0], {instancePath:instancePath+"/areas/" + i0,parentData:data2,parentDataProperty:i0,rootData,dynamicAnchors}))){
-vErrors = vErrors === null ? validate72.errors : vErrors.concat(validate72.errors);
+if(!(validate74(data2[i0], {instancePath:instancePath+"/areas/" + i0,parentData:data2,parentDataProperty:i0,rootData,dynamicAnchors}))){
+vErrors = vErrors === null ? validate74.errors : vErrors.concat(validate74.errors);
 errors = vErrors.length;
 }
 }
@@ -15854,7 +16021,7 @@ vErrors.push(err8);
 }
 errors++;
 }
-validate71.errors = vErrors;
+validate73.errors = vErrors;
 return errors === 0;
 }
-validate71.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};
+validate73.evaluated = {"props":true,"dynamicProps":false,"dynamicItems":false};

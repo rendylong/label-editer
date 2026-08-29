@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { Blob as NodeBlob } from 'node:buffer'
+import { Blob as NodeBlob, Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { compileBlueprintToSpecAreas } from '../src/agent/blueprintCompiler'
@@ -11,11 +11,12 @@ import type { DesignReviewManifestV1, EditorHandoffV2, LayoutBlueprintV1 } from 
 import { validateLayoutBlueprint } from '../src/agent/designContracts'
 import { buildReviewCapturePlan } from '../src/agent/reviewCapturePlan'
 import { applyStructuredLabelSpec } from '../src/app/labelSpec'
+import { serializeLabelProject } from '../src/app/projectSchema'
 import { designAssetReadinessKey, designFontReadinessKey, isBakeAssetReadyForArea } from '../src/label/exportReadiness'
 import { beginImageAssetLoad, bindImageAssetReceipt } from '../src/label/imageAssetReceipt'
 import type { LabelAreaConfig } from '../src/label/types'
 import { useLabelStore, useModelStore, useUiStore, type BakeResult } from '../src/state/stores'
-import { pngBlob as structuralPngBlob } from './pngTestUtils'
+import { pngBlob as structuralPngBlob, pngBytes } from './pngTestUtils'
 import carrierRegressionFixture from './fixtures/blueprints/carrier-regressions-v1.json'
 
 const external = vi.hoisted(() => ({
@@ -200,7 +201,7 @@ function sha256(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function reviewFixture(options: { withImage?: boolean } = {}): { request: ReviewEvidenceRequest; owner: LabelAreaConfig } {
+function reviewFixture(options: { withImage?: boolean; targetAspect?: number; placementPolicy?: 'block' | 'fit' } = {}): { request: ReviewEvidenceRequest; owner: LabelAreaConfig } {
   const imageAsset = {
     id: 'mark', path: 'assets/mark.png', sha256: 'a'.repeat(64), mimeType: 'image/png', width: 2, height: 1,
   }
@@ -212,7 +213,7 @@ function reviewFixture(options: { withImage?: boolean } = {}): { request: Review
     areas: [{
       id: 'front', side: 'front', carrier: 'direct_surface_print',
       artboard: { widthMm: 40, heightMm: 40, background: 'transparent' },
-      placementIntent: 'Centered front.', placementPolicy: 'block',
+      placementIntent: 'Centered front.', placementPolicy: options.placementPolicy ?? 'block',
       layers: options.withImage ? [{
         id: 'mark', kind: 'image', boundsMm: { x: 4, y: 4, width: 32, height: 16 },
         anchor: 'top_left', rotation: 0, opacity: 1, visible: true, zIndex: 0,
@@ -227,19 +228,29 @@ function reviewFixture(options: { withImage?: boolean } = {}): { request: Review
   }
   const blueprintJson = JSON.stringify(blueprint)
   const blueprintSha = sha256(blueprintJson)
+  const designHtml = '<!doctype html><html><body><section style="width:1600px;height:1200px"></section></body></html>'
+  const artifactFiles = new Map<string, string | Uint8Array>([
+    ['mockup.html', designHtml],
+    ['mockup-front.png', pngBytes(1600, 1200)],
+    ['mockup-back.png', pngBytes(1600, 1200)],
+    ['areas/front.png', pngBytes(1200, 1200)],
+  ])
   const designManifest: DesignReviewManifestV1 = {
     version: 1, createdAt: '2026-08-27T10:00:00.000Z',
     blueprint: { revision: blueprint.revision, sha256: blueprintSha },
-    html: { sha256: '1'.repeat(64) }, references: [],
+    html: { sha256: sha256(designHtml) }, references: [],
     areas: [{ id: 'front', side: 'front', carrier: 'direct_surface_print' }],
     artifacts: [{
-      id: 'mockup-front', path: 'mockup-front.png', sha256: '2'.repeat(64), mimeType: 'image/png',
+      id: 'mockup-html', path: 'mockup.html', sha256: sha256(designHtml), mimeType: 'text/html',
+      width: 1600, height: 1200, viewKind: 'mockup-html',
+    }, {
+      id: 'mockup-front', path: 'mockup-front.png', sha256: sha256(artifactFiles.get('mockup-front.png')!), mimeType: 'image/png',
       width: 1600, height: 1200, viewKind: 'mockup-front',
     }, {
-      id: 'mockup-back', path: 'mockup-back.png', sha256: '3'.repeat(64), mimeType: 'image/png',
+      id: 'mockup-back', path: 'mockup-back.png', sha256: sha256(artifactFiles.get('mockup-back.png')!), mimeType: 'image/png',
       width: 1600, height: 1200, viewKind: 'mockup-back',
     }, {
-      id: 'mockup-area-front', path: 'areas/front.png', sha256: '4'.repeat(64), mimeType: 'image/png',
+      id: 'mockup-area-front', path: 'areas/front.png', sha256: sha256(artifactFiles.get('areas/front.png')!), mimeType: 'image/png',
       width: 1200, height: 1200, viewKind: 'mockup-area', areaId: 'front', carrier: 'direct_surface_print',
     }],
   }
@@ -264,7 +275,7 @@ function reviewFixture(options: { withImage?: boolean } = {}): { request: Review
     assets: [], production_constraints: {}, assumptions: [], blockers: [],
   }
   const shell = { ...area(), id: 'front', name: 'Front', side: 'front' as const, surfaceMode: 'overlay' as const }
-  shell.canvas = { width: 1024, height: 1024, aspect: 1 }
+  shell.canvas = { width: 1024, height: 1024, aspect: options.targetAspect ?? 1 }
   shell.layers = []
   shell.globalCraft = { craft: [] }
   delete shell.printSpec
@@ -289,7 +300,14 @@ function reviewFixture(options: { withImage?: boolean } = {}): { request: Review
   return {
     request: {
       width: 640, height: 640,
-      designGate: { handoff, blueprintJson, designReviewManifestJson },
+      designGate: {
+        handoff, blueprintJson, designReviewManifestJson,
+        currentDocumentJson: JSON.stringify(serializeLabelProject('bottle.glb', [owner])),
+        designReviewArtifacts: [
+          { path: 'design-review-manifest.json', base64: Buffer.from(designReviewManifestJson).toString('base64') },
+          ...[...artifactFiles].map(([artifactPath, bytes]) => ({ path: artifactPath, base64: Buffer.from(bytes).toString('base64') })),
+        ],
+      },
     },
     owner,
   }
@@ -965,6 +983,16 @@ describe('browser Agent clean production review runtime', () => {
     for (const [, init] of (fetch as ReturnType<typeof vi.fn>).mock.calls) {
       expect(init?.redirect).toBe('error')
     }
+  })
+
+  it('preserves an explicit fit policy for an aspect-mismatched production review', async () => {
+    const { request } = reviewFixture({ targetAspect: 2, placementPolicy: 'fit' })
+    registerReviewCapture()
+    acceptUploads()
+    await expect(createBrowserAgentBridge({ token, artifactUploadBase: '/session/s1/artifact' })
+      .renderReviewEvidence(request)).resolves.toMatchObject({
+      ok: true, data: { validation: { ready: true }, fidelity: { pass: true } },
+    })
   })
 
   it('supports two successful reviews in one session with stable result ids and distinct internal artifact locators', async () => {

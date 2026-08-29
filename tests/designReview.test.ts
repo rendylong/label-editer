@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { chromium } from 'playwright'
@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveLayerRenderTransform } from '../src/label/craft'
 import { traceValidatedSvgPath } from '../src/label/svgPath'
 import { validateVectorPath } from '../src/label/vectorPathValidation'
+import { areaArtifactToken } from '../src/agent/areaArtifactToken.mjs'
 // @ts-expect-error Pure Node ESM module is consumed directly by the internal renderer.
 import { buildDesignReviewManifest, captureDesignReview, renderBlueprintHtml, renderDesignReview, resolveCaptureDimensions } from '../scripts/lib/design-review.mjs'
 // @ts-expect-error Pure Node ESM runner is consumed directly by tests.
@@ -170,7 +171,8 @@ describe('blueprint-derived design review', () => {
     const result = await renderDesignReview({ blueprintPath, outputDir, width: 640, height: 480, pxPerMm: 5, createdAt: '2026-08-27T00:00:00.000Z', capture: fakeCapture() })
 
     expect(result.artifacts.map((artifact: any) => artifact.path)).toEqual(expect.arrayContaining([
-      'mockup.html', 'mockup-front.png', 'mockup-back.png', 'design-review-manifest.json', 'areas/front.png', 'areas/back.png',
+      'mockup.html', 'mockup-front.png', 'mockup-back.png', 'design-review-manifest.json',
+      `areas/${areaArtifactToken('front')}.png`, `areas/${areaArtifactToken('back')}.png`,
     ]))
     expect(result.manifest.blueprint).toEqual({ revision: 'rev-001', sha256: createHash('sha256').update(rawBlueprint).digest('hex') })
     expect(result.manifest.artifacts.every((artifact: any) => /^[a-f0-9]{64}$/.test(artifact.sha256))).toBe(true)
@@ -458,6 +460,29 @@ describe('blueprint-derived design review', () => {
       width: 640, height: 480,
     })
     expect(result.manifest.blueprint.revision).toBe('rev-001')
+  })
+
+  it('renders and captures a distinct clean artboard for every non-bare side beyond front and back', async () => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    const left = structuredClone(source.areas[0])
+    left.id = 'left-panel'
+    left.side = 'left'
+    left.layers = left.layers.map((layer: any) => ({ ...layer, id: `left-${layer.id}` }))
+    source.areas.push(left)
+    const blueprintPath = await writeFixture(root, source)
+
+    const result = await renderDesignReview({
+      blueprintPath, outputDir: path.join(root, 'three-area-review'), width: 640, height: 480, pxPerMm: 5,
+    })
+    const leftArtifact = result.manifest.artifacts.find((artifact: any) => artifact.areaId === 'left-panel')
+
+    expect(leftArtifact).toMatchObject({
+      path: `areas/${areaArtifactToken('left-panel')}.png`,
+      viewKind: 'mockup-area', width: 200, height: 300,
+    })
+    expect(result.html.match(new RegExp(`data-capture-area-token="${areaArtifactToken('left-panel')}"`, 'g'))).toHaveLength(1)
+    expect(result.html.match(/data-presentation-area-id="left-panel"/g) ?? []).toHaveLength(0)
   })
 
   it.each([
@@ -784,20 +809,115 @@ describe('blueprint-derived design review', () => {
       .toThrow(/applied_label.*opaque|opacity/i)
   })
 
-  it('publishes safe manifest paths that exactly match sanitized area files', async () => {
+  it('publishes shared digest-suffixed paths for opaque area ids that collide under lossy sanitization', async () => {
     const root = await temporaryDirectory()
     const source = blueprint()
-    source.areas[0].id = 'front:primary'
-    source.areas[1].id = 'back:primary'
+    source.areas[0].id = 'a:b'
+    source.areas[1].id = 'a-b'
     const blueprintPath = await writeFixture(root, source)
     const outputDir = path.join(root, 'safe-review')
 
     const result = await renderDesignReview({ blueprintPath, outputDir, width: 640, height: 480, pxPerMm: 5, capture: fakeCapture() })
     const paths = result.manifest.artifacts.filter((artifact: any) => artifact.viewKind === 'mockup-area').map((artifact: any) => artifact.path)
 
-    expect(paths).toEqual(['areas/front-primary.png', 'areas/back-primary.png'])
+    expect(paths).toEqual([
+      `areas/${areaArtifactToken('a:b')}.png`,
+      `areas/${areaArtifactToken('a-b')}.png`,
+    ])
+    expect(new Set(paths.map((entry: string) => entry.normalize('NFKC').toLowerCase())).size).toBe(2)
     await expect(readFile(path.join(outputDir, paths[0]))).resolves.toEqual(pngWithDimensions(200, 300))
     await expect(readFile(path.join(outputDir, paths[1]))).resolves.toEqual(pngWithDimensions(190, 290))
+  })
+
+  it('keeps Unicode, normalization, case, and custom-side area paths portable and distinct', async () => {
+    const root = await temporaryDirectory()
+    const cases = [
+      ['É', 'e\u0301'],
+      ['Case', 'case'],
+    ]
+    for (const [frontId, backId] of cases) {
+      const source = blueprint()
+      source.areas[0].id = frontId
+      source.areas[1].id = backId
+      const custom = structuredClone(source.areas[0])
+      custom.id = `${frontId}-custom`
+      custom.side = 'custom'
+      custom.layers = custom.layers.map((layer: any) => ({ ...layer, id: `${areaArtifactToken(custom.id)}-${layer.id}` }))
+      source.areas.push(custom)
+      const blueprintPath = await writeFixture(root, source)
+      const outputDir = path.join(root, `opaque-${areaArtifactToken(frontId)}`)
+
+      const result = await renderDesignReview({ blueprintPath, outputDir, width: 640, height: 480, pxPerMm: 5, capture: fakeCapture() })
+      const paths = result.manifest.artifacts
+        .filter((artifact: any) => artifact.viewKind === 'mockup-area')
+        .map((artifact: any) => artifact.path)
+      expect(paths).toEqual(source.areas.map((area: any) => `areas/${areaArtifactToken(area.id)}.png`))
+      expect(new Set(paths.map((entry: string) => entry.normalize('NFKC').toLowerCase())).size).toBe(3)
+    }
+  })
+
+  it('rejects a symlink blueprint before parsing or browser capture', async () => {
+    const root = await temporaryDirectory()
+    const realBlueprint = await writeFixture(root)
+    const link = path.join(root, 'linked-blueprint.json')
+    await symlink(path.basename(realBlueprint), link)
+    const capture = fakeCapture()
+
+    await expect(renderDesignReview({ blueprintPath: link, outputDir: path.join(root, 'linked-review'), capture }))
+      .rejects.toMatchObject({ code: 'PATH_NOT_ALLOWED' })
+    expect(capture).not.toHaveBeenCalled()
+  })
+
+  it('rejects an oversized blueprint before JSON parse or Chromium allocation', async () => {
+    const root = await temporaryDirectory()
+    const blueprintPath = path.join(root, 'oversized-blueprint.json')
+    await writeFile(blueprintPath, `${' '.repeat(5 * 1024 * 1024)}{}`)
+    const capture = fakeCapture()
+
+    await expect(renderDesignReview({ blueprintPath, outputDir: path.join(root, 'oversized-review'), capture }))
+      .rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT', message: expect.stringMatching(/bounded.*blueprint|blueprint.*size/i) })
+    expect(capture).not.toHaveBeenCalled()
+  })
+
+  it('rejects oversized reference evidence before retaining or launching Chromium', async () => {
+    const root = await temporaryDirectory()
+    const blueprintPath = await writeFixture(root)
+    const referencePath = path.join(root, 'oversized-reference.bin')
+    await writeFile(referencePath, Buffer.alloc(17 * 1024 * 1024, 1))
+    const capture = fakeCapture()
+
+    await expect(renderDesignReview({ blueprintPath, referencePaths: [referencePath], outputDir: path.join(root, 'oversized-reference-review'), capture }))
+      .rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT', message: expect.stringMatching(/reference.*bounded|reference.*size/i) })
+    expect(capture).not.toHaveBeenCalled()
+  })
+
+  it('rejects non-regular reference evidence before browser capture', async () => {
+    const root = await temporaryDirectory()
+    const blueprintPath = await writeFixture(root)
+    const capture = fakeCapture()
+    await expect(renderDesignReview({
+      blueprintPath, referencePaths: [path.join(root, 'assets')], outputDir: path.join(root, 'directory-reference'), capture,
+    })).rejects.toMatchObject({ code: 'PATH_NOT_ALLOWED' })
+    expect(capture).not.toHaveBeenCalled()
+  })
+
+  it('rejects aggregate decoded image pixels before retaining data URLs or launching Chromium', async () => {
+    const root = await temporaryDirectory()
+    const source = blueprint()
+    source.assets = Array.from({ length: 5 }, (_, index) => {
+      const bytes = pngWithDimensions(4096, 4096)
+      return {
+        id: `large-${index}`, path: `assets/large-${index}.png`, sha256: createHash('sha256').update(bytes).digest('hex'),
+        mimeType: 'image/png', width: 4096, height: 4096,
+      }
+    })
+    source.areas[0].layers = []
+    const blueprintPath = await writeFixture(root, source)
+    for (let index = 0; index < 5; index += 1) await writeFile(path.join(root, `assets/large-${index}.png`), pngWithDimensions(4096, 4096))
+    const capture = fakeCapture()
+    await expect(renderDesignReview({ blueprintPath, outputDir: path.join(root, 'aggregate-pixels'), capture }))
+      .rejects.toMatchObject({ code: 'INVALID_LAYOUT_BLUEPRINT', message: expect.stringMatching(/aggregate pixel/i) })
+    expect(capture).not.toHaveBeenCalled()
   })
 
   it.each([

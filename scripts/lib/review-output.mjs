@@ -99,7 +99,7 @@ function artifactFromView(view, sealed, areas) {
   }
 }
 
-export function buildReviewManifest({ createdAt, input, areas, evidence, artifacts }) {
+export function buildReviewManifest({ createdAt, input, resolvedProject, areas, evidence, artifacts }) {
   const sealedByResult = new Map(artifacts.map((artifact) => [artifact.resultId ?? artifact.id, artifact]))
   const manifestArtifacts = evidence.views.map((view) => {
     const sealed = sealedByResult.get(view.id)
@@ -110,6 +110,7 @@ export function buildReviewManifest({ createdAt, input, areas, evidence, artifac
     version: 1,
     createdAt,
     input: structuredClone(input),
+    resolvedProject: structuredClone(resolvedProject),
     blueprint: { revision: evidence.blueprintRevision, sha256: evidence.blueprintSha256 },
     designReviewManifest: { sha256: evidence.designReviewManifestSha256 },
     model: { fingerprint: evidence.modelFingerprint },
@@ -130,6 +131,18 @@ export function validateReviewManifest(manifest, context) {
     fail(error instanceof Error ? error.message : String(error))
   }
   assertEqual(manifest.input, context.input, 'Input binding')
+  assertEqual({
+    kind: context.evidence.inputKind,
+    revision: context.evidence.inputRevision,
+    sha256: context.evidence.inputSha256,
+  }, context.input, 'Captured input binding')
+  assertEqual(manifest.resolvedProject, context.resolvedProject, 'Resolved Project binding')
+  if (!(context.resolvedProjectBytes instanceof Uint8Array)
+    || context.resolvedProjectBytes.byteLength < 1
+    || context.resolvedProjectBytes.byteLength > 16 * 1024 * 1024
+    || sha256(context.resolvedProjectBytes) !== manifest.resolvedProject.sha256) {
+    fail('Resolved Project bytes do not match the manifest binding')
+  }
   assertEqual(manifest.blueprint, {
     revision: context.evidence.blueprintRevision,
     sha256: context.evidence.blueprintSha256,
@@ -195,9 +208,17 @@ export async function validateReviewDirectory(outputDirectory, context) {
   } catch (error) {
     fail(`Review manifest is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
   }
-  const expectedFiles = ['review-manifest.json', ...manifest.artifacts.map((artifact) => artifact.path)].sort()
+  const expectedFiles = ['review-manifest.json', manifest.resolvedProject.path, ...manifest.artifacts.map((artifact) => artifact.path)].sort()
   const actualFiles = entries.map((entry) => entry.name).sort()
   if (!equalJson(actualFiles, expectedFiles)) fail('Review directory does not contain the exact planned files')
+  const resolvedProjectPath = path.join(root, manifest.resolvedProject.path)
+  const resolvedProjectInfo = await lstat(resolvedProjectPath)
+  if (!resolvedProjectInfo.isFile() || resolvedProjectInfo.isSymbolicLink()
+    || resolvedProjectInfo.size < 1 || resolvedProjectInfo.size > 16 * 1024 * 1024
+    || await realpath(resolvedProjectPath) !== resolvedProjectPath) {
+    fail('Published resolved Project is not a bounded direct regular file')
+  }
+  const resolvedProjectBytes = new Uint8Array(await readFile(resolvedProjectPath))
   const sourceById = new Map(context.artifacts.map((artifact) => [artifact.resultId ?? artifact.id, artifact]))
   const artifacts = await Promise.all(manifest.artifacts.map(async (artifact) => {
     const source = sourceById.get(artifact.id)
@@ -210,5 +231,5 @@ export async function validateReviewDirectory(outputDirectory, context) {
     const bytes = new Uint8Array(await readFile(filePath))
     return { ...source, bytes, byteLength: bytes.byteLength, sha256: sha256(bytes) }
   }))
-  return validateReviewManifest(manifest, { ...context, artifacts })
+  return validateReviewManifest(manifest, { ...context, resolvedProjectBytes, artifacts })
 }

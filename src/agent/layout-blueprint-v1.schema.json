@@ -34,6 +34,7 @@
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
     },
+    "opaqueId": { "type": "string", "minLength": 1, "maxLength": 4096 },
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "boundedString": { "type": "string", "maxLength": 4096 },
     "carrier": {
@@ -239,13 +240,13 @@
       "additionalProperties": false,
       "required": ["id", "side", "carrier", "artboard", "placementIntent", "layers"],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
+        "id": { "$ref": "#/$defs/opaqueId" },
         "side": { "enum": ["front", "back", "left", "right", "wrap", "top", "bottom", "neck", "custom"] },
         "carrier": { "$ref": "#/$defs/carrier" },
         "artboard": { "$ref": "#/$defs/artboard" },
         "placementIntent": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "substrate": { "$ref": "#/$defs/substrate" },
-        "placementPolicy": { "enum": ["fit", "crop-approved", "block"] },
+        "placementPolicy": { "enum": ["fit", "crop-approved", "block"], "default": "block" },
         "layers": { "type": "array", "maxItems": 2048, "items": { "$ref": "#/$defs/layer" } }
       }
     }

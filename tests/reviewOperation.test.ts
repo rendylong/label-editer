@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -34,21 +34,23 @@ async function fixture() {
   const glbPath = path.join(root, 'bottle.glb')
   const handoffPath = path.join(root, 'editor-handoff.json')
   const blueprintPath = path.join(root, 'layout-blueprint.json')
-  const designManifestPath = path.join(root, 'design-review-manifest.json')
+  const designEvidenceRoot = path.join(root, 'design-review')
+  const designManifestPath = path.join(designEvidenceRoot, 'design-review-manifest.json')
   const outputDir = path.join(root, 'review')
   const document = project()
   const blueprint = `${JSON.stringify({ version: 1, revision: 'design-v1' })}\n`
   const designManifest = `${JSON.stringify({ version: 1, blueprint: { revision: 'design-v1' } })}\n`
   const handoff = {
     handoff_version: 2, status: 'approved',
-    source: { blueprint: 'layout-blueprint.json', design_review_manifest: 'design-review-manifest.json' },
+    source: { blueprint: 'layout-blueprint.json', design_review_manifest: 'design-review/design-review-manifest.json' },
   }
   await writeFile(inputPath, `${JSON.stringify(document)}\n`)
   await writeFile(glbPath, 'glb-original')
   await writeFile(handoffPath, `${JSON.stringify(handoff)}\n`)
   await writeFile(blueprintPath, blueprint)
+  await mkdir(designEvidenceRoot)
   await writeFile(designManifestPath, designManifest)
-  return { root, inputPath, glbPath, handoffPath, blueprintPath, designManifestPath, outputDir, document, blueprint, designManifest }
+  return { root, inputPath, glbPath, handoffPath, blueprintPath, designEvidenceRoot, designManifestPath, outputDir, document, blueprint, designManifest }
 }
 
 function harness(input: Awaited<ReturnType<typeof fixture>>, options: {
@@ -102,15 +104,16 @@ function harness(input: Awaited<ReturnType<typeof fixture>>, options: {
     async callBridge(_session: unknown, method: string) {
       calls.push(method)
       if (method === 'loadModel') return { ok: true, data: { name: 'bottle.glb', fingerprint: `sha256:${'4'.repeat(64)}`, meshes: [], warnings: [] }, warnings: [] }
-      if (method === 'applyProject') return { ok: true, data: { areaIds: ['front'] }, warnings: [] }
+      if (method === 'applyProject') return { ok: true, data: { areaIds: ['front'], project: input.document }, warnings: [] }
       if (method === 'waitForReady') return { ok: true, data: { ready: true }, warnings: [] }
       if (method === 'renderReviewEvidence') {
         await mutate('capture')
         return { ok: true, data: {
-          inputKind: 'label-project-v3', inputRevision: revisionOf(input.document), inputSha256: sha256(JSON.stringify(input.document)),
+          inputKind: 'label-project-v3', inputRevision: revisionOf(input.document), inputSha256: sha256(`${JSON.stringify(input.document)}\n`),
           blueprintRevision: 'design-v1', blueprintSha256: sha256(input.blueprint),
           designReviewManifestSha256: sha256(input.designManifest), modelFingerprint: `sha256:${'4'.repeat(64)}`,
           areaTargetsSha256: '5'.repeat(64), views,
+          resolvedProjectJson: JSON.stringify(input.document), resolvedProjectAreaTargetsSha256: '5'.repeat(64),
           confirmation: { sessionId: 'review-session', batchId: 'batch-1', leaseToken: 'secret-token', generation: 1, expiresAt: Date.now() + 60_000, artifacts: receipts },
           validation: { ready: true, issues: [] }, fidelity: { pass: true, issues: [] },
         }, warnings: [] }
@@ -161,12 +164,14 @@ describe('label review operation', () => {
     expect(test.calls).toEqual(['loadModel', 'applyProject', 'waitForReady', 'renderReviewEvidence'])
     expect(await readdir(input.outputDir)).toEqual(expect.arrayContaining([
       'label-front.png', 'surface-front.png', 'model-front.png', 'model-back.png', 'review-sheet.png', 'review-manifest.json',
+      'resolved-project.lbl.json',
     ]))
     const manifestText = await readFile(path.join(input.outputDir, 'review-manifest.json'), 'utf8')
     expect(manifestText).not.toContain('secret-token')
     expect(JSON.stringify(result)).not.toContain('secret-token')
     expect(JSON.parse(manifestText)).toMatchObject({
       input: { kind: 'label-project-v3', revision: revisionOf(input.document), sha256: sha256(`${JSON.stringify(input.document)}\n`) },
+      resolvedProject: { path: 'resolved-project.lbl.json', revision: revisionOf(input.document) },
       model: { fingerprint: `sha256:${'4'.repeat(64)}` }, areaTargetsSha256: '5'.repeat(64),
     })
   })
@@ -214,6 +219,48 @@ describe('label review operation', () => {
       inputPath: input.inputPath, glbPath: input.glbPath, outputDir: input.outputDir,
     })
     expect(result).toMatchObject({ ok: false, error: { code: 'APPROVAL_REQUIRED' } })
+    expect(test.sessions).toBe(0)
+  })
+
+  it('rejects an oversized handoff during discovery before opening Chromium', async () => {
+    const input = await fixture()
+    await writeFile(input.handoffPath, `${JSON.stringify({
+      handoff_version: 2, status: 'approved', padding: 'x'.repeat(5 * 1024 * 1024),
+      source: { blueprint: 'layout-blueprint.json', design_review_manifest: 'design-review-manifest.json' },
+    })}\n`)
+    const test = harness(input)
+
+    const result = await createOperations(test.runtime).review({
+      inputPath: input.inputPath, glbPath: input.glbPath, outputDir: input.outputDir,
+    })
+    expect(result).toMatchObject({ ok: false, error: { code: 'INVALID_USAGE', message: expect.stringMatching(/handoff.*bounded|handoff.*size/i) } })
+    expect(test.sessions).toBe(0)
+  })
+
+  it('rejects a symlink handoff during discovery before opening Chromium', async () => {
+    const input = await fixture()
+    const realHandoff = path.join(input.root, 'real-editor-handoff.json')
+    await rename(input.handoffPath, realHandoff)
+    await symlink(path.basename(realHandoff), input.handoffPath)
+    const test = harness(input)
+
+    const result = await createOperations(test.runtime).review({
+      inputPath: input.inputPath, glbPath: input.glbPath, outputDir: input.outputDir,
+    })
+    expect(result).toMatchObject({ ok: false, error: { code: 'PATH_NOT_ALLOWED' } })
+    expect(test.sessions).toBe(0)
+  })
+
+  it('rejects a symlink blueprint discovered through an otherwise regular handoff', async () => {
+    const input = await fixture()
+    const realBlueprint = path.join(input.root, 'real-blueprint.json')
+    await rename(input.blueprintPath, realBlueprint)
+    await symlink(path.basename(realBlueprint), input.blueprintPath)
+    const test = harness(input)
+    const result = await createOperations(test.runtime).review({
+      inputPath: input.inputPath, glbPath: input.glbPath, outputDir: input.outputDir,
+    })
+    expect(result).toMatchObject({ ok: false, error: { code: 'PATH_NOT_ALLOWED' } })
     expect(test.sessions).toBe(0)
   })
 

@@ -29,7 +29,7 @@ Do not use MCP. Do not use computer use. Do not use DOM selectors. Do not naviga
 
 Follow this order exactly:
 
-1. **Read Handoff v2.** Resolve its source paths, reread exact bytes, require no blockers, and run Task 8 shared validator `verifyDesignGate` against the Handoff, blueprint, design-review manifest, and current Spec/Project before model inspection or apply. Only matching `approved` or `continuous_authorized` evidence with `scope: current_task` may pass. A legacy v1 approval becomes a fresh draft/evidence request; legacy `assumed_for_fast_run`, urgency, silence, and assumed consent are not authorization.
+1. **Read Handoff v2.** Resolve its source paths, reread exact bytes, require no blockers, create the bounded request described in [references/workflow-gates.md](references/workflow-gates.md), and run `label-cli gate design <design-gate-request.json> --json` before model inspection or apply. The installed command invokes the shared `verifyDesignGate`; do not reimplement its checks. Only matching `approved` or `continuous_authorized` evidence with `scope: current_task` may pass. A legacy v1 approval becomes a fresh draft/evidence request; legacy `assumed_for_fast_run`, urgency, silence, and assumed consent are not authorization.
 2. Run `label-cli inspect <model.glb> --json`. Resolve exact stable targets from the actual GLB. Use the exact `stableSelector` where names repeat; never trust design-stage mesh, node, material, UV, or range guesses.
 3. Create and validate the first complete working Spec, then start `label-cli live <working-spec.json> --glb <model.glb> --json`. Keep that visible synchronized preview open through review and delivery.
 4. **Translate the approved design without redesign.** Preserve exact copy, hierarchy, carrier, substrate, physical artboard, typography/font assets, vectors, colors/transparency, and process/craft intent. Use `replace` only for a separate label mesh and `overlay` for package-surface decoration.
@@ -74,7 +74,7 @@ area_targets_sha256: <current stable area-target SHA-256>
 recorded_at: <RFC3339 timestamp>
 ```
 
-The production review manifest must also bind the current design-review SHA-256. Run `verifyProductionGate` with freshly read Handoff, blueprint, design-review manifest, Spec/Project, model fingerprint, production review manifest, and ApprovalRecord v1. A stale or mismatched value blocks.
+The production review manifest must also bind the current design-review SHA-256. Create the exact request in [references/workflow-gates.md](references/workflow-gates.md) and run `label-cli gate production <production-gate-request.json> --json` with freshly read Handoff, blueprint, design-review directory, Spec/Project, model, production-review directory, and ApprovalRecord v1. This installed command invokes shared `verifyProductionGate` and revalidates every artifact byte. A stale or mismatched value blocks.
 
 Mapping-only rejection returns to production review after a new production revision. Design-intent rejection returns to the first gate with a new blueprint revision. Treat user rejection as a revision state transition, not a CLI crash.
 
@@ -105,7 +105,7 @@ After the gated sequence passes, require output-manifest consistency and the GLB
 
 ## Apply/export and delivery
 
-After QC passes, again immediately before apply/export, recompute every production-gate fact and run `verifyProductionGate`. Then use the requested `label-cli apply ... --json` or export path without overwriting an existing delivery directory unless the user explicitly authorizes `--force`.
+After QC passes, again immediately before apply/export, rerun the same installed `label-cli gate production <production-gate-request.json> --json`; never cache its prior result. Then use the requested `label-cli apply ... --json` or export path without overwriting an existing delivery directory unless the user explicitly authorizes `--force`.
 
 Require the labeled GLB, editable project, normalized Spec, print manifest, preview, per-area Color/Metalness/Roughness/Bump/white-underbase PNGs where declared, and artifact manifest. Independently verify output-manifest consistency, all manifest hashes, GLB re-import, and that every area reports `uvSampleOk`; require the GLB cross-check to pass. Preserve all QC warnings.
 
