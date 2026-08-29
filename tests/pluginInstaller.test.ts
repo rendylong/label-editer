@@ -3,9 +3,9 @@ import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
-  spawnSync,
-  type SpawnSyncOptionsWithStringEncoding,
-  type SpawnSyncReturns,
+  spawn,
+  type ChildProcess,
+  type SpawnOptionsWithoutStdio,
 } from 'node:child_process'
 import * as ts from 'typescript'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -93,8 +93,18 @@ let packageArchivePromise: Promise<PackageArchive> | undefined
 let installedPackagePromise: Promise<InstalledPackage> | undefined
 let packageTemporaryRoot: string | undefined
 const unitTemporaryRoots: string[] = []
+const activeBoundedCommands = new Set<Promise<BoundedCommandResult>>()
 
-function commandFailure(label: string, result: SpawnSyncReturns<string>): Error {
+type BoundedCommandResult = {
+  pid?: number
+  status: number | null
+  signal: NodeJS.Signals | null
+  error?: Error
+  stdout: string
+  stderr: string
+}
+
+function commandFailure(label: string, result: BoundedCommandResult): Error {
   return new Error([
     `${label} failed with status ${String(result.status)}`,
     result.error?.stack ?? '',
@@ -104,11 +114,273 @@ function commandFailure(label: string, result: SpawnSyncReturns<string>): Error 
 }
 
 type BoundedCommandOptions = Omit<
-  SpawnSyncOptionsWithStringEncoding,
-  'encoding' | 'timeout' | 'maxBuffer'
+  SpawnOptionsWithoutStdio,
+  'detached' | 'killSignal' | 'shell' | 'signal' | 'timeout'
 > & {
   timeoutMs: number
   maxBufferBytes: number
+  terminationGraceMs?: number
+}
+
+type BoundedCommandFailure =
+  | { kind: 'timeout' }
+  | { kind: 'overflow' }
+  | { kind: 'spawn'; error: Error }
+
+const defaultTerminationGraceMs = 250
+const maximumTerminationGraceMs = 5_000
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
+async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+function isMissingProcessError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === 'ESRCH'
+}
+
+function safeProcessTreePid(child: ChildProcess): number | undefined {
+  const pid = child.pid
+  if (!pid || !Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) return undefined
+  return pid
+}
+
+function signalPosixProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = safeProcessTreePid(child)
+  if (!pid) return
+  try {
+    process.kill(-pid, signal)
+  } catch (error) {
+    if (isMissingProcessError(error)) return
+    try {
+      child.kill(signal)
+    } catch (childError) {
+      if (!isMissingProcessError(childError)) throw childError
+    }
+  }
+}
+
+async function runWindowsTreeKill(pid: number, force: boolean, timeoutMs: number): Promise<void> {
+  const args = ['/PID', String(pid), '/T', ...(force ? ['/F'] : [])]
+  const windowsRoot = process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows'
+  const killer = spawn(path.win32.join(windowsRoot, 'System32', 'taskkill.exe'), args, {
+    detached: false,
+    shell: false,
+    stdio: 'ignore',
+    windowsHide: true,
+  })
+  const closed = new Promise<void>((resolve) => {
+    killer.once('error', () => resolve())
+    killer.once('close', () => resolve())
+  })
+  if (!(await settlesWithin(closed, timeoutMs))) {
+    try {
+      killer.kill('SIGKILL')
+    } catch {
+      // Best-effort cleanup for the bounded taskkill helper itself.
+    }
+    await settlesWithin(closed, timeoutMs)
+  }
+}
+
+async function waitForPosixProcessTreeExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = performance.now() + timeoutMs
+  while (performance.now() < deadline) {
+    try {
+      process.kill(-pid, 0)
+    } catch (error) {
+      if (isMissingProcessError(error)) return
+      return
+    }
+    await delay(Math.min(20, Math.max(1, deadline - performance.now())))
+  }
+}
+
+async function terminateProcessTree(
+  child: ChildProcess,
+  rootExit: Promise<void>,
+  streamsClosed: Promise<void>,
+  graceMs: number,
+): Promise<void> {
+  const pid = safeProcessTreePid(child)
+  if (pid && process.platform === 'win32') {
+    await runWindowsTreeKill(pid, false, graceMs)
+  } else if (pid) {
+    signalPosixProcessTree(child, 'SIGTERM')
+  }
+
+  await delay(graceMs)
+
+  if (pid && process.platform === 'win32') {
+    await runWindowsTreeKill(pid, true, graceMs)
+  } else if (pid) {
+    signalPosixProcessTree(child, 'SIGKILL')
+  }
+
+  const [rootExited] = await Promise.all([
+    settlesWithin(rootExit, graceMs),
+    settlesWithin(streamsClosed, graceMs),
+    ...(pid && process.platform !== 'win32'
+      ? [waitForPosixProcessTreeExit(pid, graceMs)]
+      : []),
+  ])
+  if (!rootExited) {
+    try {
+      child.kill('SIGKILL')
+    } catch (error) {
+      if (!isMissingProcessError(error)) {
+        // The command will still settle with its original bounded failure.
+      }
+    }
+    await settlesWithin(rootExit, graceMs)
+  }
+  child.stdout?.destroy()
+  child.stderr?.destroy()
+  await settlesWithin(streamsClosed, graceMs)
+}
+
+async function executeBoundedCommand(
+  label: string,
+  command: string,
+  args: readonly string[],
+  options: BoundedCommandOptions,
+): Promise<BoundedCommandResult> {
+  const {
+    timeoutMs,
+    maxBufferBytes,
+    terminationGraceMs = defaultTerminationGraceMs,
+    ...spawnOptions
+  } = options
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error(`${label} has an invalid timeout`)
+  if (!Number.isSafeInteger(maxBufferBytes) || maxBufferBytes <= 0) {
+    throw new Error(`${label} has an invalid output limit`)
+  }
+  if (!Number.isFinite(terminationGraceMs)
+    || terminationGraceMs <= 0
+    || terminationGraceMs > maximumTerminationGraceMs) {
+    throw new Error(`${label} has an invalid termination grace`)
+  }
+
+  const deadline = performance.now() + timeoutMs
+  const child = spawn(command, [...args], {
+    ...spawnOptions,
+    detached: true,
+    shell: false,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
+
+  const stdoutChunks: Buffer[] = []
+  const stderrChunks: Buffer[] = []
+  let capturedBytes = 0
+  let acceptingOutput = true
+  let status: number | null = null
+  let signal: NodeJS.Signals | null = null
+  let failure: BoundedCommandFailure | undefined
+  let notifyFailure: (() => void) | undefined
+  const failed = new Promise<void>((resolve) => {
+    notifyFailure = resolve
+  })
+  const rootExit = new Promise<void>((resolve) => {
+    child.once('exit', (exitCode, exitSignal) => {
+      status = exitCode
+      signal = exitSignal
+      resolve()
+    })
+    child.once('error', () => resolve())
+  })
+  const streamsClosed = new Promise<void>((resolve) => {
+    child.once('close', (exitCode, exitSignal) => {
+      status = exitCode
+      signal = exitSignal
+      resolve()
+    })
+  })
+
+  const fail = (nextFailure: BoundedCommandFailure): void => {
+    if (failure) return
+    failure = nextFailure
+    acceptingOutput = false
+    child.stdout?.pause()
+    child.stderr?.pause()
+    notifyFailure?.()
+  }
+
+  child.once('error', (error) => fail({ kind: 'spawn', error }))
+
+  const capture = (target: Buffer[], value: Buffer | string): void => {
+    if (!acceptingOutput) return
+    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
+    const remaining = maxBufferBytes - capturedBytes
+    if (chunk.length <= remaining) {
+      target.push(chunk)
+      capturedBytes += chunk.length
+      return
+    }
+    if (remaining > 0) target.push(chunk.subarray(0, remaining))
+    capturedBytes = maxBufferBytes
+    fail({ kind: 'overflow' })
+  }
+
+  child.stdout?.on('data', (chunk: Buffer | string) => capture(stdoutChunks, chunk))
+  child.stderr?.on('data', (chunk: Buffer | string) => capture(stderrChunks, chunk))
+
+  const timeout = setTimeout(
+    () => fail({ kind: 'timeout' }),
+    Math.max(0, deadline - performance.now()),
+  )
+  await Promise.race([streamsClosed, failed])
+  clearTimeout(timeout)
+
+  if (failure) {
+    await terminateProcessTree(child, rootExit, streamsClosed, terminationGraceMs)
+    const stderr = Buffer.concat(stderrChunks).toString('utf8')
+    if (failure.kind === 'timeout') {
+      throw new Error(`${label} timed out after ${String(timeoutMs)} ms\n${stderr}`)
+    }
+    if (failure.kind === 'overflow') {
+      throw new Error(`${label} exceeded its ${String(maxBufferBytes)}-byte output limit`)
+    }
+    const result: BoundedCommandResult = {
+      pid: child.pid,
+      status,
+      signal,
+      error: failure.error,
+      stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+      stderr,
+    }
+    throw commandFailure(label, result)
+  }
+
+  const result: BoundedCommandResult = {
+    pid: child.pid,
+    status,
+    signal,
+    stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+    stderr: Buffer.concat(stderrChunks).toString('utf8'),
+  }
+  if (result.signal) {
+    await terminateProcessTree(child, rootExit, streamsClosed, terminationGraceMs)
+    throw new Error(`${label} terminated by signal ${result.signal}`)
+  }
+  if (result.status === null) {
+    await terminateProcessTree(child, rootExit, streamsClosed, terminationGraceMs)
+    throw new Error(`${label} ended without an exit status`)
+  }
+  return result
 }
 
 function runBoundedCommand(
@@ -116,29 +388,20 @@ function runBoundedCommand(
   command: string,
   args: readonly string[],
   options: BoundedCommandOptions,
-): SpawnSyncReturns<string> {
-  const { timeoutMs, maxBufferBytes, ...spawnOptions } = options
-  const result = spawnSync(command, args, {
-    ...spawnOptions,
-    encoding: 'utf8',
-    timeout: timeoutMs,
-    maxBuffer: maxBufferBytes,
-  })
-  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code
-  if (errorCode === 'ETIMEDOUT') {
-    throw new Error(`${label} timed out after ${String(timeoutMs)} ms\n${String(result.stderr ?? '')}`)
+): Promise<BoundedCommandResult> {
+  const execution = executeBoundedCommand(label, command, args, options)
+  activeBoundedCommands.add(execution)
+  void execution.then(
+    () => activeBoundedCommands.delete(execution),
+    () => activeBoundedCommands.delete(execution),
+  )
+  return execution
+}
+
+async function waitForActiveBoundedCommands(): Promise<void> {
+  while (activeBoundedCommands.size > 0) {
+    await Promise.allSettled([...activeBoundedCommands])
   }
-  if (errorCode === 'ENOBUFS') {
-    throw new Error(`${label} exceeded its ${String(maxBufferBytes)}-byte output limit`)
-  }
-  if (result.error) throw commandFailure(label, result)
-  if (result.signal) {
-    throw new Error(`${label} terminated by signal ${result.signal}`)
-  }
-  if (result.status === null) {
-    throw new Error(`${label} ended without an exit status`)
-  }
-  return result
 }
 
 async function createPackageArchive(): Promise<PackageArchive> {
@@ -148,7 +411,7 @@ async function createPackageArchive(): Promise<PackageArchive> {
   const extractRoot = path.join(root, 'extract')
   await mkdir(packRoot)
   await mkdir(extractRoot)
-  const result = runBoundedCommand('npm pack', 'npm', ['pack', '--json', '--pack-destination', packRoot], {
+  const result = await runBoundedCommand('npm pack', 'npm', ['pack', '--json', '--pack-destination', packRoot], {
     cwd: repoRoot,
     timeoutMs: 60_000,
     maxBufferBytes: 16 * 1024 * 1024,
@@ -158,7 +421,7 @@ async function createPackageArchive(): Promise<PackageArchive> {
   if (!Array.isArray(parsed) || parsed.length !== 1) throw new Error('npm pack did not return one package')
   const pack = parsed[0] as PackageArchive['pack']
   const tarballPath = path.join(packRoot, pack.filename)
-  const extracted = runBoundedCommand('tar extract', 'tar', ['-xzf', tarballPath, '-C', extractRoot], {
+  const extracted = await runBoundedCommand('tar extract', 'tar', ['-xzf', tarballPath, '-C', extractRoot], {
     timeoutMs: 60_000,
     maxBufferBytes: 16 * 1024 * 1024,
   })
@@ -267,7 +530,7 @@ fi
 exec /bin/sh "$@"
 `)
 
-  const result = runBoundedCommand('real packaged installer', process.execPath, [
+  const result = await runBoundedCommand('real packaged installer', process.execPath, [
     path.join(archive.packageRoot, 'scripts/install-plugin.mjs'),
     '--source', archive.packageRoot,
     '--install-root', installRoot,
@@ -390,7 +653,7 @@ async function inspectInstalledPackagedSample(
     throw new Error('Copied review sample is not a direct regular file')
   }
 
-  const result = runBoundedCommand('installed packaged-sample inspect', process.execPath, [
+  const result = await runBoundedCommand('installed packaged-sample inspect', process.execPath, [
     installed.launcherPath, 'inspect', path.basename(modelPath), '--json',
   ], {
     cwd: installed.callerRoot,
@@ -566,11 +829,12 @@ async function writeInstalledReviewFixture(
 }
 
 afterAll(async () => {
+  await waitForActiveBoundedCommands()
   await Promise.all([
     ...(packageTemporaryRoot ? [rm(packageTemporaryRoot, { recursive: true, force: true })] : []),
     ...unitTemporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
   ])
-}, 30_000)
+}, 180_000)
 
 async function writeExecutable(filePath: string, body: string): Promise<void> {
   await writeFile(filePath, `#!/bin/sh\nset -eu\n${body}\n`)
@@ -708,22 +972,85 @@ describe('GLB label editor installer', () => {
       .toThrow('Installed inspect returned no suitable direct_surface_print package surface')
   })
 
-  it('fails clearly when a bounded child command exceeds its timeout', () => {
-    expect(() => runBoundedCommand(
-      'bounded timeout probe',
+  it('captures stdout and stderr while preserving a nonzero exit status', async () => {
+    const result = await runBoundedCommand(
+      'bounded result probe',
       process.execPath,
-      ['-e', 'setTimeout(() => undefined, 1_000)'],
-      { timeoutMs: 25, maxBufferBytes: 1_024 },
-    )).toThrow('bounded timeout probe timed out after 25 ms')
+      ['-e', "process.stdout.write('out'); process.stderr.write('err'); process.exitCode = 7"],
+      { timeoutMs: 5_000, maxBufferBytes: 1_024 },
+    )
+
+    expect(result).toMatchObject({
+      status: 7,
+      signal: null,
+      stdout: 'out',
+      stderr: 'err',
+    })
+    expect(result.error).toBeUndefined()
   })
 
-  it('fails clearly when a bounded child command exceeds its output limit', () => {
-    expect(() => runBoundedCommand(
+  it('bounds a SIGTERM-resistant direct child by escalating after a short grace', async () => {
+    const startedAt = Date.now()
+    await expect(runBoundedCommand(
+      'bounded resistant-child probe',
+      process.execPath,
+      ['-e', [
+        "process.on('SIGTERM', () => undefined)",
+        "process.stdout.write('ready\\n')",
+        'setTimeout(() => process.exit(0), 3_000)',
+      ].join(';')],
+      { timeoutMs: 750, maxBufferBytes: 1_024, terminationGraceMs: 100 },
+    )).rejects.toThrow('bounded resistant-child probe timed out after 750 ms')
+    expect(Date.now() - startedAt).toBeLessThan(1_800)
+  })
+
+  it('terminates descendants before a timed-out command settles', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'glb-label-process-tree-'))
+    unitTemporaryRoots.push(root)
+    const identityPath = path.join(root, 'descendant.pid')
+    const survivorPath = path.join(root, 'descendant-survived')
+    const descendantSource = [
+      "const { writeFileSync } = require('node:fs')",
+      'writeFileSync(process.argv[1], String(process.pid))',
+      "setTimeout(() => writeFileSync(process.argv[2], 'survived'), 1_500)",
+      'setTimeout(() => process.exit(0), 2_500)',
+    ].join(';')
+    const parentSource = [
+      "const { spawn } = require('node:child_process')",
+      `const child = spawn(process.execPath, ['-e', ${JSON.stringify(descendantSource)}, process.argv[1], process.argv[2]], { stdio: 'ignore' })`,
+      'child.unref()',
+      'setInterval(() => undefined, 1_000)',
+    ].join(';')
+    let descendantPid: number | undefined
+    try {
+      await expect(runBoundedCommand(
+        'bounded descendant probe',
+        process.execPath,
+        ['-e', parentSource, identityPath, survivorPath],
+        { timeoutMs: 750, maxBufferBytes: 1_024, terminationGraceMs: 100 },
+      )).rejects.toThrow('bounded descendant probe timed out after 750 ms')
+      descendantPid = Number(await readFile(identityPath, 'utf8'))
+      expect(Number.isSafeInteger(descendantPid) && descendantPid > 0).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 1_750))
+      await expect(lstat(survivorPath)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      if (descendantPid && Number.isSafeInteger(descendantPid) && descendantPid > 0) {
+        try {
+          process.kill(descendantPid, 'SIGKILL')
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+        }
+      }
+    }
+  })
+
+  it('fails clearly when a bounded child command exceeds its output limit', async () => {
+    await expect(runBoundedCommand(
       'bounded output probe',
       process.execPath,
       ['-e', "process.stdout.write('x'.repeat(8_192))"],
       { timeoutMs: 5_000, maxBufferBytes: 1_024 },
-    )).toThrow('bounded output probe exceeded its 1024-byte output limit')
+    )).rejects.toThrow('bounded output probe exceeded its 1024-byte output limit')
   })
 
   it('packages the complete approval and review runtime in a real npm tarball', async () => {
@@ -895,7 +1222,7 @@ describe('GLB label editor installer', () => {
     expect(new Set(nodeExtractedRecords.map((record) => record.tier)).size).toBeGreaterThanOrEqual(3)
     expect(new Set(nodeExtractedRecords.map((record) => record.category)).size).toBeGreaterThanOrEqual(10)
 
-    const knowledgeStatsResult = runBoundedCommand(
+    const knowledgeStatsResult = await runBoundedCommand(
       'installed optional cosmetic-label knowledge query',
       'python3',
       ['scripts/query_labels.py', '--stats'],
@@ -939,7 +1266,7 @@ describe('GLB label editor installer', () => {
 
     const coreWithoutPython = await createPythonBlockedEnvironment(installed.root, 'core-launcher')
 
-    const schemaResult = runBoundedCommand(
+    const schemaResult = await runBoundedCommand(
       'installed launcher schema',
       process.execPath,
       [installed.launcherPath, 'schema', '--json'],
@@ -963,7 +1290,7 @@ describe('GLB label editor installer', () => {
       },
     })
 
-    const invalidReviewResult = runBoundedCommand('installed invalid review route', process.execPath, [
+    const invalidReviewResult = await runBoundedCommand('installed invalid review route', process.execPath, [
       installed.launcherPath, 'review', 'working.json', '--json',
     ], {
       cwd: installed.callerRoot,
@@ -979,7 +1306,7 @@ describe('GLB label editor installer', () => {
     })
 
     await writeFile(path.join(installed.callerRoot, 'invalid-label-spec.json'), '{"version":2,"areas":[]}\n')
-    const invalidSpecResult = runBoundedCommand('installed invalid-spec validation', process.execPath, [
+    const invalidSpecResult = await runBoundedCommand('installed invalid-spec validation', process.execPath, [
       installed.launcherPath, 'validate', 'invalid-label-spec.json', '--json',
     ], {
       cwd: installed.callerRoot,
@@ -1043,7 +1370,7 @@ describe('GLB label editor installer', () => {
         '--height', '320',
         '--json',
       ]
-      const result = runBoundedCommand('installed successful review', process.execPath, reviewArgs, {
+      const result = await runBoundedCommand('installed successful review', process.execPath, reviewArgs, {
         cwd: installed.callerRoot,
         timeoutMs: 120_000,
         maxBufferBytes: 32 * 1024 * 1024,
@@ -1107,7 +1434,7 @@ describe('GLB label editor installer', () => {
       const immutableSnapshot = Object.fromEntries(await Promise.all(expectedOutputFiles.map(async (fileName) => (
         [fileName, sha256(await readFile(path.join(fixture.outputDir, fileName)))]
       ))))
-      const conflictResult = runBoundedCommand('installed immutable review conflict', process.execPath, reviewArgs, {
+      const conflictResult = await runBoundedCommand('installed immutable review conflict', process.execPath, reviewArgs, {
         cwd: installed.callerRoot,
         timeoutMs: 60_000,
         maxBufferBytes: 32 * 1024 * 1024,
@@ -1157,7 +1484,7 @@ case "$*" in
 esac
 `)
 
-    const result = runBoundedCommand('controlled installer staging', process.execPath, [
+    const result = await runBoundedCommand('controlled installer staging', process.execPath, [
       path.join(repoRoot, 'scripts/install-plugin.mjs'),
       '--source', sourceRoot,
       '--install-root', installRoot,
@@ -1225,7 +1552,7 @@ esac
     const callerRoot = path.join(root, 'caller-workspace')
     await mkdir(callerRoot)
     expect((await stat(launcherPath)).mode & 0o111).not.toBe(0)
-    const launcherResult = runBoundedCommand(
+    const launcherResult = await runBoundedCommand(
       'controlled installed launcher schema',
       process.execPath,
       [launcherPath, 'schema', '--json'],
@@ -1287,7 +1614,7 @@ esac
       'esac',
     ].join('\n'))
 
-    const result = runBoundedCommand('legacy MCP rejection installer', process.execPath, [
+    const result = await runBoundedCommand('legacy MCP rejection installer', process.execPath, [
       path.join(repoRoot, 'scripts/install-plugin.mjs'),
       '--source', sourceRoot,
       '--install-root', installRoot,
